@@ -50,10 +50,16 @@ export interface DeepSeekHarnessOptions {
   launch: HarnessClientOptions
   /** Workspace cwd recorded on every SDK-created session (default: the launch cwd, else `process.cwd()`). */
   cwd?: string
-  /** Provider route for SDK-created agents (default `deepseek-official`). */
-  provider?: string
-  /** Model for SDK-created agents (default `deepseek-v4-flash`). */
-  model?: string
+  /**
+   * Provider route for SDK-created agents. Required: the runtime's
+   * `initialize` takes it verbatim (the wire params declare it non-optional),
+   * and which routes resolve is decided by the child runtime's own
+   * composition — a default here would silently send every SDK-created agent
+   * to a route the caller never chose.
+   */
+  provider: string
+  /** Model for SDK-created agents. Required for the same reason as {@link DeepSeekHarnessOptions.provider}. */
+  model: string
   /** Maximum output tokens for each conversation-model request. */
   maxTokens?: number
 }

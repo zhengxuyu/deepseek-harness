@@ -14,6 +14,18 @@ import { HarnessClient, isRecord, SdkProtocolError } from './client.ts'
 import type { ContentBlock, DeepSeekHarnessOptions, HarnessClientOptions, HarnessNotification, RunResult } from './types.ts'
 
 /**
+ * Reject an unstated or blank half of the child's route at construction, where
+ * the caller's own stack frame is still on the error.
+ * @param key - the option name, named verbatim in the message.
+ * @param value - the caller-supplied value, possibly absent.
+ */
+function assertRoutePart(key: 'provider' | 'model', value: string | undefined): asserts value is string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new TypeError(`DeepSeekHarness ${key} must be a non-empty string: it is sent verbatim in the runtime's initialize handshake and has no default`)
+  }
+}
+
+/**
  * Reusable SDK for running DeepSeek Harness agent turns in a runtime
  * subprocess. The subprocess starts lazily on first use and stays owned by
  * this instance until {@link close}; always close (or `await using`) so the
@@ -37,8 +49,14 @@ export class DeepSeekHarness implements AsyncDisposable {
     // process's cwd, but the wire cwd is resolved again inside the child — a
     // relative value would double-resolve (e.g. `worker` → `worker/worker`).
     this.cwd = resolve(options.cwd ?? options.launch.cwd ?? process.cwd())
-    this.provider = options.provider ?? 'deepseek-official'
-    this.model = options.model ?? 'deepseek-v4-flash'
+    // Stated, never defaulted: the handshake sends this route verbatim and the
+    // child composition decides which routes resolve. Checked at runtime too —
+    // the type requires both, but a JavaScript caller can still omit them, and
+    // an undefined half would reach the wire as a route nothing serves.
+    assertRoutePart('provider', options.provider)
+    assertRoutePart('model', options.model)
+    this.provider = options.provider
+    this.model = options.model
     this.maxTokens = options.maxTokens
   }
 

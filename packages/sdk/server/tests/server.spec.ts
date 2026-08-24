@@ -190,9 +190,10 @@ describe('HarnessSdkJsonRpcServer', () => {
     const ctx = {
       on: vi.fn(() => () => undefined),
       agents: { create, get: (id: SessionId) => liveAgents.get(String(id)) },
-      get: () => undefined,
+      get: () => ({ listProviders: () => [{ id: 'mock', name: 'Mock' }] }),
     } as unknown as Context
     const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
+    await server.initialize({ cwd: process.cwd(), provider: 'mock', model: 'model' })
     const prompt = (sessionId: string, text: string) => server.prompt({
       sessionId,
       contentBlocks: [{ type: 'text', text }],
@@ -226,9 +227,10 @@ describe('HarnessSdkJsonRpcServer', () => {
         create: vi.fn(async () => handle),
         get: (id: SessionId) => (live && String(id) === 'zombie' ? agent : undefined),
       },
-      get: () => undefined,
+      get: () => ({ listProviders: () => [{ id: 'mock', name: 'Mock' }] }),
     } as unknown as Context
     const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
+    await server.initialize({ cwd: process.cwd(), provider: 'mock', model: 'model' })
     const prompt = (text: string) => server.prompt({
       sessionId: 'zombie',
       contentBlocks: [{ type: 'text', text }],
@@ -851,6 +853,27 @@ describe('HarnessSdkJsonRpcServer', () => {
     }
   })
 
+  it('refuses session work before the initialize handshake sets a route', async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-preinit-'))
+    const ctx = await makeHarness(storageDir)
+    try {
+      // `handleRequest` does not order the protocol, so this is reachable from
+      // any client that prompts first. Before, the server held placeholder
+      // fields and created the agent on a route nobody chose.
+      const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
+
+      await expect(server.handleRequest('session/prompt', {
+        sessionId: 'pre-init',
+        content: [{ type: 'text', text: 'hi' }],
+      })).rejects.toThrow('session work requested before initialize')
+
+      await server.shutdown()
+    } finally {
+      await ctx.fiber.dispose()
+      await rm(storageDir, { recursive: true, force: true })
+    }
+  })
+
   it('rejects unknown JSON-RPC runtime methods', async () => {
     const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-unknown-'))
     const ctx = await makeHarness(storageDir)
@@ -880,12 +903,14 @@ describe('HarnessSdkJsonRpcServer', () => {
     const ctx = {
       on: vi.fn(() => () => undefined),
       agents: { create, get: () => undefined },
-      get: () => undefined,
+      get: () => ({ listProviders: () => [{ id: 'mock', name: 'Mock' }] }),
     } as unknown as Context
     const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport()) as unknown as {
+      initialize(params: { cwd: string; provider: string; model: string }): Promise<unknown>
       getOrCreateSession(sessionId: string): Promise<{ handle: AgentHandle }>
       shutdown(): Promise<Record<string, never>>
     }
+    await server.initialize({ cwd: process.cwd(), provider: 'mock', model: 'model' })
 
     const first = server.getOrCreateSession('shared')
     const second = server.getOrCreateSession('shared')
