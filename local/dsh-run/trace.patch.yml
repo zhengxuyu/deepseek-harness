@@ -1,0 +1,23 @@
+# Collection-mode overlay for DeepSeek Harness session logs.
+#
+# Applied with `dsh --patch`, which composes AFTER every other layer (bundle
+# patches -> profile cordis.patch.yml -> home-level cordis.patch.yml -> here),
+# so it wins without editing either user layer and leaves normal runs untouched.
+#
+# An id-targeted patch REPLACES the row's whole `config` — it does not deep
+# merge — so `root` is restated here. Dropping it would leave the required key
+# unset (the package ships no default: a process.cwd() default would scatter
+# logs as the process cwd moves through bash calls and subprocesses).
+- id: session-persistence-jsonl
+  config:
+    # Set by dsh-run.sh. A root belongs to ONE encoding: pointing an
+    # uncompressed run at a root holding .jsonl.zstd is rejected at startup
+    # discovery, not silently ignored — hence a dedicated directory.
+    root: !!js process.env.DSH_TRACE_ROOT
+    # Raw newline-delimited UTF-8 instead of concatenated zstd frames.
+    compression: none
+    # One event per line. With the default `true`, runs of >=3 consecutive
+    # same-block assistant/chunk deltas collapse into packed `text-chunks` /
+    # `reasoning-chunks` / `tool-call-chunks` rows, which a naive
+    # line-by-line JSON reader would silently mis-parse.
+    packChunks: false
