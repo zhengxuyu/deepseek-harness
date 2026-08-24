@@ -383,6 +383,19 @@ describe('dsh-subagent-dsh-sdk provider', () => {
     await ctx.fiber.dispose()
   })
 
+  it('rejects a config that omits the child route at load', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SubagentRuntime)
+    // No vendor default stands in for either half of the route: the child is a
+    // separate harness whose own composition decides which routes resolve, so
+    // an unstated one must fail at mount rather than at the first delegation.
+    const base = { providerName: 'sdk', command: 'true', args: [], env: {} }
+    await expect(ctx.plugin(sdk, { ...base, model: 'm' } as unknown as sdk.Config)).rejects.toThrow('provider')
+    await expect(ctx.plugin(sdk, { ...base, provider: 'p' } as unknown as sdk.Config)).rejects.toThrow('model')
+    expect(ctx.subagents.getProvider('sdk')).toBeUndefined()
+    await ctx.fiber.dispose()
+  })
+
   it('rejects non-positive timing bounds at load', async () => {
     const ctx = new Context()
     await ctx.plugin(SubagentRuntime)

@@ -42,9 +42,15 @@ export interface Config {
    * fails.
    */
   cwd?: string
-  /** Provider route the child runtime initializes with (default `deepseek-official`). */
+  /**
+   * Provider route sent in the child's `initialize`. Required: the child is a
+   * separate harness runtime whose own `cordis.yml` decides which provider
+   * routes exist, so no value here is correct for every deployment — a vendor
+   * default would silently route children away from the deployment's own
+   * adapters and fail credential resolution at the first delegation.
+   */
   provider: string
-  /** Model the child runtime initializes with (default `deepseek-v4-flash`). */
+  /** Model sent in the child's `initialize`. Required for the same reason as {@link Config.provider}. */
   model: string
   /** Optional per-request output-token cap for the child runtime. */
   maxTokens?: number
@@ -73,8 +79,8 @@ export const Config: z<Config> = z.object({
   command: z.string().required(),
   args: z.array(z.string()).default([]),
   cwd: z.string(),
-  provider: z.string().default('deepseek-official'),
-  model: z.string().default('deepseek-v4-flash'),
+  provider: z.string().required(),
+  model: z.string().required(),
   maxTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER),
   env: z.dict(z.string()).default({}),
   shutdownTimeoutMs: z.number().default(DEFAULT_SHUTDOWN_TIMEOUT_MS),

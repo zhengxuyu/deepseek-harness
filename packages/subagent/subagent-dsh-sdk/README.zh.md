@@ -30,8 +30,8 @@ Provider 不宣告任何启动期能力（`outputSchema`/`depthLimit`/`toolFilte
 | `command` | 必填 | 每次运行时 spawn 的可执行文件（子运行时 bin 或打包后的可执行文件）。 |
 | `args` | `[]` | 命令参数（通常是子进程的 `cordis.yml` 路径）。 |
 | `cwd` | 父会话 cwd | 工作目录覆盖；校验规则与 [`subagent-acp`](../subagent-acp/README.md) 相同。 |
-| `provider` | `deepseek-official` | 写入子进程 `initialize` 的提供方路由。 |
-| `model` | `deepseek-v4-flash` | 写入子进程 `initialize` 的模型。 |
+| `provider` | 必填 | 写入子进程 `initialize` 的提供方路由。无默认值：子进程是独立的 harness 运行时，由它自己的 `cordis.yml` 决定存在哪些提供方路由。 |
+| `model` | 必填 | 写入子进程 `initialize` 的模型。无默认值，理由同 `provider`。 |
 | `maxTokens` | 适配器／提供方路由默认值 | 写入子进程 `initialize` 的单次请求输出 token 上限；对子运行时的根 agent 及其进程内后代生效。 |
 | `env` | `{}` | 在凭据擦除后的父环境之上叠加的显式子环境（例如子进程自己的 `DEEPSEEK_API_KEY`，或 `DSH_CORDIS_CONFIG`）。 |
 | `shutdownTimeoutMs` | `1000` | dispose 期间协议 `shutdown` 交换的时限。 |
@@ -45,6 +45,8 @@ Provider 不宣告任何启动期能力（`outputSchema`/`depthLimit`/`toolFilte
     providerName: dsh-sdk
     command: node
     args: ['./packages/examples/jsonrpc-demo/lib/bin.js', './examples/jsonrpc-agent/cordis.yml']
+    provider: deepseek-official
+    model: deepseek-v4-flash
     maxTokens: 49152
     env:
       DEEPSEEK_API_KEY: !!js process.env.DEEPSEEK_API_KEY
@@ -95,3 +97,4 @@ Provider 不宣告任何启动期能力（`outputSchema`/`depthLimit`/`toolFilte
 - **不支持可选的启动时能力**：父级无法在子进程内强制执行 `outputSchema`、深度限制、工具过滤或 persona；应改为配置子进程自身的 `cordis.yml`。
 - **子进程的 transcript（文本记录）保留在其自身的会话根目录中**：父级日志只记录委派工具调用／结果（seam 的子级隔离规则）；流式 `session.event` 通道只用于提取输出，不会桥接到父级日志中。
 - **仅支持本地子进程**：解析出的 cwd 是本地路径；远程运行时需要独立的后端。
+- **子进程的路由由配置显式声明，不从父级继承**：`provider`／`model` 是必填配置，不由发起委派的父级当前选择推导。子进程是另一个进程、另一套组装，父级的路由未必能在子进程中解析到；若部署方希望两侧一致，应在两侧写同一对值。
