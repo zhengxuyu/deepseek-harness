@@ -2140,9 +2140,15 @@ export interface Config {
    * fails.
    */
   cwd?: string
-  /** Provider route the child runtime initializes with (default `deepseek-official`). */
+  /**
+   * Provider route sent in the child's `initialize`. Required: the child is a
+   * separate harness runtime whose own `cordis.yml` decides which provider
+   * routes exist, so no value here is correct for every deployment — a vendor
+   * default would silently route children away from the deployment's own
+   * adapters and fail credential resolution at the first delegation.
+   */
   provider: string
-  /** Model the child runtime initializes with (default `deepseek-v4-flash`). */
+  /** Model sent in the child's `initialize`. Required for the same reason as {@link Config.provider}. */
   model: string
   /** Optional per-request output-token cap for the child runtime. */
   maxTokens?: number

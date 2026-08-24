@@ -30,8 +30,8 @@ The provider advertises no start-time capabilities (`outputSchema`/`depthLimit`/
 | `command` | required | Executable spawned per run (the child runtime bin or packaged exe). |
 | `args` | `[]` | Command arguments (typically the child's `cordis.yml` path). |
 | `cwd` | parent session cwd | Working-directory override; same validation as [`subagent-acp`](../subagent-acp/README.md). |
-| `provider` | `deepseek-official` | Provider route sent in the child's `initialize`. |
-| `model` | `deepseek-v4-flash` | Model sent in the child's `initialize`. |
+| `provider` | required | Provider route sent in the child's `initialize`. No default: the child is a separate harness runtime whose own `cordis.yml` decides which provider routes exist. |
+| `model` | required | Model sent in the child's `initialize`. No default, for the same reason as `provider`. |
 | `maxTokens` | adapter/provider route default | Per-request output-token cap sent in the child's `initialize`; it applies to the child root agent and its in-process descendants. |
 | `env` | `{}` | Explicit child environment layered over a credential-scrubbed parent environment (e.g. the child's own `DEEPSEEK_API_KEY`, or `DSH_CORDIS_CONFIG`). |
 | `shutdownTimeoutMs` | `1000` | Bound on the protocol `shutdown` exchange during dispose. |
@@ -45,6 +45,8 @@ The provider advertises no start-time capabilities (`outputSchema`/`depthLimit`/
     providerName: dsh-sdk
     command: node
     args: ['./packages/examples/jsonrpc-demo/lib/bin.js', './examples/jsonrpc-agent/cordis.yml']
+    provider: deepseek-official
+    model: deepseek-v4-flash
     maxTokens: 49152
     env:
       DEEPSEEK_API_KEY: !!js process.env.DEEPSEEK_API_KEY
@@ -95,3 +97,4 @@ Append-only; newly visible content follows the reusable request prefix and does 
 - **No optional start-time capabilities** — the parent cannot enforce `outputSchema`, depth, tool filters, or persona inside the child process; configure the child's own `cordis.yml` instead.
 - **The child's transcript stays in the child's own session root** — the parent log records only the delegation tool call/result (the seam's child-isolation rule); the streamed `session.event` channel is consumed for output extraction, not bridged into the parent log.
 - **Local child processes only** — the resolved cwd is a local path; a remote runtime would need its own backend.
+- **The child's route is stated, never inherited** — `provider`/`model` are required config, not derived from the delegating parent's live selection. The child is a different process with a different composition, so a parent route need not name anything the child can resolve; a deployment that wants them to agree states the same pair on both sides.
