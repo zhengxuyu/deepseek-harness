@@ -42,7 +42,7 @@ function fakeLaunch(env: Record<string, string> = {}, extra: LaunchOverrides = {
 }
 
 function harnessWith(env: Record<string, string> = {}, extra: LaunchOverrides = {}): DeepSeekHarness {
-  const harness = new DeepSeekHarness({ launch: fakeLaunch(env, extra) })
+  const harness = new DeepSeekHarness({ launch: fakeLaunch(env, extra), provider: 'fake-provider', model: 'fake-model' })
   cleanups.push(() => harness.close())
   return harness
 }
@@ -147,6 +147,26 @@ describe('DeepSeekHarness', () => {
     await harness.close()
   })
 
+  it.each([
+    ['provider', { model: 'fake-model' }],
+    ['model', { provider: 'fake-provider' }],
+  ])('refuses to construct without a stated %s', (key, half) => {
+    // The type already requires both; this is the JavaScript-caller guard, so
+    // an unstated half fails on the caller's frame instead of reaching the
+    // handshake as a route the runtime cannot resolve.
+    expect(() => new DeepSeekHarness({
+      launch: fakeLaunch(),
+      ...half,
+    } as unknown as ConstructorParameters<typeof DeepSeekHarness>[0])).toThrow(`DeepSeekHarness ${key} must be a non-empty string`)
+  })
+
+  it.each(['', '   '])('refuses to construct with a blank route half (%j)', (blank) => {
+    expect(() => new DeepSeekHarness({ launch: fakeLaunch(), provider: blank, model: 'fake-model' }))
+      .toThrow('DeepSeekHarness provider must be a non-empty string')
+    expect(() => new DeepSeekHarness({ launch: fakeLaunch(), provider: 'fake-provider', model: blank }))
+      .toThrow('DeepSeekHarness model must be a non-empty string')
+  })
+
   it('sends the configured cwd/provider/model/maxTokens in the handshake exactly once', async () => {
     const dir = await tempDir('sdk-client-init-')
     const recordFile = join(dir, 'init.jsonl')
@@ -182,6 +202,8 @@ describe('DeepSeekHarness', () => {
     expect(isAbsolute(relativeCwd)).toBe(false)
     const harness = new DeepSeekHarness({
       launch: fakeLaunch({ FAKE_RECORD_INIT: recordFile, FAKE_ECHO_CWD_IN_INIT: '1' }, { cwd: relativeCwd }),
+      provider: 'fake-provider',
+      model: 'fake-model',
     })
     cleanups.push(() => harness.close())
     await harness.start()
@@ -232,7 +254,7 @@ describe('DeepSeekHarness', () => {
   it('supports await using disposal', async () => {
     let captured: DeepSeekHarness
     {
-      await using harness = new DeepSeekHarness({ launch: fakeLaunch() })
+      await using harness = new DeepSeekHarness({ launch: fakeLaunch(), provider: 'fake-provider', model: 'fake-model' })
       captured = harness
       const result = await harness.run('scoped')
       expect(result.finalResponse).toBe('hello from fake runtime')

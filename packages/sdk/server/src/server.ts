@@ -52,8 +52,11 @@ function successStatus(reason: string, options: HarnessSdkJsonRpcServerOptions):
  */
 export class HarnessSdkJsonRpcServer {
   private cwd = process.cwd()
-  private provider = 'deepseek-official'
-  private model = 'deepseek-official'
+  // No pre-handshake route: `initialize` supplies both, and there is no value
+  // that would be right before it — the previous placeholders named a vendor
+  // provider for `provider` and, by copy, that same provider id for `model`.
+  private provider: string | undefined
+  private model: string | undefined
   private maxTokens: number | undefined
   private llmFiber: { dispose(): Promise<void> } | undefined
   private readonly sessions = new Map<string, SessionRecord>()
@@ -220,12 +223,19 @@ export class HarnessSdkJsonRpcServer {
     // rows in the host plane, so this agent reads them from the global layer. A
     // deployment that configures a roster has to join one here first
     // (@deepseek-ai/dsh-agent-presets README, "Composing a child agent").
+    const { provider, model } = this
+    // `handleRequest` does not order the protocol, so a client that prompts
+    // before the handshake lands here with no route. Say that, rather than
+    // creating an agent on a route nobody chose.
+    if (provider === undefined || model === undefined) {
+      throw new Error('session work requested before initialize: the SDK runtime has no provider/model route until the handshake sets one')
+    }
     const handle = await this.ctx.agents.create({
       sessionId: SessionId(sessionId),
       meta: { cwd: this.cwd },
       agentOptions: {
-        provider: this.provider,
-        model: this.model,
+        provider,
+        model,
         ...this.maxTokens === undefined ? {} : { maxTokens: this.maxTokens },
       },
     })
