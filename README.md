@@ -36,6 +36,33 @@ pnpm dsh web
 
 `pnpm run build` prepares the repository artifacts. `pnpm dsh web` uses those built artifacts without rebuilding.
 
+## Delegation: `subagent` and Agent Teams
+
+dsh ships two ways for an agent to hand work to other agents. `tool-subagent`
+is mounted in `dsh-base` and available by default. Agent Teams —
+`packages/experimental/agent-team` and `tool-agent-team` — is opt-in: a
+deployment mounts both plugins through a patch layer, and the Lead creates a
+team only when the conversation asks for Agent Teams or teammates.
+
+| | `tool-subagent` | Agent Teams |
+|---|---|---|
+| Model-facing tools | one `subagent(description, prompt)` call, fire-and-forget, returning `started subagent <id>`; plus `list_agents` and `send_message` | `spawn_teammate`, `team_task_create` / `list` / `get` / `update`, `send_message` / `followup_task`, `wait_agent`, `interrupt_agent`; plus a fixed workflow policy in the system prompt |
+| Coordination | parent ↔ child only; children cannot address each other; no shared state; the task is the prompt text | a flat named roster, a durable peer mailbox, and a shared task board with DAG dependencies, one owner per task, compare-and-set revisions, and advisory write scopes |
+| Waiting for results | the parent ends its turn and is woken when a child settles | `wait_agent` blocks the Lead on a team edge; the policy requires the Lead to wait for required teammates before answering |
+| Persistence | each child is a durable session; nothing is shared | roster, tasks and mail are folded from the Lead's session log: durable, cold-resumable, replayable |
+| Identity | anonymous session ids | immutable kebab-case names, addressable, never reused; a failed member keeps its slot |
+| Activation | mounted by default; used when the prompt asks for it | mounted explicitly; teammates are created only when the user asks for Agent Teams or teammates |
+| File isolation | none | none — write scopes warn about overlap, they do not lock |
+| Observed on ASI-Bench b1, this fork at `fac9bd0`, `--profile headless` | 12 of 60 instances exited with subagents still running and delivered nothing | 0 of 52 so far; median completed runtime 3255s against a ~1950s single-agent baseline |
+
+The last row is the practical difference under `--profile headless`, where a run
+ends when the root agent's turn ends. A root that dispatched background
+subagents and yielded has ended its turn, so the run exits and the children's
+work is lost. A Lead blocks in `wait_agent` instead. Neither surface has typed
+outputs, a harness-checked notion of done, or a recorded state for work that was
+lost; those are tracked in
+[zhengxuyu/mllm-benchs](https://github.com/zhengxuyu/mllm-benchs/blob/main/DEFECTS.md).
+
 ## Community and support
 
 - Feel free to submit feedback or bug reports through [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions).
