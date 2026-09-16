@@ -202,6 +202,19 @@ describe('Agent Teams fold', () => {
     expect(state.nextTaskNumber).toBe(1)
   })
 
+  it('folds a lost task only with its cause, and never a cause without the status', () => {
+    const lost = task({ status: 'lost', lostCause: 'run-ended', ownerId: SessionId('owner') })
+    expect(foldTeam(ROOT, [event('team/task', { version: 1, teamId: TEAM, task: lost }, 0)]).tasks.get(lost.id))
+      .toMatchObject({ status: 'lost', lostCause: 'run-ended' })
+    for (const invalid of [
+      task({ status: 'lost', ownerId: SessionId('owner') }),
+      task({ status: 'pending', lostCause: 'owner-failed' }),
+    ]) {
+      expect(() => foldTeam(ROOT, [event('team/task', { version: 1, teamId: TEAM, task: invalid }, 0)]))
+        .toThrow(/persisted Agent Teams team\/task payload is invalid/)
+    }
+  })
+
   it('rejects a persisted numeric task id outside the safe integer range', () => {
     expect(() => foldTeam(ROOT, [event('team/task', {
       version: 1,

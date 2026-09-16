@@ -32,7 +32,7 @@ The plugin listens to Agent publication and installs its registrations through t
 
 #### What the model sees
 
-One stable policy section states the exact Team role/name/id, explicit-delegation requirement, shared-cwd behavior, filesystem stale-version recovery, Bash/formatter/codegen risk, task/write-scope coordination, quiet versus waking delivery, no-retry mailbox rule, and the Lead's duty to wait before answering. The ten Team schemas from `spawn_teammate` through `team_task_update` appear only in Team member scopes.
+One stable policy section states the exact Team role/name/id, explicit-delegation requirement, shared-cwd behavior, filesystem stale-version recovery, Bash/formatter/codegen risk, task/write-scope coordination, quiet versus waking delivery, no-retry mailbox rule, the recovery of a `lost` task through `reopen`, the frozen text and edges of in-progress and completed tasks, and the Lead's duty to wait before answering. The ten Team schemas from `spawn_teammate` through `team_task_update` appear only in Team member scopes.
 
 #### Token effect
 

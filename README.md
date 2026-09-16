@@ -38,11 +38,7 @@ pnpm dsh web
 
 ## Delegation: `subagent` and Agent Teams
 
-dsh ships two ways for an agent to hand work to other agents. `tool-subagent`
-is mounted in `dsh-base` and available by default. Agent Teams —
-`packages/experimental/agent-team` and `tool-agent-team` — is opt-in: a
-deployment mounts both plugins through a patch layer, and the Lead creates a
-team only when the conversation asks for Agent Teams or teammates.
+dsh ships two ways for an agent to hand work to other agents. `tool-subagent` is mounted in `dsh-base` and available by default. Agent Teams — `packages/experimental/agent-team` and `tool-agent-team` — is opt-in: a deployment mounts both plugins through a patch layer, and the Lead creates a team only when the conversation asks for Agent Teams or teammates.
 
 | | `tool-subagent` | Agent Teams |
 |---|---|---|
@@ -55,13 +51,7 @@ team only when the conversation asks for Agent Teams or teammates.
 | File isolation | none | none — write scopes warn about overlap, they do not lock |
 | Observed on ASI-Bench b1, this fork at `fac9bd0`, `--profile headless` | 12 of 60 instances exited with subagents still running and delivered nothing | 0 of 52 so far; median completed runtime 3255s against a ~1950s single-agent baseline |
 
-The last row is the practical difference under `--profile headless`, where a run
-ends when the root agent's turn ends. A root that dispatched background
-subagents and yielded has ended its turn, so the run exits and the children's
-work is lost. A Lead blocks in `wait_agent` instead. Neither surface has typed
-outputs, a harness-checked notion of done, or a recorded state for work that was
-lost; those are tracked in
-[zhengxuyu/mllm-benchs](https://github.com/zhengxuyu/mllm-benchs/blob/main/DEFECTS.md).
+The last row is the practical difference under `--profile headless`, where a run used to end when the root agent's turn ended: a root that dispatched background subagents and yielded had ended its turn, so the run exited and the children's work was lost, while a Lead blocks in `wait_agent` instead. The headless runner now accepts an optional `ctx.headlessSettlement` service; [`agent-team-settlement`](packages/experimental/agent-team-settlement/README.md) provides it over the Team board, `agent-team` can record plain `subagent` runs on that board (`trackSubagentRuns`), and work the run has to give up on is recorded as `lost` rather than dropped. Neither surface has typed outputs or a harness-checked notion of done; those are tracked in [zhengxuyu/mllm-benchs](https://github.com/zhengxuyu/mllm-benchs/blob/main/DEFECTS.md).
 
 ## Community and support
 

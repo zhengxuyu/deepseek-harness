@@ -67,8 +67,19 @@ export interface TeamMemberView {
   readonly diagnostics: string[]
 }
 
-/** Durable task lifecycle. */
-export type TeamTaskStatus = 'pending' | 'in_progress' | 'completed' | 'deleted'
+/**
+ * Durable task lifecycle. `lost` is entered only by the harness, when an
+ * in-progress task's owner can no longer finish it; the owner stays recorded
+ * and only `reopen` clears it.
+ */
+export type TeamTaskStatus = 'pending' | 'in_progress' | 'completed' | 'lost' | 'deleted'
+
+/**
+ * Why the harness marked a task `lost`: `owner-failed` when the owning member
+ * or delegated run ended without completing it, `run-ended` when the process
+ * settled the run before the task finished.
+ */
+export type TeamTaskLostCause = 'owner-failed' | 'run-ended'
 
 /** Whole durable task snapshot; every mutation increments {@link revision}. */
 export interface TeamTaskSnapshot {
@@ -78,6 +89,8 @@ export interface TeamTaskSnapshot {
   readonly description: string
   readonly status: TeamTaskStatus
   readonly ownerId?: SessionId
+  /** Present exactly while {@link status} is `lost`. */
+  readonly lostCause?: TeamTaskLostCause
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
 }
@@ -92,8 +105,19 @@ export interface TeamTaskView {
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
   readonly ownerName?: string
+  readonly lostCause?: TeamTaskLostCause
   readonly ready: boolean
   readonly writeScopeWarnings: string[]
+}
+
+/** One in-progress task that a settling run is still waiting on. */
+export interface OutstandingTeamTask {
+  readonly id: TeamTaskId
+  readonly subject: string
+  /** The Lead, a roster name, or the child Session id of a tracked run. */
+  readonly ownerName: string
+  /** Whether the owner is currently running, so the task can still make progress on its own. */
+  readonly live: boolean
 }
 
 /** One peer message retained until its target Session records it. */
@@ -133,6 +157,12 @@ export interface Config {
   readonly maxMessageBytes?: number
   /** Maximum milliseconds allowed for Team-owned runtime disposal. */
   readonly disposalTimeoutMs?: number
+  /**
+   * Record every subagent run delegated below the Lead as an owned in-progress
+   * task on the Lead's board, completed or lost when the run ends. Off by
+   * default: the board then holds only tasks members created.
+   */
+  readonly trackSubagentRuns?: boolean
 }
 
 /** Input for creating one durable teammate. */

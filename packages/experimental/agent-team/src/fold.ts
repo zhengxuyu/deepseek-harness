@@ -79,11 +79,15 @@ const teamTaskSnapshotSchema = z.object({
   revision: positiveSafeInteger,
   subject: z.string(),
   description: z.string(),
-  status: z.enum(['pending', 'in_progress', 'completed', 'deleted']),
+  status: z.enum(['pending', 'in_progress', 'completed', 'lost', 'deleted']),
   ownerId: sessionIdSchema.optional(),
+  lostCause: z.enum(['owner-failed', 'run-ended']).optional(),
   blockedBy: z.array(teamTaskIdSchema),
   writeScopes: z.array(z.string()),
-}).strict() as z.ZodType<TeamTaskSnapshot>
+}).strict().refine(
+  task => (task.status === 'lost') === (task.lostCause !== undefined),
+  { message: 'lostCause must be present exactly while status is lost' },
+) as z.ZodType<TeamTaskSnapshot>
 
 const teamMessageSnapshotSchema = z.object({
   id: teamMessageIdSchema,

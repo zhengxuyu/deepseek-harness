@@ -15,9 +15,12 @@ Implicit-root Agent Teams domain. `ctx.agentTeams` owns a flat Lead/teammate ros
     maxPendingMessagesPerMember: 64
     maxMessageBytes: 65536
     disposalTimeoutMs: 5000
+    trackSubagentRuns: false
 ```
 
 Every limit must be a positive safe integer. `maxMembers` counts every name ever provisioned, including failed members, because names are never reusable. `maxTasks` counts non-deleted tasks. The mailbox limit is per target; the byte limit covers the complete framed delivery, including its stable id and sender name. `disposalTimeoutMs` bounds admitted creation, mailbox dispatch, and Team-owned Activation settlement so plugin reload and process shutdown fail visibly instead of waiting forever.
+
+`trackSubagentRuns` records every `subagent/start` below a Team as an owned `in_progress` task on that Team's Lead board and settles it from the paired `subagent/end`: `completed` completes the task, every other stop reason marks it `lost` with cause `owner-failed`. The Lead is found by walking the delegating parent's lineage to the nearest member or root; roster members' own epochs are not recorded, because the roster already owns them. Off by default, so the board holds only tasks members created.
 
 The service requires Agent, Session, Session persistence, and continuable-subagent services. A composition without durable Session storage does not activate it.
 
@@ -41,7 +44,11 @@ The guarantee is process-local retry plus target-Session de-duplication, not cro
 
 ## Shared task board
 
-Tasks are complete versioned snapshots. Every mutation carries `expectedRevision`; stale callers receive `TEAM_TASK_STALE_REVISION` instead of overwriting a newer value. Any member can create, read, or claim a ready unowned task. The owner or Lead can edit, release, complete, reopen, or delete it; only the Lead can assign another member. Numeric `task-<n>` ids require a safe-integer suffix; creation reports `TEAM_TASK_LIMIT` instead of reusing the final safe id.
+Tasks are complete versioned snapshots. Every mutation carries `expectedRevision`; stale callers receive `TEAM_TASK_STALE_REVISION` instead of overwriting a newer value. Any member can create, read, or claim a ready unowned task. The owner or Lead can release, complete, or reopen it; only the Lead can assign another member. Numeric `task-<n>` ids require a safe-integer suffix; creation reports `TEAM_TASK_LIMIT` instead of reusing the final safe id.
+
+The executed part of the graph is frozen. `edit`, `set_dependencies`, and `delete` are accepted only on `pending` or `lost` tasks; `reassign` to a member only on a ready `pending` task; `reassign` with no owner (a Lead-side release) on `pending` or `in_progress`. Everything else answers `TEAM_TASK_INVALID_TRANSITION`, so a running task keeps the text and edges its owner started from and a completed task keeps the record its result was produced for.
+
+`lost` is the harness's status, never a member action: `markLost(caller, id, cause)` moves one `in_progress` task there and keeps its owner recorded, and a member that fails provisioning loses whatever it claimed while provisioning (`owner-failed`). A lost task cannot be claimed or completed; `reopen` returns it to `pending` with no owner, and `edit` or `set_dependencies` may revise it first. Its dependents stay blocked and its write scopes no longer warn. `outstandingTasks(caller)` lists the `in_progress` tasks on the caller's board with whether each owner is currently running (a tracked run behind an out-of-process provider counts as running until it ends), which is what a one-shot host waits on before it exits.
 
 Dependencies must name current non-deleted tasks and form a complete DAG with no self or duplicate edge. A pending task is ready only after every blocker completes. Deleting a task that still has a non-deleted dependent is rejected. Deleted tasks remain tombstones for replay and id stability but do not consume `maxTasks` or appear in `listTasks()`.
 
@@ -72,5 +79,6 @@ Peer messages append after the target's reusable history prefix. Cold resume reu
 - **One process and one shared checkout** — members share cwd and observe edits immediately; this package provides no worktree, remote member, merge, or filesystem lock.
 - **Advisory write scopes** — Bash, formatters, code generators, and direct external writers can bypass filesystem version checks; Leads must coordinate ownership and review the final diff.
 - **Flat immutable roster** — only the Lead creates direct teammates; there is no nested Team, rename, deletion, or name reuse.
-- **No automatic ownership release** — idle, interruption, process exit, and failed work do not release a task owner.
+- **No automatic ownership release** — idle, interruption, process exit, and failed work do not release a task owner; a one-shot host that gives up on an owner marks the task `lost` with the owner still recorded, and only `reopen` clears it.
+- **Tracked runs carry no contract** — a run recorded through `trackSubagentRuns` names its provider and child Session, not the prompt it was given or the artifact it owes; its completion is the run's stop reason, not a check of what it produced.
 - **Mailbox is not cross-process exactly-once** — concurrent harness processes over one Team are unsupported.

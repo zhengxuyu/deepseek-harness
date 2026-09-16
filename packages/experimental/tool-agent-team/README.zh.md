@@ -32,7 +32,7 @@
 
 #### 模型看到的内容
 
-一段稳定策略会说明确切 Team role／name／id、显式 delegation 要求、共享 cwd 行为、文件 stale-version 恢复、Bash／formatter／codegen 风险、task／write-scope 协调、quiet 与 waking 投递区别、mailbox 不重试规则，以及 Lead 必须在回答前等待。`spawn_teammate` 到 `team_task_update` 的 10 个 Team schema 只出现在 Team member scope。
+一段稳定策略会说明确切 Team role／name／id、显式 delegation 要求、共享 cwd 行为、文件 stale-version 恢复、Bash／formatter／codegen 风险、task／write-scope 协调、quiet 与 waking 投递区别、mailbox 不重试规则、`lost` 任务须经 `reopen` 恢复、进行中与已完成任务的文本与边已冻结，以及 Lead 必须在回答前等待。`spawn_teammate` 到 `team_task_update` 的 10 个 Team schema 只出现在 Team member scope。
 
 #### Token 影响
 

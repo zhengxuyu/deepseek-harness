@@ -2,7 +2,8 @@
  * @deepseek-ai/dsh-headless — one-shot direct Agent driver. The bundle patch
  * rides over dsh-base without Host, HTTP, or browser plugins; this runner
  * creates one Agent through the core registry, drives the task to quiescence,
- * flushes its Session, prints the final assistant text, and exits.
+ * lets an optional settlement provider follow delegated work, flushes its
+ * Session, prints the final assistant text, and exits.
  *
  * @module @deepseek-ai/dsh-headless
  */
@@ -11,7 +12,7 @@ import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
-import type { ModelSelectionRef } from '@deepseek-ai/dsh-agent'
+import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -36,6 +37,34 @@ export interface Config {
 export const Config: z<Config> = z.object({
   task: z.string().required(),
 })
+
+/** What a settlement provider could not collect before the run ended. */
+export interface HeadlessSettlementReport {
+  /** One line per piece of delegated work that did not settle; empty when everything did. */
+  readonly unsettled: readonly string[]
+}
+
+/**
+ * Optional host service consulted after the root turn ends. A provider that
+ * tracks work the root delegated waits for it here and reports what never
+ * settled; without one the runner exits as soon as the root turn ends.
+ */
+export interface HeadlessSettlement {
+  /**
+   * Wait until the root is idle with no delegated work outstanding, or until
+   * the provider gives up on what remains and records that.
+   * @param root - the run's exact live root Agent, idle when called.
+   * @returns the work that did not settle; the root is idle when this resolves.
+   */
+  settle(root: Agent): Promise<HeadlessSettlementReport>
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Delegated-work settlement for one-shot runs; provided by a plugin that tracks delegation. */
+    headlessSettlement?: HeadlessSettlement
+  }
+}
 
 /** Outcome of one owned run interval. */
 interface RunOutcome {
@@ -124,13 +153,18 @@ async function run(ctx: Context, task: string, io: HeadlessIo): Promise<void> {
     source: { kind: 'user' },
   }))
   await agent.whenIdle()
+  // The root turn ending is not the run ending when the root delegated work:
+  // a settlement provider follows that work and may wake the root again.
+  const settlement = ctx.get('headlessSettlement')
+  const report = settlement === undefined ? { unsettled: [] } : await settlement.settle(agent)
   await sessions.flush(agent.session)
   const outcome = summarize(agent.session.events, firstSeq)
   io.stdout.write(outcome.text + '\n')
   if (outcome.reason?.kind === 'error') {
     io.stderr.write(`dsh: ${outcome.reason.error.code}: ${outcome.reason.error.message}\n`)
   }
-  io.exit(outcome.reason?.kind === 'completed' ? 0 : 1)
+  for (const row of report.unsettled) io.stderr.write(`dsh: unsettled: ${row}\n`)
+  io.exit(outcome.reason?.kind === 'completed' && report.unsettled.length === 0 ? 0 : 1)
 }
 
 /**

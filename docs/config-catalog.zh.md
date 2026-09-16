@@ -614,10 +614,37 @@ export interface Config {
   readonly maxMessageBytes?: number
   /** Maximum milliseconds allowed for Team-owned runtime disposal. */
   readonly disposalTimeoutMs?: number
+  /**
+   * Record every subagent run delegated below the Lead as an owned in-progress
+   * task on the Lead's board, completed or lost when the run ends. Off by
+   * default: the board then holds only tasks members created.
+   */
+  readonly trackSubagentRuns?: boolean
 }
 ```
 
-来源：[`packages/experimental/agent-team/src/types.ts:125`](../packages/experimental/agent-team/src/types.ts)
+来源：[`packages/experimental/agent-team/src/types.ts:149`](../packages/experimental/agent-team/src/types.ts)
+
+<a id="deepseek-aidsh-experimental-agent-team-settlement"></a>
+
+## `@deepseek-ai/dsh-experimental-agent-team-settlement`
+
+需要：`agentTeams`
+
+```ts config-catalog
+/** Deployment limits for how long a one-shot run follows delegated work. */
+export interface Config {
+  /** Milliseconds after the root turn ends before every task still in progress is marked lost. */
+  readonly deadlineMs: number
+  /**
+   * Milliseconds without any Team change, while no task owner is running, before
+   * the remaining tasks are marked lost. At least ten seconds, at most one hour.
+   */
+  readonly stallMs: number
+}
+```
+
+来源：[`packages/experimental/agent-team-settlement/src/index.ts:26`](../packages/experimental/agent-team-settlement/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-tool-agent-team"></a>
 
@@ -726,7 +753,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/bundle/headless/src/index.ts:31`](../packages/bundle/headless/src/index.ts)
+来源：[`packages/bundle/headless/src/index.ts:32`](../packages/bundle/headless/src/index.ts)
 
 <a id="deepseek-aidsh-hooks-claude-code"></a>
 

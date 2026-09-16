@@ -15,9 +15,12 @@
     maxPendingMessagesPerMember: 64
     maxMessageBytes: 65536
     disposalTimeoutMs: 5000
+    trackSubagentRuns: false
 ```
 
 每个限制都必须是正的安全整数。`maxMembers` 统计所有曾 provision 的名字，包括失败成员，因为名字永不复用。`maxTasks` 统计未删除任务。mailbox 限额按目标成员计算；字节限制覆盖完整的投递帧，包括稳定 id 与发送者名称。`disposalTimeoutMs` 限制已获准创建、mailbox dispatch 与 Team 自有 Activation 的 settlement 时长，使插件 reload 与进程 shutdown 在异常时明确失败，而不是无限等待。
+
+`trackSubagentRuns` 会把 Team 之下的每一次 `subagent/start` 记录为该 Team Lead 任务板上一个有 owner 的 `in_progress` 任务，并根据配对的 `subagent/end` 结算：`completed` 完成该任务，其他任何 stop reason 都把它标记为 `lost`，原因为 `owner-failed`。Lead 通过沿委派 parent 的谱系向上查找最近的成员或 Root 得到；roster 成员自身的 epoch 不会被记录，因为 roster 已经拥有它们。默认关闭，此时任务板上只有成员自己创建的任务。
 
 该服务要求 Agent、Session、Session persistence 与 continuable-subagent 服务。没有持久 Session 存储的组合不会激活它。
 
@@ -41,7 +44,11 @@ roster 同时报告持久 provisioning／failed phase 与实时 `running`／`idl
 
 ## 共享任务板
 
-任务是完整的版本化快照。每次变更都携带 `expectedRevision`；陈旧调用方会收到 `TEAM_TASK_STALE_REVISION`，不会覆盖更新值。任意成员都可以创建、读取或 claim ready 且无 owner 的任务。Owner 或 Lead 可以编辑、释放、完成、重开或删除任务；只有 Lead 可以分配给其他成员。数字 `task-<n>` id 的后缀必须是安全整数；最后一个安全 id 已被占用时，创建会报告 `TEAM_TASK_LIMIT`，而不会复用该 id。
+任务是完整的版本化快照。每次变更都携带 `expectedRevision`；陈旧调用方会收到 `TEAM_TASK_STALE_REVISION`，不会覆盖更新值。任意成员都可以创建、读取或 claim ready 且无 owner 的任务。Owner 或 Lead 可以释放、完成或重开任务；只有 Lead 可以分配给其他成员。数字 `task-<n>` id 的后缀必须是安全整数；最后一个安全 id 已被占用时，创建会报告 `TEAM_TASK_LIMIT`，而不会复用该 id。
+
+图中已执行的部分是冻结的。`edit`、`set_dependencies` 与 `delete` 只接受 `pending` 或 `lost` 任务；`reassign` 给成员只接受 ready 的 `pending` 任务；不带 owner 的 `reassign`（Lead 侧的释放）接受 `pending` 或 `in_progress`。其余情况一律回答 `TEAM_TASK_INVALID_TRANSITION`，因此运行中的任务保持其 owner 开始时的文本与边，已完成的任务保持其结果所对应的记录。
+
+`lost` 是 harness 的状态，绝不是成员动作：`markLost(caller, id, cause)` 把一个 `in_progress` 任务移入该状态并保留其 owner 记录；provisioning 失败的成员会丢失它在 provisioning 期间认领的一切（`owner-failed`）。lost 任务不能被 claim 或 complete；`reopen` 把它变回无 owner 的 `pending`，在此之前可以先用 `edit` 或 `set_dependencies` 修订它。它的依赖方保持阻塞，它的写范围不再产生警告。`outstandingTasks(caller)` 列出调用方任务板上的 `in_progress` 任务以及每个 owner 当前是否在运行（进程外 provider 承载的被跟踪运行在结束前都视为运行中），这正是一次性宿主在退出前等待的东西。
 
 依赖必须指向当前未删除任务，并组成完整 DAG，不允许 self edge 或重复 edge。只有所有 blocker 都 completed，pending 任务才 ready。仍被未删除任务依赖的任务不能删除。删除任务作为 tombstone 保留以供回放和维持 id 稳定，但不占用 `maxTasks`，也不出现在 `listTasks()` 中。
 
@@ -72,5 +79,6 @@ Peer 消息追加在 target 可复用历史前缀之后。冷恢复会先复用�
 - **单进程、共享 checkout**：所有成员共享 cwd，修改立即可见；本包不提供 worktree、远端成员、自动 merge 或文件锁。
 - **write scope 仅作提示**：Bash、formatter、codegen 和直接外部写入可以绕过文件版本检查；Lead 必须协调 owner 并检查最终 diff。
 - **扁平且不可变的 roster**：只有 Lead 可以创建直接 teammate；不支持嵌套 Team、重命名、删除或名字复用。
-- **不会自动释放 owner**：idle、interrupt、进程退出与工作失败都不会释放任务 owner。
+- **不会自动释放 owner**：idle、interrupt、进程退出与工作失败都不会释放任务 owner；放弃某个 owner 的一次性宿主会把任务标记为 `lost` 并保留 owner 记录，只有 `reopen` 会清除它。
+- **被跟踪的运行不带契约**：通过 `trackSubagentRuns` 记录的运行只记下它的 provider 与子 Session，不记它收到的 prompt 或它应交付的产物；它的完成只是运行的 stop reason，不是对其产出的检查。
 - **mailbox 不保证跨进程 exactly-once**：不支持多个 harness 进程并发操作同一 Team。

@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-16-lost-tasks-and-headless-settlement.md
+2026-09-16-lost-tasks-and-headless-settlement.md: 731ff0b88322e43081657c19cf7f1bacea09ef11
+2026-09-16-lost-tasks-and-headless-settlement.zh.md: 8522c38ccc0ac0d11dce7976166c8d4a2104bb40

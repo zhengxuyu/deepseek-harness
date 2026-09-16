@@ -65,12 +65,14 @@ interface TeamTaskSnapshot {
   readonly description: string
   readonly status: TeamTaskStatus
   readonly ownerId?: SessionId
+  /** Present exactly while {@link status} is `lost`. */
+  readonly lostCause?: TeamTaskLostCause
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
 }
 ```
 
-`pending` is unstarted or released, `in_progress` carries an owner, `completed` satisfies blockers, and `deleted` is a retained tombstone. Views add owner name, readiness, and write-scope overlap warnings without changing the durable snapshot.
+`pending` is unstarted or released, `in_progress` carries an owner, `completed` satisfies blockers, `lost` is an in-progress task whose owner the harness gave up on (`lostCause` is `owner-failed` or `run-ended`; the owner stays recorded until `reopen`), and `deleted` is a retained tombstone. `in_progress` and `completed` tasks are frozen: their text, edges, and assignment do not change. Views add owner name, readiness, lost cause, and write-scope overlap warnings without changing the durable snapshot.
 
 ## Replay
 
@@ -151,6 +153,22 @@ listTasks(caller: Agent): TeamTaskView[]
  * @returns the committed next task revision.
  */
 async updateTask(caller: Agent, request: UpdateTeamTaskRequest): Promise<TeamTaskView>
+
+/**
+ * List in-progress tasks on the caller's Team board with whether each owner is still running.
+ * @param caller - exact live Team member reading the board.
+ * @returns outstanding rows in creation order; empty once every claimed task settled.
+ */
+outstandingTasks(caller: Agent): OutstandingTeamTask[]
+
+/**
+ * Mark one in-progress task `lost` on behalf of the harness; the owner stays recorded.
+ * @param caller - exact live Team member whose board holds the task.
+ * @param id - task whose owner can no longer finish it.
+ * @param cause - why the harness gave up on the owner.
+ * @returns the lost task view.
+ */
+async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause): Promise<TeamTaskView>
 
 /**
  * Wait for the next Team-domain or member-status change.

@@ -65,12 +65,14 @@ interface TeamTaskSnapshot {
   readonly description: string
   readonly status: TeamTaskStatus
   readonly ownerId?: SessionId
+  /** Present exactly while {@link status} is `lost`. */
+  readonly lostCause?: TeamTaskLostCause
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
 }
 ```
 
-`pending` 表示尚未开始或已经释放，`in_progress` 携带 owner，`completed` 满足 blocker，`deleted` 是保留的 tombstone。view 会添加 owner name、readiness 和 write-scope 重叠警告，但不会改变持久快照。
+`pending` 表示尚未开始或已经释放，`in_progress` 携带 owner，`completed` 满足 blocker，`lost` 是 harness 已放弃其 owner 的进行中任务（`lostCause` 为 `owner-failed` 或 `run-ended`；owner 记录保留到 `reopen` 为止），`deleted` 是保留的 tombstone。`in_progress` 与 `completed` 任务是冻结的：其文本、边与分配不再改变。view 会添加 owner name、readiness、lost cause 和 write-scope 重叠警告，但不会改变持久快照。
 
 ## 回放
 
@@ -151,6 +153,22 @@ listTasks(caller: Agent): TeamTaskView[]
  * @returns the committed next task revision.
  */
 async updateTask(caller: Agent, request: UpdateTeamTaskRequest): Promise<TeamTaskView>
+
+/**
+ * List in-progress tasks on the caller's Team board with whether each owner is still running.
+ * @param caller - exact live Team member reading the board.
+ * @returns outstanding rows in creation order; empty once every claimed task settled.
+ */
+outstandingTasks(caller: Agent): OutstandingTeamTask[]
+
+/**
+ * Mark one in-progress task `lost` on behalf of the harness; the owner stays recorded.
+ * @param caller - exact live Team member whose board holds the task.
+ * @param id - task whose owner can no longer finish it.
+ * @param cause - why the harness gave up on the owner.
+ * @returns the lost task view.
+ */
+async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause): Promise<TeamTaskView>
 
 /**
  * Wait for the next Team-domain or member-status change.
