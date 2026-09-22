@@ -14,11 +14,11 @@ Issue lifecycle 与 Issue policy 工作流假定运行在规范的 `deepseek-har
 
 [CI 工作流](../../../../.github/workflows/ci.yml)中三个企业级 Linux 作业与三个原生 Windows 作业的 runner 选择器在企业级默认值之前增加一个分支：当 `github.event.repository.fork` 为真时，作业运行在 `ubuntu-latest` 或 `windows-latest` 上。两个 failover 开关保持优先，因此规范仓库的选择不变；汇总裁决作业本来就运行在标准托管 runner 上。
 
-[Issue lifecycle](../../../../.github/workflows/issue-lifecycle.yml) 作业在工作流文件中以 `github.repository == 'deepseek-harness/deepseek-harness'` 为门控，因为它的 token 步骤在任何脚本运行之前就已失败。[Issue policy](../../../../.github/workflows/issue-policy.yml) 作业按其可信预检约定保持无条件；改由预检脚本对 `repository.full_name` 不是规范仓库的事件做豁免，写出 `exempt=true`、`needs-project=false` 与 `legacy-automated=true`，使 token 与校验步骤在不发起任何 API 读取的情况下跳过。脚本从默认分支运行，因此 fork 在其默认分支携带此变更后即获得豁免。
+[Issue lifecycle](../../../../.github/workflows/issue-lifecycle.yml) 作业在工作流文件中以 `github.repository == 'deepseek-harness/deepseek-harness'` 为门控，因为它的 token 步骤在任何脚本运行之前就已失败。[Issue policy](../../../../.github/workflows/issue-policy.yml) 作业按其可信预检约定保持无条件；改由预检脚本对 `repository.full_name` 不是规范仓库的事件做豁免，写出 `exempt=true`、`needs-project=false` 与 `legacy-automated=true`，使 token 与校验步骤在不发起任何 API 读取的情况下跳过。预检步骤的 shell 脚本会先以 `GITHUB_REPOSITORY` 为键做同样的豁免，因为策略脚本从默认分支检出，而工作流文件来自 pull request 本身，所以 fork 的第一个 pull request 在其默认分支携带脚本变更之前就已豁免。[Cloudflare 预览](../../../../.github/workflows/build-preview-cloudflare.yml)作业同样以规范仓库为门控，因为其部署需要 fork 并不拥有的 secrets。
 
 ## Verification
 
-[工作流测试](../../../../scripts/ci-workflow.spec.ts)固定每个企业级选择器中的 fork 分支，在置位 fork 标志的情况下求值每个选择器以证明托管回退只在没有 failover 开关生效时胜出，并固定 lifecycle 作业上的规范仓库条件。[Issue 管理测试](../../../../.github/issue-management/policy.test.mjs)固定非规范仓库的事件在不发起请求的情况下被豁免，而规范仓库仍执行完整预检。
+[工作流测试](../../../../scripts/ci-workflow.spec.ts)固定每个企业级选择器中的 fork 分支，在置位 fork 标志的情况下求值每个选择器以证明托管回退只在没有 failover 开关生效时胜出，并固定 lifecycle 作业上的规范仓库条件。[Issue 管理测试](../../../../.github/issue-management/policy.test.mjs)固定非规范仓库的事件在不发起请求的情况下被豁免，规范仓库仍执行完整预检，并且工作流的 shell 脚本对外来的 `GITHUB_REPOSITORY` 直接写出豁免输出而不调用策略脚本。
 
 ## Alternatives considered
 

@@ -939,6 +939,7 @@ test('runs trusted rollout selection with absent and present capability markers'
     { name: 'legacy app', type: 'App', marker: false, expected: 'legacy-automated=true\nneeds-project=false\n' },
     { name: 'modern exempt', type: 'Bot', marker: true, expected: 'exempt=true\nneeds-project=false\n' },
     { name: 'modern failure', type: 'User', marker: true, failure: true, expected: '' },
+    { name: 'fork exempt', type: 'User', marker: true, repository: 'someone/deepseek-harness', expected: 'eligible=false\nexempt=true\nneeds-project=false\nlegacy-automated=true\n' },
   ]
   for (const [index, fixture] of cases.entries()) {
     const cwd = join(directory, String(index))
@@ -954,7 +955,12 @@ test('runs trusted rollout selection with absent and present capability markers'
       : "throw new Error('preflight unavailable or failed')\n")
     const result = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', script], {
       cwd,
-      env: { PATH: process.env.PATH, GITHUB_EVENT_PATH: eventPath, GITHUB_OUTPUT: outputPath },
+      env: {
+        PATH: process.env.PATH,
+        GITHUB_EVENT_PATH: eventPath,
+        GITHUB_OUTPUT: outputPath,
+        ...(fixture.repository === undefined ? {} : { GITHUB_REPOSITORY: fixture.repository }),
+      },
       encoding: 'utf8',
       timeout: 30_000,
     })
