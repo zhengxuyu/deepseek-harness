@@ -12,6 +12,7 @@ import { UiConversation } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { TestSessions } from '@deepseek-ai/dsh-client-test-runtime'
 import { apply, inject } from '../src/client/index.ts'
+import { apply as nodeApply } from '../src/index.ts'
 
 async function bench() {
   const ctx = new Context()
@@ -57,4 +58,7 @@ describe('ui-jev browser plugin', () => {
     expect(b.commandKeys()).toEqual([])
   })
 
+  it('has an inert node half', () => {
+    expect(() => { nodeApply() }).not.toThrow()
+  })
 })
