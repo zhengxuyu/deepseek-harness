@@ -2,6 +2,8 @@
 
 Status: implemented
 
+Update: the `reported` bit and `onJobDone` this note relies on left the registry with the [jobs seam consolidation](../architecture/2026-09-03-jobs-seam-consolidation.md): `dsh-tool-jobs` now keeps the delivery ledger (a wait or an accepted `job_kill` claims the task) and skips teardown settlements by their `settled` cause, so the wake-or-inject decision below stands while the mechanism it names is the tool's ledger, not a registry flag.
+
 English | [中文](2026-08-11-background-job-completion-wakes-an-idle-owner.zh.md)
 
 ## Problem
@@ -12,7 +14,7 @@ The gap was recorded as a limitation rather than reasoned about, so the fallback
 
 This supersedes one fact of the [background-job runtime decision](../architecture/2026-06-20-generic-long-running-tool-runtime.md) — that completion never wakes an idle owner — and adds teardown as a `reported` setter. That note keeps every other task-runtime decision and is updated in place rather than replaced.
 
-The delivery machinery was never the obstacle. `Agent.send(message, target, wakeup)` has covered the `target` × `wakeup` matrix since the [unified send decision](../architecture/2026-07-22-unified-send-and-coalesced-user-messages.md), and `wakeDriver()` already handles idle, maintenance, and cancelled-converging phases. The missing piece was the policy choice of which lane a completion takes, plus the bound that choice needs.
+The delivery machinery was never the obstacle. `Agent.send(message, target, wakeup)` has covered the `target` × `wakeup` matrix since the [unified send decision](../../archived/architecture/2026-07-22-unified-send-and-coalesced-user-messages.md), and `wakeDriver()` already handles idle, maintenance, and cancelled-converging phases. The missing piece was the policy choice of which lane a completion takes, plus the bound that choice needs.
 
 ## Decision
 

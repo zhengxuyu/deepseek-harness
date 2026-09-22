@@ -2,6 +2,8 @@
 
 Status: implemented
 
+Update：本文依赖的 `reported` 位与 `onJobDone` 已随 [jobs seam 收敛](../architecture/2026-09-03-jobs-seam-consolidation.zh.md)离开注册表：`dsh-tool-jobs` 现在持有投递台账（等待或被接受的 `job_kill` 认领任务），并按 `settled` 事件的 cause 跳过 teardown 结算，因此下文唤醒或注入的决策仍然成立，只是它提到的机制是工具的台账而非注册表标志。
+
 [English](2026-08-11-background-job-completion-wakes-an-idle-owner.md) | 中文
 
 ## 问题
@@ -12,7 +14,7 @@ Status: implemented
 
 本决策取代[后台任务运行时决策](../architecture/2026-06-20-generic-long-running-tool-runtime.zh.md)中的一条事实——完成永不唤醒空闲所有者——并把 teardown 加为 `reported` 的置位方。那份 note 仍拥有其余全部任务运行时决策，因此就地更新而非替换。
 
-交付机制从来不是障碍。自[统一 send 决策](../architecture/2026-07-22-unified-send-and-coalesced-user-messages.zh.md)起，`Agent.send(message, target, wakeup)` 就覆盖了 `target` × `wakeup` 矩阵，`wakeDriver()` 也已经处理 idle、maintenance 和已取消未收敛三种相位。缺的是「一次完成走哪条通道」这一策略选择，以及该选择所需的界。
+交付机制从来不是障碍。自[统一 send 决策](../../archived/architecture/2026-07-22-unified-send-and-coalesced-user-messages.md)起，`Agent.send(message, target, wakeup)` 就覆盖了 `target` × `wakeup` 矩阵，`wakeDriver()` 也已经处理 idle、maintenance 和已取消未收敛三种相位。缺的是「一次完成走哪条通道」这一策略选择，以及该选择所需的界。
 
 ## 决策
 

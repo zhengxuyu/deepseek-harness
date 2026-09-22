@@ -4,11 +4,15 @@
 
 DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的开源 agent harness（智能体框架）。
 
-它采用**一切皆插件**的架构，并由 [Cordis](https://github.com/cordiverse/cordis) 驱动，其设计参见论文 [_A Programming Paradigm for Spatiotemporal Composability_](https://github.com/cordiverse/paper)。
+它构建于**一切皆插件**的架构之上，由 [Cordis](https://github.com/cordiverse/cordis) 驱动，其设计参见论文 [_A Programming Paradigm for Spatiotemporal Composability_](https://arxiv.org/abs/2608.25512)。
+
+文档：[https://deepseek-harness.github.io/deepseek-harness/](https://deepseek-harness.github.io/deepseek-harness/)
 
 ## 开发者预览
 
-DeepSeek Harness 目前处于 _开发者预览_ 阶段，正在快速迭代。**未来将出现破坏兼容性的变更。**
+DeepSeek Harness 处于 _开发者预览_ 阶段，正在快速迭代。**未来将出现破坏兼容性的变更。**
+
+运行本项目前，请阅读[安全说明](SAFETY.zh.md)。
 
 <a id="run"></a>
 
@@ -53,13 +57,13 @@ dsh 提供两种让 agent 把工作交给其他 agent 的方式。`tool-subagent
 | 身份 | 匿名 session id | 不可变的 kebab-case 名字，可寻址，永不复用；失败的成员保留其槽位 |
 | 激活 | 默认挂载；prompt 要求时使用 | 需显式挂载；仅当用户明确要求 Agent Teams 或 teammates 时才创建 teammate |
 | 文件隔离 | 无 | 无 —— 写范围只对重叠发出警告，不是锁 |
-| ASI-Bench b1 上的观察（本 fork `fac9bd0`，`--profile headless`） | 60 个实例中 12 个在 subagent 仍在运行时退出，未交付任何产物 | 目前 52 个中 0 个；完成实例的中位耗时 3255s，单 agent 基线约 1950s |
+| ASI-Bench b1 上的观察（本 fork 截至 2026-08-27，`--profile headless`） | 60 个实例中 12 个在 subagent 仍在运行时退出，未交付任何产物 | 目前 52 个中 0 个；完成实例的中位耗时 3255s，单 agent 基线约 1950s |
 
 最后一行是 `--profile headless` 下的实际差别：headless 在 root agent 回合结束时结束运行。派发了后台 subagent 然后让出的 root 已经结束了回合，于是运行退出，子 agent 的工作丢失；而 Lead 会在 `wait_agent` 中阻塞。两种方式都没有类型化产物、由 harness 判定的"完成"、或对丢失工作的记录状态；这些记录在 [zhengxuyu/mllm-benchs](https://github.com/zhengxuyu/mllm-benchs/blob/main/DEFECTS.md)。
 
 ## 社区与支持
 
-- 欢迎通过 [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions) 提交反馈或 bug 报告。
+- 通过 [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions) 提交反馈或 bug 报告。
 - 为你的插件仓库添加 [`dsh-plugin`](https://github.com/topics/dsh-plugin) 话题，便于被发现。
 - 欢迎加入 DeepSeek Harness 企微群：扫码添加企微小助手并填写入群问卷，完成后小助手会邀请你入群。
 
@@ -88,7 +92,21 @@ dsh 提供两种让 agent 把工作交给其他 agent 的方式。`tool-subagent
 
 请先阅读[开发指南](docs/development.zh.md)与[架构文档](docs/architecture.zh.md)。
 
+`pnpm run dev:web` 会在一个终端里完成构建、启动，并在源码修改时重建 client bundle；`make help` 列出 Web 与 Desktop 对应的 Make target。完整表格见开发指南的「应用命令」一节。
+
 面向 agent：请遵循 [AGENTS.md](AGENTS.md)。
+
+## 引用
+
+```bibtex
+@misc{deepseek-harness2026,
+  title={DeepSeek Harness: Everything is a Plugin},
+  author={DeepSeek-AI},
+  year={2026},
+  publisher={GitHub},
+  howpublished={\url{https://github.com/deepseek-ai/deepseek-harness}},
+}
+```
 
 ## 许可证
 

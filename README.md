@@ -4,11 +4,15 @@ English | [中文](README.zh.md)
 
 DeepSeek Harness (`dsh`) is an open-source agent harness developed by [DeepSeek AI](https://deepseek.com).
 
-It uses an architecture where **everything is a plugin**, and is powered by [Cordis](https://github.com/cordiverse/cordis), whose design is described in [_A Programming Paradigm for Spatiotemporal Composability_](https://github.com/cordiverse/paper).
+It is built on an **everything-is-a-plugin** architecture and powered by [Cordis](https://github.com/cordiverse/cordis), whose design is described in [_A Programming Paradigm for Spatiotemporal Composability_](https://arxiv.org/abs/2608.25512).
+
+Documentation: [https://deepseek-harness.github.io/deepseek-harness/](https://deepseek-harness.github.io/deepseek-harness/)
 
 ## Developer preview
 
-DeepSeek Harness is currently in _developer preview_ and is iterating rapidly. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**
+DeepSeek Harness is in _developer preview_ and iterating rapidly. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**
+
+Review the [safety notice](SAFETY.md) before running the project.
 
 ## Run
 
@@ -38,11 +42,7 @@ pnpm dsh web
 
 ## Delegation: `subagent` and Agent Teams
 
-dsh ships two ways for an agent to hand work to other agents. `tool-subagent`
-is mounted in `dsh-base` and available by default. Agent Teams —
-`packages/experimental/agent-team` and `tool-agent-team` — is opt-in: a
-deployment mounts both plugins through a patch layer, and the Lead creates a
-team only when the conversation asks for Agent Teams or teammates.
+dsh ships two ways for an agent to hand work to other agents. `tool-subagent` is mounted in `dsh-base` and available by default. Agent Teams — `packages/experimental/agent-team` and `tool-agent-team` — is opt-in: a deployment mounts both plugins through a patch layer, and the Lead creates a team only when the conversation asks for Agent Teams or teammates.
 
 | | `tool-subagent` | Agent Teams |
 |---|---|---|
@@ -53,19 +53,13 @@ team only when the conversation asks for Agent Teams or teammates.
 | Identity | anonymous session ids | immutable kebab-case names, addressable, never reused; a failed member keeps its slot |
 | Activation | mounted by default; used when the prompt asks for it | mounted explicitly; teammates are created only when the user asks for Agent Teams or teammates |
 | File isolation | none | none — write scopes warn about overlap, they do not lock |
-| Observed on ASI-Bench b1, this fork at `fac9bd0`, `--profile headless` | 12 of 60 instances exited with subagents still running and delivered nothing | 0 of 52 so far; median completed runtime 3255s against a ~1950s single-agent baseline |
+| Observed on ASI-Bench b1, this fork as of 2026-08-27, `--profile headless` | 12 of 60 instances exited with subagents still running and delivered nothing | 0 of 52 so far; median completed runtime 3255s against a ~1950s single-agent baseline |
 
-The last row is the practical difference under `--profile headless`, where a run
-ends when the root agent's turn ends. A root that dispatched background
-subagents and yielded has ended its turn, so the run exits and the children's
-work is lost. A Lead blocks in `wait_agent` instead. Neither surface has typed
-outputs, a harness-checked notion of done, or a recorded state for work that was
-lost; those are tracked in
-[zhengxuyu/mllm-benchs](https://github.com/zhengxuyu/mllm-benchs/blob/main/DEFECTS.md).
+The last row is the practical difference under `--profile headless`, where a run ends when the root agent's turn ends. A root that dispatched background subagents and yielded has ended its turn, so the run exits and the children's work is lost. A Lead blocks in `wait_agent` instead. Neither surface has typed outputs, a harness-checked notion of done, or a recorded state for work that was lost; those are tracked in [zhengxuyu/mllm-benchs](https://github.com/zhengxuyu/mllm-benchs/blob/main/DEFECTS.md).
 
 ## Community and support
 
-- Feel free to submit feedback or bug reports through [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions).
+- Submit feedback or bug reports through [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions).
 - Add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to your plugin repository for discoverability.
 - Join <a href="https://discord.gg/Ycq5dCaS4">DeepSeek Harness Discord community</a>.
 
@@ -77,7 +71,21 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Start with the [development guide](docs/development.md) and [architecture documentation](docs/architecture.md).
 
+`pnpm run dev:web` builds, serves, and rebuilds client bundles on source edits in one terminal, and `make help` lists the matching Make targets for Web and Desktop; the guide's application commands section owns the full table.
+
 For agents, follow [AGENTS.md](AGENTS.md).
+
+## Citation
+
+```bibtex
+@misc{deepseek-harness2026,
+  title={DeepSeek Harness: Everything is a Plugin},
+  author={DeepSeek-AI},
+  year={2026},
+  publisher={GitHub},
+  howpublished={\url{https://github.com/deepseek-ai/deepseek-harness}},
+}
+```
 
 ## License
 

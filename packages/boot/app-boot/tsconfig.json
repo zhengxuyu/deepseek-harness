@@ -21,12 +21,6 @@
       "path": "../../../vendor/group"
     },
     {
-      "path": "../../../vendor/hmr"
-    },
-    {
-      "path": "../../runtime-diagnostics/invariants"
-    },
-    {
       "path": "../../core/system-prompt"
     },
     {
@@ -34,6 +28,9 @@
     },
     {
       "path": "../../util/home-paths"
+    },
+    {
+      "path": "../../util/package-manifest"
     }
   ]
 }
