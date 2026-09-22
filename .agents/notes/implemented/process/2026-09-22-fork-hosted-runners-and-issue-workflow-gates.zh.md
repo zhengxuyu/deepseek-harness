@@ -30,4 +30,4 @@ Issue lifecycle 与 Issue policy 工作流假定运行在规范的 `deepseek-har
 
 ## Consequences
 
-Fork 的 pull request 在标准托管 runner 上以标准 runner 的速度得到真实的 CI 结论，issue 工作流报告为跳过而非失败。fork 的 coverage 通道运行两个而非默认三个插桩分区，因为在 4 核托管 runner 上，三个分区会让自带 60 s 预算的测试得不到 CPU。DeepSeek 默认值 headless fixture 把流空闲预算从 150 ms 放宽到 1 s，与 pi-ai 默认值 fixture 一致，因为标准 runner 可能把 fixture 服务器 60 ms 一次的 keep-alive 拖延到触发重试，从而破坏请求计数。规范仓库的选择不变。`ci-master.yml` 推送工作流仍直接指定自托管与企业级池，因此向 fork 默认分支的推送会让这些作业排队；该工作流不是 pull request 门控，保持上游原样。
+Fork 的 pull request 在标准托管 runner 上以标准 runner 的速度得到真实的 CI 结论，issue 工作流报告为跳过而非失败。fork 的 coverage 通道运行两个而非默认三个插桩分区，因为在 4 核托管 runner 上，三个分区会让自带 60 s 预算的测试得不到 CPU。DeepSeek 默认值 headless fixture 把流空闲预算从 150 ms 放宽到 1 s，与 pi-ai 默认值 fixture 一致，因为标准 runner 可能把 fixture 服务器 60 ms 一次的 keep-alive 拖延到触发重试，从而破坏请求计数。规范仓库的选择不变。裁决作业不依赖的 Windows coverage 通道在 fork 上仍然是红的：`windows-latest` 只有两个核心且账户模型不同，沙箱 ACL、工作区准备与 persistence-schema 套件在那里的失败不是分区数量能解决的。`ci-master.yml` 推送工作流仍直接指定自托管与企业级池，因此向 fork 默认分支的推送会让这些作业排队；该工作流不是 pull request 门控，保持上游原样。
