@@ -30,4 +30,4 @@ Issue lifecycle 与 Issue policy 工作流假定运行在规范的 `deepseek-har
 
 ## Consequences
 
-Fork 的 pull request 在标准托管 runner 上以标准 runner 的速度得到真实的 CI 结论，issue 工作流报告为跳过而非失败。规范仓库的选择不变。`ci-master.yml` 推送工作流仍直接指定自托管与企业级池，因此向 fork 默认分支的推送会让这些作业排队；该工作流不是 pull request 门控，保持上游原样。
+Fork 的 pull request 在标准托管 runner 上以标准 runner 的速度得到真实的 CI 结论，issue 工作流报告为跳过而非失败。DeepSeek 默认值 headless fixture 把流空闲预算从 150 ms 放宽到 1 s，与 pi-ai 默认值 fixture 一致，因为标准 runner 可能把 fixture 服务器 60 ms 一次的 keep-alive 拖延到触发重试，从而破坏请求计数。规范仓库的选择不变。`ci-master.yml` 推送工作流仍直接指定自托管与企业级池，因此向 fork 默认分支的推送会让这些作业排队；该工作流不是 pull request 门控，保持上游原样。
