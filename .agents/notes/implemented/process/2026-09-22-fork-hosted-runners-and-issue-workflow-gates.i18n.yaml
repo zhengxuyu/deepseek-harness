@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-09-22-fork-hosted-runners-and-issue-workflow-gates.md
-2026-09-22-fork-hosted-runners-and-issue-workflow-gates.md: 7579e2bb336d558336fc3784fb64dbda038237b7
-2026-09-22-fork-hosted-runners-and-issue-workflow-gates.zh.md: 3a64455abb5ac5675fe82780436af91128ba358a
+2026-09-22-fork-hosted-runners-and-issue-workflow-gates.md: 59eb2e52c5188c0fef1566938d36c458ae5a7c83
+2026-09-22-fork-hosted-runners-and-issue-workflow-gates.zh.md: 8de949c399cdcbc347c42e57b5392e8b8d0eb041
