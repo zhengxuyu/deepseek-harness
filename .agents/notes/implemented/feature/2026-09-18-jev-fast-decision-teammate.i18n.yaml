@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-18-jev-fast-decision-teammate.md
-2026-09-18-jev-fast-decision-teammate.md: fa76d8c297f273cfe68780cc971e85262ce0a631
-2026-09-18-jev-fast-decision-teammate.zh.md: a960409b333f22801ff47cced80b9f625e266f85
+2026-09-18-jev-fast-decision-teammate.md: a5edc10a8d109f77800a752cd7ea61067b630ed6
+2026-09-18-jev-fast-decision-teammate.zh.md: ec34a1e554f927fa0a252dfb6e496ec2f8c07c40

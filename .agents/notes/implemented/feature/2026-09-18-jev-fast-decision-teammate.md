@@ -63,3 +63,5 @@ A teammate whose advice only one party hears splits the team. Injecting the cons
 **No retry.** A rate limit or transient provider failure surfaces once as a `JevError`; the model or the user decides whether to try again.
 
 **One vendor in one package.** Adding a second System One provider means splitting `dsh-jev` into a definition and two implementations, a rename the pre-release stance permits without a compatibility shim.
+
+Mounting `tool-jev` in `dsh-base` adds its schema and prompt section to every profile's request prefix, so the keyless snapshot corpus was refreshed rather than re-recorded, the `persistent-tools` SDK scenario excludes the tool to stay minimal, and the two compaction scenarios widen their context window by the added prefix (632 estimated tokens) so their triggers keep the same relative position.

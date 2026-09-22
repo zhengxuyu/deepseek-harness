@@ -200,6 +200,7 @@
           "tools": [
             "cordis_inspect_list",
             "cordis_inspect_query",
+            "jev",
             "job_kill",
             "job_list",
             "job_output",
@@ -296,6 +297,7 @@
           "tools": [
             "cordis_inspect_list",
             "cordis_inspect_query",
+            "jev",
             "job_kill",
             "job_list",
             "job_output",
@@ -1905,6 +1907,7 @@
               "tools": [
                 "cordis_inspect_list",
                 "cordis_inspect_query",
+                "jev",
                 "job_kill",
                 "job_list",
                 "job_output",
@@ -2031,6 +2034,7 @@
               "tools": [
                 "cordis_inspect_list",
                 "cordis_inspect_query",
+                "jev",
                 "job_kill",
                 "job_list",
                 "job_output",
@@ -3313,6 +3317,7 @@
               "tools": [
                 "cordis_inspect_list",
                 "cordis_inspect_query",
+                "jev",
                 "job_kill",
                 "job_list",
                 "job_output",
@@ -4122,6 +4127,7 @@
               "tools": [
                 "cordis_inspect_list",
                 "cordis_inspect_query",
+                "jev",
                 "job_kill",
                 "job_list",
                 "job_output",

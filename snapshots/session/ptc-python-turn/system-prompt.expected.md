@@ -27,6 +27,8 @@ Use the web_fetch tool to retrieve the content of a specific HTTP(S) URL (for ex
 
 Use goal tools for one long-running completion objective in the current session. create_goal may infer goal intent from a direct human request in any language; do not create a goal for routine single-turn work. Call get_goal before update_goal and copy its exact goal_id and revision. After session resume or fork, an active goal is disarmed: when a human asks to continue or resume in any wording or language, use update_goal action resume to rearm it. Mark complete only when the objective is actually achieved. Mark blocked only after the same blocking condition persists for at least 3 consecutive goal rounds, and report that concrete condition in blocked_reason; difficulty, uncertainty, or useful remaining work is not blocked.
 
+Jev is a fast-thinking teammate available through the `jev` tool: a System One model that returns calibrated judgments instead of prose. Consult it for quick decisions that hinge on reading rather than lookup or computation; put every fact the judgment needs in `state`, ask independent questions together, and treat the returned probabilities and confidence as signals to threshold on — a low-confidence answer on a consequential decision is a reason to gather more evidence or ask the user, not to guess. You keep responsibility for exact facts, calculations, and the final decision.
+
 Use subagent in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set `run_in_background: false` only when your next action depends on that subagent's result. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message.
 
 ## Writing code for run_code
@@ -211,6 +213,53 @@ class InterruptAgentArgs(TypedDict):
 
 class InterruptAgentOutput(TypedDict):
     accepted: bool
+
+class JevArgsQuestions(TypedDict):
+    # Your own handle for the answer; never shown to Jev.
+    id: str
+    type: Literal["choice", "noul", "score"]
+    # The complete question, standing alone. Reference nested state with backticked paths such as `ticket.messages[0].text`.
+    instructions: str
+    # choice only: option name → short description, or null when the name explains itself. Include a no-match option when nothing may fit.
+    options: NotRequired[dict[str, Any]]
+    # score only: 2–10 ordered level descriptions from lowest to highest, each a concrete situation.
+    levels: NotRequired[list[str]]
+
+class JevArgs(TypedDict):
+    # Everything the judgment needs: source text, candidates, constraints, current facts. Prefer an object with named fields when the context has several parts.
+    state: str | dict[str, Any]
+    # Independent questions about the same state, at most 16. Each id must be unique.
+    questions: list[JevArgsQuestions]
+    # Additional keys beyond those declared are allowed.
+
+class JevOutputAnswers1(TypedDict):
+    id: str
+    type: Literal["choice"]
+    choice: str
+    probabilities: dict[str, Any]
+    confidence: float
+
+class JevOutputAnswers2(TypedDict):
+    id: str
+    type: Literal["noul"]
+    noul: float
+
+class JevOutputAnswers3(TypedDict):
+    id: str
+    type: Literal["score"]
+    score: float
+    legend: dict[str, Any]
+    probabilities: dict[str, Any]
+    confidence: float
+
+class JevOutputUsage(TypedDict):
+    inputTokens: int
+    outputTokens: int
+
+class JevOutput(TypedDict):
+    model: str
+    answers: list[JevOutputAnswers1 | JevOutputAnswers2 | JevOutputAnswers3]
+    usage: JevOutputUsage
 
 class JobKillArgs(TypedDict):
     # Job id returned by the tool that started the background work.
@@ -527,6 +576,8 @@ class Tools(Protocol):
         """Search file contents with a ripgrep regular expression. Returns matching lines with line numbers, grouped by file. Returns the first 250 matches inline; a capped result reports where the complete match list was saved. Use read on a matched file for surrounding context."""
     async def interrupt_agent(self, args: InterruptAgentArgs) -> InterruptAgentOutput:
         """Request cancellation of a background agent's current turn by its agent id. The target may be your direct child or a deeper agent created under you. Only the current turn stops: messages already queued for the agent stay parked until a later send_message, agents it started keep running, and the agent itself stays available for follow-ups. This call returns as soon as the stop request is accepted, so the target may keep running briefly; interrupting an agent that already finished is an accepted no-op."""
+    async def jev(self, args: JevArgs) -> JevOutput:
+        """Ask Jev, a fast-thinking teammate, for calibrated judgments about facts you supply. Jev is a System One model: it does not reason, browse, or write prose; it returns typed answers with probabilities. Send complete `state` (Jev sees nothing else) and one or more independent questions: `choice` picks one named option, `noul` gives the probability that a condition holds, `score` rates along ordered levels. Use it for quick decisions that hinge on semantic reading — picking between candidates, triage, ranking, checking a condition — not for lookups, arithmetic, or facts outside `state`. Ask every independent question about the same state in one call."""
     async def job_kill(self, args: JobKillArgs) -> JobKillOutput:
         """Request cancellation of a running background job by job id. Returns immediately; the job settles as killed once its work actually stops."""
     async def job_list(self, args: dict[str, Any]) -> list[JobListOutput]:
