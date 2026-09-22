@@ -1044,9 +1044,9 @@ describe('Issue lifecycle workflow', () => {
 
     expect(lifecycle.on).toHaveProperty('pull_request')
     expect(lifecycle.on).toHaveProperty('pull_request_review')
-    // Both issue workflows check out the default-branch policy script and need
-    // the canonical repository's App installation, labels, and Project board,
-    // so a fork skips them at the job gate instead of failing every event.
+    // The lifecycle job mints a token from the canonical repository's App
+    // installation before any script runs, so a fork skips it at the job gate;
+    // the policy job stays unconditional and its preflight script exempts forks.
     expect(lifecycleJob.if).toContain("github.repository == 'deepseek-harness/deepseek-harness'")
     expect(lifecycleJob.if).toContain("github.event.review.state == 'changes_requested'")
     expect(lifecycleJob.if).toContain('github.event.changes.body != null')
@@ -1090,7 +1090,7 @@ describe('Issue lifecycle workflow', () => {
     expect(preflightStep?.run).toContain('if [ -f .github/issue-management/selective-preflight.json ]; then')
     expect(preflightStep?.run).toContain('node .github/issue-management/policy.mjs pr-preflight')
     expect(preflightStep?.if).toBeUndefined()
-    expect(policyJob.if).toBe("github.repository == 'deepseek-harness/deepseek-harness'")
+    expect(policyJob.if).toBeUndefined()
     expect(validateStep?.if).toBe("${{ steps.preflight.outputs.legacy-automated != 'true' }}")
 
     expect(tokenStep).toMatchObject({

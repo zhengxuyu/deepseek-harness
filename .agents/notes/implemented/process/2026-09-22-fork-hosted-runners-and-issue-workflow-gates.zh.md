@@ -14,17 +14,17 @@ Issue lifecycle 与 Issue policy 工作流假定运行在规范的 `deepseek-har
 
 [CI 工作流](../../../../.github/workflows/ci.yml)中三个企业级 Linux 作业与三个原生 Windows 作业的 runner 选择器在企业级默认值之前增加一个分支：当 `github.event.repository.fork` 为真时，作业运行在 `ubuntu-latest` 或 `windows-latest` 上。两个 failover 开关保持优先，因此规范仓库的选择不变；汇总裁决作业本来就运行在标准托管 runner 上。
 
-[Issue lifecycle](../../../../.github/workflows/issue-lifecycle.yml) 与 [Issue policy](../../../../.github/workflows/issue-policy.yml) 作业以 `github.repository == 'deepseek-harness/deepseek-harness'` 为门控。门控放在工作流文件而非策略脚本中，因为两个工作流都检出默认分支上的脚本，而 fork 的默认分支可能尚未携带它；同时 lifecycle 的 token 步骤在任何脚本运行之前就已失败。
+[Issue lifecycle](../../../../.github/workflows/issue-lifecycle.yml) 作业在工作流文件中以 `github.repository == 'deepseek-harness/deepseek-harness'` 为门控，因为它的 token 步骤在任何脚本运行之前就已失败。[Issue policy](../../../../.github/workflows/issue-policy.yml) 作业按其可信预检约定保持无条件；改由预检脚本对 `repository.full_name` 不是规范仓库的事件做豁免，写出 `exempt=true`、`needs-project=false` 与 `legacy-automated=true`，使 token 与校验步骤在不发起任何 API 读取的情况下跳过。脚本从默认分支运行，因此 fork 在其默认分支携带此变更后即获得豁免。
 
 ## Verification
 
-[工作流测试](../../../../scripts/ci-workflow.spec.ts)固定每个企业级选择器中的 fork 分支，在置位 fork 标志的情况下求值每个选择器以证明托管回退只在没有 failover 开关生效时胜出，并固定两个 issue 作业上的规范仓库条件。
+[工作流测试](../../../../scripts/ci-workflow.spec.ts)固定每个企业级选择器中的 fork 分支，在置位 fork 标志的情况下求值每个选择器以证明托管回退只在没有 failover 开关生效时胜出，并固定 lifecycle 作业上的规范仓库条件。[Issue 管理测试](../../../../.github/issue-management/policy.test.mjs)固定非规范仓库的事件在不发起请求的情况下被豁免，而规范仓库仍执行完整预检。
 
 ## Alternatives considered
 
 **在 fork 上设置 failover 变量。** 两个开关的取值指向的池 fork 仍然无法触达，而增加第三个取值会为一个并非 failover 的场景扩大规范选择器。
 
-**在策略脚本内部做防护。** 脚本从默认分支运行，因此无法保护默认分支早于该防护的 fork；而且 lifecycle 的 token 步骤在脚本启动之前就已失败。
+**也在工作流文件中门控 policy 作业。** policy 工作流的测试要求该作业及其预检保持无条件，使必需检查永远不会被一次工作流编辑跳过；脚本级豁免保住了这一约定，而 fork 只需付出一次 checkout 的代价。
 
 **从 fork 的工作流中移除企业级池。** 这会让 fork 的 CI 在每次同步时都与上游分叉；一个纯增量分支可以干净合并，并在标志为假时逐字节保持规范行为。
 

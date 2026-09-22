@@ -825,6 +825,17 @@ for (const [name, pull, requested, count] of [
   })
 }
 
+test('exempts a pull request from a repository other than the canonical one without any read', async (t) => {
+  const fixture = mockPolicyApi(t, { pull: { body: 'Fixes #2' }, issues: { 2: {} } })
+  const event = { pull_request: { number: 10 }, repository: { full_name: 'someone/deepseek-harness' } }
+  assert.deepEqual(await runPullRequestPreflight(event), { eligible: false, needsProject: false })
+  assert.equal(fixture.requests.length, 0)
+  assert.equal(fixture.workflowOutput(), 'eligible=false\nexempt=true\nneeds-project=false\nlegacy-automated=true\n')
+  assert.match(fixture.output.join(''), /Issue policy skipped/)
+  assert.deepEqual(await runPullRequestPreflight({ ...event, repository: { full_name: 'deepseek-harness/deepseek-harness' } }), { eligible: true, needsProject: true })
+  assert.ok(fixture.requests.length > 0)
+})
+
 test('validates informational Issues and ignores PR numbers without Project reads', async (t) => {
   const fixture = mockPolicyApi(t, { pull: { body: 'Refs #2; Fixes #3' }, issues: { 2: {}, 3: { pull_request: {} } } })
   const event = { pull_request: { number: 10, draft: true, body: 'Fixes #999' } }

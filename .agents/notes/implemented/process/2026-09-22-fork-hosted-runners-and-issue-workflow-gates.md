@@ -14,17 +14,17 @@ The Issue lifecycle and Issue policy workflows assume the canonical `deepseek-ha
 
 The [CI workflow](../../../../.github/workflows/ci.yml) runner selectors for the three enterprise Linux jobs and the three native Windows jobs add one clause before the enterprise default: when `github.event.repository.fork` is true, the job runs on `ubuntu-latest` or `windows-latest`. Both failover switches keep precedence, so the canonical repository's selection is unchanged, and the aggregate verdict job already targets the standard hosted runner.
 
-The [Issue lifecycle](../../../../.github/workflows/issue-lifecycle.yml) and [Issue policy](../../../../.github/workflows/issue-policy.yml) jobs gate on `github.repository == 'deepseek-harness/deepseek-harness'`. The gate lives in the workflow file rather than the policy script because both workflows check out the default-branch script, which a fork's default branch may not carry yet, and because the lifecycle token step fails before any script runs.
+The [Issue lifecycle](../../../../.github/workflows/issue-lifecycle.yml) job gates on `github.repository == 'deepseek-harness/deepseek-harness'` in the workflow file, because its token step fails before any script runs. The [Issue policy](../../../../.github/workflows/issue-policy.yml) job stays unconditional, as its trusted-preflight contract requires; instead the preflight script exempts an event whose `repository.full_name` is not the canonical repository, writing `exempt=true`, `needs-project=false`, and `legacy-automated=true` so the token and validation steps skip without any API read. The script runs from the default branch, so a fork gains the exemption once its default branch carries this change.
 
 ## Verification
 
-[Workflow tests](../../../../scripts/ci-workflow.spec.ts) pin the fork clause in every enterprise selector, evaluate each selector with the fork flag set to prove the hosted fallback wins only when no failover switch applies, and pin the canonical-repository condition on both issue jobs.
+[Workflow tests](../../../../scripts/ci-workflow.spec.ts) pin the fork clause in every enterprise selector, evaluate each selector with the fork flag set to prove the hosted fallback wins only when no failover switch applies, and pin the canonical-repository condition on the lifecycle job. [Issue-management tests](../../../../.github/issue-management/policy.test.mjs) pin that a non-canonical event is exempt without a request and that the canonical repository still runs the full preflight.
 
 ## Alternatives considered
 
 **Set the failover variables on the fork.** Both switch values name pools the fork still cannot reach, and adding a third value would grow the canonical selector for a case that is not a failover.
 
-**Guard inside the policy script.** The script runs from the default branch, so the guard would not protect a fork whose default branch predates it, and the lifecycle token step fails before the script starts.
+**Gate the policy job in the workflow file too.** The policy workflow's tests require the job and its preflight to stay unconditional so a required check can never be skipped by a workflow edit; the script-level exemption keeps that contract and still costs a fork nothing but one checkout.
 
 **Remove the enterprise pools from the fork's workflows.** That diverges the fork's CI from upstream on every sync; one additive clause merges cleanly and keeps the canonical behavior byte-for-byte when the flag is false.
 
