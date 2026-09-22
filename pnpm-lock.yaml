@@ -2487,6 +2487,9 @@ importers:
       '@deepseek-ai/dsh-command-goal':
         specifier: workspace:^
         version: link:../../goal/command-goal
+      '@deepseek-ai/dsh-command-jev':
+        specifier: workspace:^
+        version: link:../../jev/command-jev
       '@deepseek-ai/dsh-compaction-basic':
         specifier: workspace:^
         version: link:../../compaction/compaction-basic
@@ -2589,6 +2592,9 @@ importers:
       '@deepseek-ai/dsh-tool-goal':
         specifier: workspace:^
         version: link:../../goal/tool-goal
+      '@deepseek-ai/dsh-tool-jev':
+        specifier: workspace:^
+        version: link:../../jev/tool-jev
       '@deepseek-ai/dsh-tool-jobs':
         specifier: workspace:^
         version: link:../../jobs/tool-jobs

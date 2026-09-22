@@ -139,6 +139,10 @@
             config:
               fetch: true
               searchTimeoutMs: 60000
+          - id: command-jev
+            name: '@deepseek-ai/dsh-command-jev'
+          - id: tool-jev
+            name: '@deepseek-ai/dsh-tool-jev'
           - id: present
             name: '@deepseek-ai/dsh-tool-present'
           - id: tool-plugin-manager

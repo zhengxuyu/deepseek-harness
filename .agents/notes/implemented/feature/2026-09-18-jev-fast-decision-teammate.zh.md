@@ -18,7 +18,7 @@ Jev 作为 `packages/jev/` 下的能力家族加入 harness：
 2. `@deepseek-ai/dsh-tool-jev`（`packages/jev/tool-jev`）注册面向模型的 `jev` 工具和把 Jev 介绍为快思考队友的 `tool:jev` 提示词区段。工具只发送模型提供的 `state`，接受一次调用中的多个独立问题，强制执行 schema DSL 无法表达的跨字段规则，并以整数百分比概率和 confidence 渲染每个答案。
 3. `@deepseek-ai/dsh-command-jev`（`packages/jev/command-jev`）注册用户的 `/jev` 命令。其语法是 `question` 表示是／否判断，或 `question | option | option` 表示 choice；其状态是会话中最新的人类文本和模型文本，按数量和字符数限制。答案直接渲染，并作为 `command-jev` 通知注入接收的 agent，使用户的咨询在 agent 的下一个步骤成为共享上下文。
 
-`dsh-base` 组合包挂载全部三行，并把该 seam 路由到 OpenRouter（`baseURL: https://openrouter.ai/api`、`model: typesafe/jev-1.13`、`apiKeyEnv: OPENROUTER_API_KEY`）：OpenRouter 原样提供 TypeSafe 的 System One 端点，一个 OpenRouter 密钥就能同时覆盖 Jev 和部署已经路由到那里的其他模型；包默认值仍指向 `api.typesafe.ai`，供直接持有 TypeSafe 密钥的场景使用。没有密钥的部署保持工具和命令可见；此时调用以 `JEV_CREDENTIAL_MISSING` 失败并给出应存储的引用，遵循 web seam 的规则：凭据状态是执行时事实，而非注册时事实。
+`dsh-base` 组合包挂载全部三行，并把该 seam 路由到 OpenRouter（`baseURL: https://openrouter.ai/api`、`model: typesafe/jev-1.13`、`apiKeyEnv: OPENROUTER_API_KEY`）：OpenRouter 原样提供 TypeSafe 的 System One 端点，一个 OpenRouter 密钥就能同时覆盖 Jev 和部署已经路由到那里的其他模型；包默认值仍指向 `api.typesafe.ai`，供直接持有 TypeSafe 密钥的场景使用。Web 组合包在全局禁用工具行与命令行，并把它们列入自己的 `cordis` 与 `standard` agent preset，与 goal 的工具和命令做法相同，因此 agent 看到的工具来自它的 preset。没有密钥的部署保持工具和命令可见；此时调用以 `JEV_CREDENTIAL_MISSING` 失败并给出应存储的引用，遵循 web seam 的规则：凭据状态是执行时事实，而非注册时事实。
 
 ### 为什么 seam 与厂商共用一个包
 

@@ -538,6 +538,12 @@
 - id: tool-web
   disabled: true
 
+- id: command-jev
+  disabled: true
+
+- id: tool-jev
+  disabled: true
+
 # The preset selection registry. The shipped preset declarations follow as
 # separate patch files under `presets/`, listed after this file in
 # `package.json` `dsh.bundle.patch`.
