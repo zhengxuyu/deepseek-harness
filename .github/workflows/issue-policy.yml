@@ -27,7 +27,10 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          if [ -f .github/issue-management/selective-preflight.json ]; then
+          if [ -n "$GITHUB_REPOSITORY" ] && [ "$GITHUB_REPOSITORY" != 'deepseek-harness/deepseek-harness' ]; then
+            printf 'eligible=false\nexempt=true\nneeds-project=false\nlegacy-automated=true\n' >> "$GITHUB_OUTPUT"
+            echo "Issue policy skipped: $GITHUB_REPOSITORY is not the canonical repository."
+          elif [ -f .github/issue-management/selective-preflight.json ]; then
             node .github/issue-management/policy.mjs pr-preflight
           else
             node --input-type=module <<'NODE'

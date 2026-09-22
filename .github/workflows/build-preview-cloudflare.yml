@@ -32,6 +32,9 @@ env:
 
 jobs:
   preview:
+    # The deploy and its verification need the canonical repository's Cloudflare
+    # secrets; a fork has none, so it skips the preview instead of failing it.
+    if: github.repository == 'deepseek-harness/deepseek-harness'
     runs-on: ubuntu-24.04
     name: cloudflare pages preview
     steps:

@@ -86,15 +86,30 @@ export async function lifecyclePullRequestSnapshot(number) {
   }
 }
 
+const CANONICAL_REPOSITORY = `${config.organization}/${config.repository}`
+
 const EXEMPT_MESSAGE =
   'Issue policy exempt：当前 PR 不在强制范围（Draft、Bot/App 或尚无 review request/review）。\n'
 
 /**
  * Determine current policy eligibility and Project access needs without Project credentials.
- * @param {{pull_request: {number: number}}} event GitHub event identifying the PR.
- * @returns {Promise<{eligible: boolean, needsProject: boolean}>} Trusted workflow decisions.
+ * @param {{pull_request: {number: number}, repository?: {full_name: string}}} event GitHub event identifying the PR and its repository.
+ * @returns {Promise<{eligible: boolean, needsProject: boolean}>} Trusted workflow decisions; a repository other than the canonical one is exempt without any API read.
  */
 export async function runPullRequestPreflight(event) {
+  const repository = event.repository?.full_name
+  if (repository !== undefined && repository !== CANONICAL_REPOSITORY) {
+    // A fork has neither the canonical pull request nor the Project board;
+    // exempt it here, before the workflow mints any token or validates.
+    if (process.env.GITHUB_OUTPUT) {
+      fs.appendFileSync(
+        process.env.GITHUB_OUTPUT,
+        'eligible=false\nexempt=true\nneeds-project=false\nlegacy-automated=true\n',
+      )
+    }
+    process.stdout.write(`Issue policy skipped：${repository} 不是 ${CANONICAL_REPOSITORY}。\n`)
+    return { eligible: false, needsProject: false }
+  }
   const pull = await pullRequestSnapshot(event.pull_request.number, false)
   const eligible = requiresPullRequestPolicy(pull)
   const needsProject = eligible && pull.references.resolving.length > 0

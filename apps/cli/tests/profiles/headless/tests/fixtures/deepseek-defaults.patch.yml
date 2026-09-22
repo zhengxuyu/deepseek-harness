@@ -10,7 +10,9 @@
     baseURL: !!js process.env.DSH_SNAPSHOT_BASE_URL
     thinking: enabled
     reasoningEffort: low
-    streamIdleTimeoutMs: 150
+    # Standard hosted runners can stall the fixture's 60 ms keep-alives past a
+    # tight idle budget, which would retry the request and break its count.
+    streamIdleTimeoutMs: 1000
 
 - id: agent-loop
   config:
