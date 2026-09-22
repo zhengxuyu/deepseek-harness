@@ -68,6 +68,8 @@ import type PluginManager from '@deepseek-ai/dsh-plugin-manager'
 import * as PluginManagerTools from '@deepseek-ai/dsh-plugin-manager/tools'
 import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
 import McpResources from '@deepseek-ai/dsh-mcp-resources'
+import JevRuntime from '@deepseek-ai/dsh-jev'
+import * as ToolJev from '@deepseek-ai/dsh-tool-jev'
 import * as ToolSubagent from '@deepseek-ai/dsh-tool-subagent'
 import { registerListSubagentModels } from '../packages/subagent/tool-subagent/src/list-models.ts'
 import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
@@ -653,6 +655,21 @@ const TOOL_PACKAGES: ToolPackage[] = [
       // Schema harvest never prepares a payload; the directory need not exist.
       await ctx.plugin(ToolWorkspaceDependencies, { source: resolve(root, '.tmp/tool-catalog/primary-runtime') })
     },
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-jev',
+    dir: 'tool-jev',
+    source: 'packages/jev/tool-jev/src/index.ts',
+    requires: ['ctx.tools', 'ctx.jev', 'ctx.systemPrompt'],
+    writes: ['tool/call', 'tool/result'],
+    async mount(ctx) {
+      // The schema does not depend on credential availability: the seam
+      // resolves the key at execution time.
+      await ctx.plugin(JevRuntime)
+      await ctx.plugin(ToolJev)
+    },
+    note:
+      'jev is the model-facing consult of Jev, the fast-thinking System One teammate; the seam validates each answer before the tool renders it.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-web',

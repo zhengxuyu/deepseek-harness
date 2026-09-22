@@ -1,0 +1,6 @@
+# The Jev seam resolves its key per call; pointing it at an unset reference
+# makes the /jev result deterministic and keyless (the credential-missing
+# error row) while still exercising the real command, projection, and bubble.
+- id: jev
+  config:
+    apiKeyEnv: DSH_WEB_E2E_JEV_UNSET

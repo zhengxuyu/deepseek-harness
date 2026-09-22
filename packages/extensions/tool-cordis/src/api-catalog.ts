@@ -1248,6 +1248,26 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'jev',
+    summary: 'The Jev judgment service, registered as `ctx.jev`.',
+    description: 'The Jev judgment service, registered as `ctx.jev`. One request is one `decide()` call; questions inside it run in parallel on the provider and cannot see one another\'s answers.',
+    methods: [
+      {
+        signature: 'describe(): JevEndpointInfo',
+        description: 'Describe the endpoint without exposing any credential value.',
+        parameters: [],
+        returns: 'the credential reference, base URL, and default model in force.',
+      },
+      {
+        signature: 'async decide(request: JevRequest, signal?: AbortSignal): Promise<JevResult>',
+        description: 'Answer one request. Validation failures reject before any network call; the credential is resolved per call so a stored or rotated key reaches the next request without a restart.',
+        parameters: [{ name: 'request', description: 'state plus at least one typed question.' }, { name: 'signal', description: 'optional cancellation; an abort rejects as `JEV_ABORTED`.' }],
+        returns: 'one validated answer per question id.',
+        throws: ['{JevError} with a code from the {@link JevError} taxonomy.'],
+      },
+    ],
+  },
+  {
     key: 'jobController',
     summary: 'Host service backing the generated `ctx.remote.job` namespace.',
     description: 'Host service backing the generated `ctx.remote.job` namespace.',
@@ -5138,6 +5158,54 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'InvokeRemoteRequest',
     declaration: 'export interface InvokeRemoteRequest {\n    readonly namespace: string;\n    readonly method: string;\n    readonly args: Readonly<Record<string, unknown>>;\n    readonly uplink?: AsyncIterable<unknown>;\n    readonly peer?: PeerScope;\n    readonly signal?: AbortSignal;\n}',
+  },
+  {
+    name: 'JevAnswer',
+    declaration: 'export type JevAnswer = JevChoiceAnswer | JevNoulAnswer | JevScoreAnswer;',
+  },
+  {
+    name: 'JevChoiceAnswer',
+    declaration: 'export interface JevChoiceAnswer {\n    readonly type: \'choice\';\n    readonly choice: string;\n    readonly probabilities: Readonly<Record<string, number>>;\n    readonly confidence: number;\n}',
+  },
+  {
+    name: 'JevChoiceQuestion',
+    declaration: 'export interface JevChoiceQuestion {\n    readonly type: \'choice\';\n    readonly instructions: string;\n    readonly options: Readonly<Record<string, string | null>>;\n}',
+  },
+  {
+    name: 'JevEndpointInfo',
+    declaration: 'export interface JevEndpointInfo {\n    readonly apiKeyEnv: CredentialRef;\n    readonly baseURL: string;\n    readonly model: string;\n}',
+  },
+  {
+    name: 'JevNoulAnswer',
+    declaration: 'export interface JevNoulAnswer {\n    readonly type: \'noul\';\n    readonly noul: number;\n}',
+  },
+  {
+    name: 'JevNoulQuestion',
+    declaration: 'export interface JevNoulQuestion {\n    readonly type: \'noul\';\n    readonly instructions: string;\n}',
+  },
+  {
+    name: 'JevQuestion',
+    declaration: 'export type JevQuestion = JevChoiceQuestion | JevNoulQuestion | JevScoreQuestion;',
+  },
+  {
+    name: 'JevRequest',
+    declaration: 'export interface JevRequest {\n    readonly state: JsonValue;\n    readonly questions: Readonly<Record<string, JevQuestion>>;\n    readonly model?: string;\n}',
+  },
+  {
+    name: 'JevResult',
+    declaration: 'export interface JevResult {\n    readonly model: string;\n    readonly answers: Readonly<Record<string, JevAnswer>>;\n    readonly usage: JevUsage;\n}',
+  },
+  {
+    name: 'JevScoreAnswer',
+    declaration: 'export interface JevScoreAnswer {\n    readonly type: \'score\';\n    readonly score: number;\n    readonly legend: Readonly<Record<string, string>>;\n    readonly probabilities: Readonly<Record<string, number>>;\n    readonly confidence: number;\n}',
+  },
+  {
+    name: 'JevScoreQuestion',
+    declaration: 'export interface JevScoreQuestion {\n    readonly type: \'score\';\n    readonly instructions: string;\n    readonly levels: readonly string[];\n}',
+  },
+  {
+    name: 'JevUsage',
+    declaration: 'export interface JevUsage {\n    readonly inputTokens: number;\n    readonly outputTokens: number;\n}',
   },
   {
     name: 'JobAppendOptions',

@@ -132,6 +132,10 @@ flowchart LR
   cfg --> plugin_dsh_base_compaction_basic
   plugin_dsh_base_command_compact["command-compact<br/>@deepseek-ai/dsh-command-compact"]
   cfg --> plugin_dsh_base_command_compact
+  plugin_dsh_base_jev["jev<br/>@deepseek-ai/dsh-jev"]
+  cfg --> plugin_dsh_base_jev
+  plugin_dsh_base_command_jev["command-jev<br/>@deepseek-ai/dsh-command-jev"]
+  cfg --> plugin_dsh_base_command_jev
   plugin_dsh_base_subagent["subagent<br/>@deepseek-ai/dsh-subagent"]
   cfg --> plugin_dsh_base_subagent
   plugin_dsh_base_subagent_spawn_in_process["subagent-spawn-in-process<br/>@deepseek-ai/dsh-subagent-spawn-in-process"]
@@ -182,6 +186,8 @@ flowchart LR
   cfg --> plugin_dsh_base_tool_web
   plugin_dsh_base_mcp_resources["mcp-resources<br/>@deepseek-ai/dsh-mcp-resources"]
   cfg --> plugin_dsh_base_mcp_resources
+  plugin_dsh_base_tool_jev["tool-jev<br/>@deepseek-ai/dsh-tool-jev"]
+  cfg --> plugin_dsh_base_tool_jev
   plugin_dsh_base_tools["tools<br/>@deepseek-ai/dsh-tools"]
   cfg --> plugin_dsh_base_tools
   plugin_dsh_base_system_prompt["system-prompt<br/>@deepseek-ai/dsh-system-prompt"]
@@ -258,6 +264,8 @@ flowchart LR
 | `token-meter` | `@deepseek-ai/dsh-token-meter` |
 | `compaction-basic` | `@deepseek-ai/dsh-compaction-basic` |
 | `command-compact` | `@deepseek-ai/dsh-command-compact` |
+| `jev` | `@deepseek-ai/dsh-jev` |
+| `command-jev` | `@deepseek-ai/dsh-command-jev` |
 | `subagent` | `@deepseek-ai/dsh-subagent` |
 | `subagent-spawn-in-process` | `@deepseek-ai/dsh-subagent-spawn-in-process` |
 | `subagent-fork-in-process` | `@deepseek-ai/dsh-subagent-fork-in-process` |
@@ -283,6 +291,7 @@ flowchart LR
 | `web-fetch-http` | `@deepseek-ai/dsh-web-fetch-http` |
 | `tool-web` | `@deepseek-ai/dsh-tool-web` |
 | `mcp-resources` | `@deepseek-ai/dsh-mcp-resources` |
+| `tool-jev` | `@deepseek-ai/dsh-tool-jev` |
 | `tools` | `@deepseek-ai/dsh-tools` |
 | `system-prompt` | `@deepseek-ai/dsh-system-prompt` |
 | `agent-loop` | `@deepseek-ai/dsh-agent-loop` |

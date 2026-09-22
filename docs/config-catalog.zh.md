@@ -566,7 +566,27 @@ Depends on: `Volatile` (`@deepseek-ai/cordis`)
 
 来源： [`packages/client/ui-theme/src/index.ts:22`](../packages/client/ui-theme/src/index.ts)
 
-<a id="deepseek-aidsh-compaction-basic"></a>
+<a id="deepseek-aidsh-command-jev"></a>
+
+## `@deepseek-ai/dsh-command-jev`
+
+需要：`commands` · `jev`
+
+```ts config-catalog
+/** Plugin config: how much recent conversation Jev sees and how long the command waits. */
+export interface Config {
+  /** Newest user and assistant messages included as state. Defaults to 12. */
+  contextMessages?: number
+  /** Upper bound on conversation characters included as state; older messages drop first. Defaults to 16000. */
+  contextChars?: number
+  /** Answer deadline in milliseconds. Defaults to 30000. */
+  timeoutMs?: number
+}
+```
+
+来源：[`packages/jev/command-jev/src/index.ts:58`](../packages/jev/command-jev/src/index.ts)
+
+<a id="deepseek-aidsh-command-jev"></a>
 
 ## `@deepseek-ai/dsh-compaction-basic`
 
@@ -1387,7 +1407,27 @@ export interface Config {
 
 来源： [`packages/runtime-diagnostics/invariants/src/index.ts:15`](../packages/runtime-diagnostics/invariants/src/index.ts)
 
-<a id="deepseek-aidsh-jobs-local"></a>
+<a id="deepseek-aidsh-jev"></a>
+
+## `@deepseek-ai/dsh-jev`
+
+```ts config-catalog
+/** Plugin config: credential reference, endpoint, and model. Secrets stay out of configuration through `apiKeyEnv`. */
+export interface Config {
+  /** Literal TypeSafe API key; prefer {@link apiKeyEnv} so no secret enters configuration files. A non-empty literal wins. */
+  apiKey?: string
+  /** Credential reference resolved for each request; defaults to `TYPESAFE_API_KEY`. */
+  apiKeyEnv?: string
+  /** Endpoint base; `/v1/systemone` is appended. Falls back to `$TYPESAFE_BASE_URL`, then the public API. */
+  baseURL?: string
+  /** Model sent when a request names none. Defaults to `jev-latest`. */
+  model?: string
+}
+```
+
+来源：[`packages/jev/jev/src/index.ts:69`](../packages/jev/jev/src/index.ts)
+
+<a id="deepseek-aidsh-jev"></a>
 
 ## `@deepseek-ai/dsh-jobs-local`
 
@@ -3177,7 +3217,7 @@ export interface Config {
 }
 ```
 
-来源： [`packages/core/system-prompt/src/index.ts:247`](../packages/core/system-prompt/src/index.ts)
+来源： [`packages/core/system-prompt/src/index.ts:248`](../packages/core/system-prompt/src/index.ts)
 
 <a id="deepseek-aidsh-terminal-bash"></a>
 
@@ -3400,7 +3440,27 @@ export interface Config {
 
 来源： [`packages/goal/tool-goal/src/index.ts:32`](../packages/goal/tool-goal/src/index.ts)
 
-<a id="deepseek-aidsh-tool-jobs"></a>
+<a id="deepseek-aidsh-tool-jev"></a>
+
+## `@deepseek-ai/dsh-tool-jev`
+
+需要：`tools` · `jev` · `systemPrompt`
+
+```ts config-catalog
+/** Plugin config: the per-call budgets the deployment allows the model to spend on Jev. */
+export interface Config {
+  /** Cooperative timeout budget (ms) attached to the tool definition. Defaults to 30000. */
+  timeoutMs?: number
+  /** Upper bound on questions in one call. Defaults to 16. */
+  maxQuestions?: number
+  /** Upper bound on serialized `state` characters in one call. Defaults to 64000. */
+  maxStateChars?: number
+}
+```
+
+来源：[`packages/jev/tool-jev/src/index.ts:27`](../packages/jev/tool-jev/src/index.ts)
+
+<a id="deepseek-aidsh-tool-jev"></a>
 
 ## `@deepseek-ai/dsh-tool-jobs`
 
@@ -4115,6 +4175,7 @@ export interface Config {
 - `@deepseek-ai/dsh-client-ui-directory-picker-native`（[`packages/client/ui-directory-picker-native/src/index.ts`](../packages/client/ui-directory-picker-native/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-goal`（[`packages/client/ui-goal/src/index.ts`](../packages/client/ui-goal/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-input-trigger`（[`packages/client/ui-input-trigger/src/index.ts`](../packages/client/ui-input-trigger/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-jev`（[`packages/client/ui-jev/src/index.ts`](../packages/client/ui-jev/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-jobs`（[`packages/client/ui-jobs/src/index.ts`](../packages/client/ui-jobs/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-layout`（[`packages/client/ui-layout/src/index.ts`](../packages/client/ui-layout/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-message-feedback`（[`packages/client/ui-message-feedback/src/index.ts`](../packages/client/ui-message-feedback/src/index.ts)）

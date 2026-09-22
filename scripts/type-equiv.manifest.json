@@ -1507,6 +1507,21 @@
       "source": "packages/web/web/src/types.ts"
     },
     {
+      "doc": "docs/subsystems/jev.md",
+      "symbol": "JevRequest",
+      "source": "packages/jev/jev/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/jev.md",
+      "symbol": "JevResult",
+      "source": "packages/jev/jev/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/jev.md",
+      "symbol": "JevEndpointInfo",
+      "source": "packages/jev/jev/src/index.ts"
+    },
+    {
       "doc": "docs/subsystems/spill.md",
       "symbol": "SaveTextSpill",
       "source": "packages/spill/spill/src/types.ts"

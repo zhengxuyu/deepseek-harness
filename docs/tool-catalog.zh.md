@@ -48,6 +48,7 @@
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`、`owning Agent session` | `tool/call`、`todo/write`、`tool/result` | - | todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为检查清单。`allowParallelInProgress` 是没有默认值的必填项，因此本目录明确选择 `true`，对应描述允许同时存在多个 `in_progress` 项。选择 `false` 的部署会获得同一工具，但描述会要求只能有 1 个活动任务。 |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`、`ctx.workflowEngine`、`ctx.systemPrompt`、`a calling Agent (exec.agent parents the script children)` | `tool/call`、`tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-workspace-dependencies` | `load_workspace_dependencies` | `ctx.tools` | `tool/call`, `tool/result` | - | - |
+| `@deepseek-ai/dsh-tool-jev` | `jev` | `ctx.tools`、`ctx.jev`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | jev 是面向模型的 Jev 咨询入口，Jev 是快思考的 System One 队友；seam 会在工具渲染之前校验每个答案。 |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`、`web_search` | `ctx.tools`、`ctx.web`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | web_search 和 web_fetch 将提供方选择置于 ctx.web 之后，使模型可见 schema 在更换后端时保持稳定。 |
 
 <a id="deepseek-aidsh-plugin-manager"></a>
@@ -2471,6 +2472,84 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
 ```
 
 来源：[`packages/skill/tool-workspace-dependencies/src/index.ts`](../packages/skill/tool-workspace-dependencies/src/index.ts)
+
+<a id="deepseek-aidsh-tool-jev"></a>
+
+## `@deepseek-ai/dsh-tool-jev`
+
+### `jev`
+
+向快思考的队友 Jev 索取关于你所提供事实的校准判断。Jev 是 System One 模型：它不推理、不浏览、不写文本，只返回带概率的类型化答案。发送完整的 `state`（Jev 看不到其他任何东西）以及一个或多个相互独立的问题：`choice` 从具名选项中选出一个，`noul` 给出某条件成立的概率，`score` 沿有序等级评分。用于那些取决于语义阅读的快速决策——在候选之间取舍、分诊、排序、检查某个条件——而不是查找、算术或 `state` 之外的事实。把针对同一状态的所有独立问题放在一次调用中提出。
+```json
+{
+  "type": "object",
+  "properties": {
+    "state": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "additionalProperties": true
+        }
+      ],
+      "description": "Everything the judgment needs: source text, candidates, constraints, current facts. Prefer an object with named fields when the context has several parts."
+    },
+    "questions": {
+      "type": "array",
+      "description": "Independent questions about the same state, at most 16. Each id must be unique.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Your own handle for the answer; never shown to Jev."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "choice",
+              "noul",
+              "score"
+            ]
+          },
+          "instructions": {
+            "type": "string",
+            "description": "The complete question, standing alone. Reference nested state with backticked paths such as `ticket.messages[0].text`."
+          },
+          "options": {
+            "type": "object",
+            "description": "choice only: option name → short description, or null when the name explains itself. Include a no-match option when nothing may fit.",
+            "additionalProperties": true
+          },
+          "levels": {
+            "type": "array",
+            "description": "score only: 2–10 ordered level descriptions from lowest to highest, each a concrete situation.",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "instructions"
+        ]
+      }
+    }
+  },
+  "required": [
+    "state",
+    "questions"
+  ]
+}
+```
+
+来源：[`packages/jev/tool-jev/src/index.ts`](../packages/jev/tool-jev/src/index.ts)
+
+jev 是面向模型的 Jev 咨询入口，Jev 是快思考的 System One 队友；seam 会在工具渲染之前校验每个答案。
 
 <a id="deepseek-aidsh-tool-web"></a>
 

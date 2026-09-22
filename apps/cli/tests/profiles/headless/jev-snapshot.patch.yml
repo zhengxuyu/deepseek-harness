@@ -1,0 +1,41 @@
+# Keyless Jev patch over the shipped headless profile: a scripted adapter
+# drives one `jev` tool call and a loopback TypeSafe stand-in answers it, so
+# the recorded stream pins the model-visible tool round trip without any key.
+- id: headless-startup
+  disabled: true
+
+- id: headless-runner
+  disabled: true
+
+- id: llm-deepseek
+  disabled: true
+
+- id: agent-loop
+  config:
+    agents:
+      - id: main
+        provider: deepseek-official
+        model: deepseek-v4-flash
+        cwd: !!js process.cwd()
+
+- id: session-persistence-jsonl
+  config:
+    root: './.sessions'
+    compression: none
+
+- insert:
+    - id: jev-fixture-llm
+      name: ./tests/fixtures/jev-llm.mjs
+    - id: jev-fixture-server
+      name: ./tests/fixtures/jev-fixture-server.mjs
+
+# The literal key and fixed loopback base are the stand-in's contract; a real
+# deployment names a credential reference instead.
+- id: jev
+  config:
+    apiKey: jev-snapshot-key
+    baseURL: http://127.0.0.1:43119
+
+- id: session-log-deepseek
+  config:
+    enabled: false

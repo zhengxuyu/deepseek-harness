@@ -843,8 +843,8 @@ describe('dsh-subagent-dsh-sdk provider', () => {
     // separate harness whose own composition decides which routes resolve, so
     // an unstated one must fail at mount rather than at the first delegation.
     const base = { providerName: 'sdk', command: 'true', args: [], env: {}, dshHome: '/tmp/dsh-home' }
-    await expect(ctx.plugin(sdk, { ...base, model: 'm' } as unknown as sdk.Config)).rejects.toThrow('provider')
-    await expect(ctx.plugin(sdk, { ...base, provider: 'p' } as unknown as sdk.Config)).rejects.toThrow('model')
+    await expect(ctx.plugin(sdk, { ...base, model: 'm' } as never)).rejects.toThrow('provider')
+    await expect(ctx.plugin(sdk, { ...base, provider: 'p' } as never)).rejects.toThrow('model')
     expect(ctx.subagents.getProvider('sdk')).toBeUndefined()
     await ctx.fiber.dispose()
   })

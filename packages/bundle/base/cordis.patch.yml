@@ -345,6 +345,21 @@
     - id: command-compact
       name: '@deepseek-ai/dsh-command-compact'
 
+    # Jev, the fast-thinking System One teammate, reached through OpenRouter's
+    # System One endpoint (same body and answers as api.typesafe.ai). The seam
+    # resolves OPENROUTER_API_KEY per call, so the rows stay mounted keyless
+    # and a call without a key fails as JEV_CREDENTIAL_MISSING; `/jev` shares
+    # each human consult with the agent as a notice.
+    - id: jev
+      name: '@deepseek-ai/dsh-jev'
+      config:
+        apiKeyEnv: OPENROUTER_API_KEY
+        baseURL: https://openrouter.ai/api
+        model: typesafe/jev-1.13
+
+    - id: command-jev
+      name: '@deepseek-ai/dsh-command-jev'
+
     - id: subagent
       name: '@deepseek-ai/dsh-subagent'
 
@@ -490,6 +505,8 @@
 
     - id: mcp-resources
       name: '@deepseek-ai/dsh-mcp-resources'
+    - id: tool-jev
+      name: '@deepseek-ai/dsh-tool-jev'
 
     # ── rows every mode mounts, whose values each overlay may state ──────────────
 

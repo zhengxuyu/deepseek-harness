@@ -1,0 +1,15 @@
+- banner:
+  - navigation "Session hierarchy": workspace
+  - text: Standard mode
+  - button "More actions"
+  - button "Open right sidebar"
+  - tablist:
+    - tab "Chat" [selected]
+    - tab "Trajectory"
+- group "Question to Jev": /jev Which storage fits? | sqlite | jsonl
+- group "Answer from Jev": "Jev · fast-thinking teammate Jev is unavailable (JEV_CREDENTIAL_MISSING): no TypeSafe API key resolves for DSH_WEB_E2E_JEV_UNSET; store it through the credentials seam or the environment"
+- textbox "Message or run a task, / commands, @ files or sessions"
+- button "Add files or run commands"
+- 'button "Access mode, current: Workspace Write"': Workspace Write
+- button "Select model, current DeepSeek-V4-Flash": DeepSeek-V4-Flash
+- button "Send message" [disabled]
