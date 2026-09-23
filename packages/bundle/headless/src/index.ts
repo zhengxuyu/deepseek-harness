@@ -3,8 +3,9 @@
  * rides over dsh-base without Host, HTTP, or browser plugins; this runner
  * creates one Agent through the core registry (or adopts the exact Session a
  * `--session-id` names), drives the task to quiescence, streams provider
- * reasoning to stderr, flushes its Session, prints the final assistant text to
- * stdout, and exits. With `--json` it projects the run as newline-delimited
+ * reasoning to stderr, lets an optional settlement provider follow delegated
+ * work, flushes its Session, prints the final assistant text to stdout, and
+ * exits. With `--json` it projects the run as newline-delimited
  * events instead of the final text.
  *
  * @module @deepseek-ai/dsh-headless
@@ -53,6 +54,34 @@ export const Config: z<Config> = z.object({
   sessionId: z.string(),
   json: z.boolean(),
 })
+
+/** What a settlement provider could not collect before the run ended. */
+export interface HeadlessSettlementReport {
+  /** One line per piece of delegated work that did not settle; empty when everything did. */
+  readonly unsettled: readonly string[]
+}
+
+/**
+ * Optional host service consulted after the root turn ends. A provider that
+ * tracks work the root delegated waits for it here and reports what never
+ * settled; without one the runner exits as soon as the root turn ends.
+ */
+export interface HeadlessSettlement {
+  /**
+   * Wait until the root is idle with no delegated work outstanding, or until
+   * the provider gives up on what remains and records that.
+   * @param root - the run's exact live root Agent, idle when called.
+   * @returns the work that did not settle; the root is idle when this resolves.
+   */
+  settle(root: Agent): Promise<HeadlessSettlementReport>
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Delegated-work settlement for one-shot runs; provided by a plugin that tracks delegation. */
+    headlessSettlement?: HeadlessSettlement
+  }
+}
 
 /** Outcome of one owned run interval. */
 interface RunOutcome {
@@ -360,6 +389,7 @@ async function run(ctx: Context, config: Config, io: HeadlessIo): Promise<void> 
   const firstSeq = agent.session.seq
   const projection = config.json === true ? projectJsonRun(ctx, agent, io.stdout, { cwd }) : undefined
   const stopReasoning = projection === undefined ? streamReasoning(ctx, agent, io.stderr) : undefined
+  let report: HeadlessSettlementReport
   try {
     try {
       agent.followup(createUserMessage({
@@ -367,6 +397,10 @@ async function run(ctx: Context, config: Config, io: HeadlessIo): Promise<void> 
         source: { kind: 'user' },
       }))
       await agent.whenIdle()
+      // The root turn ending is not the run ending when the root delegated work:
+      // a settlement provider follows that work and may wake the root again.
+      const settlement = ctx.get('headlessSettlement')
+      report = settlement === undefined ? { unsettled: [] } : await settlement.settle(agent)
     } finally {
       stopReasoning?.()
     }
@@ -377,7 +411,8 @@ async function run(ctx: Context, config: Config, io: HeadlessIo): Promise<void> 
     if (outcome.reason?.kind === 'error') {
       io.stderr.write(`dsh: ${outcome.reason.error.code}: ${outcome.reason.error.message}\n`)
     }
-    io.exit(outcome.reason?.kind === 'completed' ? 0 : 1)
+    for (const row of report.unsettled) io.stderr.write(`dsh: unsettled: ${row}\n`)
+    io.exit(outcome.reason?.kind === 'completed' && report.unsettled.length === 0 ? 0 : 1)
   } finally {
     projection?.dispose()
   }

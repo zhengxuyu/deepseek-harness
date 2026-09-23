@@ -67,8 +67,19 @@ export interface TeamMemberView {
   readonly diagnostics: string[]
 }
 
-/** Durable task lifecycle. */
-export type TeamTaskStatus = 'pending' | 'in_progress' | 'completed' | 'deleted'
+/**
+ * Durable task lifecycle. `lost` is entered only by the harness, when an
+ * in-progress task's owner can no longer finish it; the owner stays recorded
+ * and only `reopen` clears it.
+ */
+export type TeamTaskStatus = 'pending' | 'in_progress' | 'completed' | 'lost' | 'deleted'
+
+/**
+ * Why the harness marked a task `lost`: `owner-failed` when the owning member
+ * or delegated run ended without completing it, `run-ended` when the process
+ * settled the run before the task finished.
+ */
+export type TeamTaskLostCause = 'owner-failed' | 'run-ended'
 
 /** Whole durable task snapshot; every mutation increments {@link revision}. */
 export interface TeamTaskSnapshot {
@@ -77,6 +88,24 @@ export interface TeamTaskSnapshot {
   readonly subject: string
   readonly description: string
   readonly status: TeamTaskStatus
+  readonly ownerId?: SessionId
+  /** Present exactly while {@link status} is `lost`. */
+  readonly lostCause?: TeamTaskLostCause
+  readonly blockedBy: TeamTaskId[]
+  readonly writeScopes: string[]
+}
+
+/**
+ * Task snapshot as written by `team/task` payload version 2, before `lost`
+ * existed: the same record with no lost status and no cause. Read-only; new
+ * snapshots are written at version 3 as {@link TeamTaskSnapshot}.
+ */
+export interface TeamTaskSnapshotV2 {
+  readonly id: TeamTaskId
+  readonly revision: number
+  readonly subject: string
+  readonly description: string
+  readonly status: 'pending' | 'in_progress' | 'completed' | 'deleted'
   readonly ownerId?: SessionId
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
@@ -92,8 +121,19 @@ export interface TeamTaskView {
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
   readonly ownerName?: string
+  readonly lostCause?: TeamTaskLostCause
   readonly ready: boolean
   readonly writeScopeWarnings: string[]
+}
+
+/** One in-progress task that a settling run is still waiting on. */
+export interface OutstandingTeamTask {
+  readonly id: TeamTaskId
+  readonly subject: string
+  /** The Lead, a roster name, or the child Session id of a tracked run. */
+  readonly ownerName: string
+  /** Whether the owner is currently running, so the task can still make progress on its own. */
+  readonly live: boolean
 }
 
 /** Point-in-time roster and task-board projection returned to browser clients. */
@@ -138,6 +178,12 @@ export interface Config {
   readonly maxMessageBytes?: number
   /** Maximum milliseconds allowed for Team-owned runtime disposal. */
   readonly disposalTimeoutMs?: number
+  /**
+   * Record every subagent run delegated below the Lead as an owned in-progress
+   * task on the Lead's board, completed or lost when the run ends. Off by
+   * default: the board then holds only tasks members created.
+   */
+  readonly trackSubagentRuns?: boolean
 }
 
 /** Input for creating one durable teammate. */
@@ -208,8 +254,13 @@ declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
     /** Whole teammate lifecycle value, stored only in the Team Lead Session. */
     'team/member': { version: 2; teamId: TeamId; member: TeamMemberSnapshot }
-    /** Whole shared-task value, stored only in the Team Lead Session. */
-    'team/task': { version: 2; teamId: TeamId; task: TeamTaskSnapshot }
+    /**
+     * Whole shared-task value, stored only in the Team Lead Session. Version 3
+     * adds the `lost` status and `lostCause`; version 2 records stay readable.
+     */
+    'team/task':
+      | { version: 2; teamId: TeamId; task: TeamTaskSnapshotV2 }
+      | { version: 3; teamId: TeamId; task: TeamTaskSnapshot }
     /** Durable mailbox enqueue, stored before delivery is attempted. */
     'team/message/queued': { version: 2; teamId: TeamId; message: TeamMessageSnapshot }
     /** Durable acknowledgement that the target Session recorded the message. */

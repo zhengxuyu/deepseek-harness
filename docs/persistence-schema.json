@@ -16542,7 +16542,7 @@
       "kind": "event",
       "event": "team/task",
       "surface": false,
-      "digest": "d595ec73b32b016a6055333c67a5d646032b22e672da1d4a09c5b1ae398a093a",
+      "digest": "cc80b86c80b0f4a334297abb4b6aa0398ef60abf81d54d3de632b37247458c4f",
       "schema": {
         "root": 0,
         "nodes": [
@@ -16556,43 +16556,50 @@
               },
               {
                 "name": "ignorable",
-                "type": 12,
+                "type": 21,
                 "optional": true
               },
               {
                 "name": "seq",
-                "type": 5,
+                "type": 9,
                 "optional": false
               },
               {
                 "name": "time",
-                "type": 5,
+                "type": 9,
                 "optional": false
               },
               {
                 "name": "type",
-                "type": 13,
+                "type": 22,
                 "optional": false
               }
             ],
             "indices": []
           },
           {
+            "kind": "union",
+            "types": [
+              2,
+              17
+            ]
+          },
+          {
             "kind": "object",
             "properties": [
               {
                 "name": "task",
-                "type": 2,
+                "type": 3,
                 "optional": false
               },
               {
                 "name": "teamId",
-                "type": 4,
+                "type": 5,
                 "optional": false
               },
               {
                 "name": "version",
-                "type": 11,
+                "type": 16,
                 "optional": false
               }
             ],
@@ -16603,42 +16610,47 @@
             "properties": [
               {
                 "name": "blockedBy",
-                "type": 3,
+                "type": 4,
                 "optional": false
               },
               {
                 "name": "description",
-                "type": 4,
-                "optional": false
-              },
-              {
-                "name": "id",
-                "type": 4,
-                "optional": false
-              },
-              {
-                "name": "ownerId",
-                "type": 4,
-                "optional": true
-              },
-              {
-                "name": "revision",
                 "type": 5,
                 "optional": false
               },
               {
-                "name": "status",
+                "name": "id",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "lostCause",
                 "type": 6,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 5,
+                "optional": true
+              },
+              {
+                "name": "revision",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 10,
                 "optional": false
               },
               {
                 "name": "subject",
-                "type": 4,
+                "type": 5,
                 "optional": false
               },
               {
                 "name": "writeScopes",
-                "type": 3,
+                "type": 4,
                 "optional": false
               }
             ],
@@ -16646,11 +16658,26 @@
           },
           {
             "kind": "array",
-            "element": 4
+            "element": 5
           },
           {
             "kind": "primitive",
             "type": "string"
+          },
+          {
+            "kind": "union",
+            "types": [
+              7,
+              8
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "owner-failed"
+          },
+          {
+            "kind": "literal",
+            "value": "run-ended"
           },
           {
             "kind": "primitive",
@@ -16659,10 +16686,11 @@
           {
             "kind": "union",
             "types": [
-              7,
-              8,
-              9,
-              10
+              11,
+              12,
+              13,
+              14,
+              15
             ]
           },
           {
@@ -16679,7 +16707,91 @@
           },
           {
             "kind": "literal",
+            "value": "lost"
+          },
+          {
+            "kind": "literal",
             "value": "pending"
+          },
+          {
+            "kind": "literal",
+            "value": 3
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "task",
+                "type": 18,
+                "optional": false
+              },
+              {
+                "name": "teamId",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 20,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "blockedBy",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "id",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 5,
+                "optional": true
+              },
+              {
+                "name": "revision",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 19,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              11,
+              12,
+              13,
+              15
+            ]
           },
           {
             "kind": "literal",
@@ -22698,7 +22810,7 @@
       },
       "names": [],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:216"
+        "packages/experimental/agent-team/src/types.ts:267"
       ]
     },
     {
@@ -28319,6 +28431,20 @@
           {
             "kind": "literal",
             "value": "developer/message"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
+    },
+    {
+      "digest": "137ac60e26bcb192210d9a32a704b73b0924ed34019323defa1b787be95bd45e",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "literal",
+            "value": 3
           }
         ]
       },
@@ -34699,7 +34825,7 @@
         "packages/experimental/agent-team/src/types.ts#TeamMessageSource"
       ],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:115"
+        "packages/experimental/agent-team/src/types.ts:155"
       ]
     },
     {
@@ -35511,6 +35637,20 @@
           {
             "kind": "literal",
             "value": "approval/policy"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
+    },
+    {
+      "digest": "26b0e99212ec45911085ab6e5b3e9b3c40af5b2a1ce021784ba4d57735e93f7a",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "literal",
+            "value": "run-ended"
           }
         ]
       },
@@ -39389,7 +39529,7 @@
         "packages/experimental/agent-team/src/types.ts#TeamMessageSnapshot"
       ],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:106"
+        "packages/experimental/agent-team/src/types.ts:146"
       ]
     },
     {
@@ -39713,6 +39853,128 @@
       ],
       "sources": [
         "packages/llm/llm/src/call-config.ts:36"
+      ]
+    },
+    {
+      "digest": "32c0b998f3107225c4d6981558d237081359c3d13084d8d12f135c263206f7bf",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "blockedBy",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "id",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "lostCause",
+                "type": 3,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "revision",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 1,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 2
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "union",
+            "types": [
+              4,
+              5
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "run-ended"
+          },
+          {
+            "kind": "literal",
+            "value": "owner-failed"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "union",
+            "types": [
+              8,
+              9,
+              10,
+              11,
+              12
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "completed"
+          },
+          {
+            "kind": "literal",
+            "value": "deleted"
+          },
+          {
+            "kind": "literal",
+            "value": "in_progress"
+          },
+          {
+            "kind": "literal",
+            "value": "lost"
+          },
+          {
+            "kind": "literal",
+            "value": "pending"
+          }
+        ]
+      },
+      "names": [
+        "packages/experimental/agent-team/src/types.ts#TeamTaskSnapshot"
+      ],
+      "sources": [
+        "packages/experimental/agent-team/src/types.ts:85"
       ]
     },
     {
@@ -45131,6 +45393,20 @@
           {
             "kind": "literal",
             "value": "image/jpeg"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
+    },
+    {
+      "digest": "3fb8268f735b7110f4505933d39eede5f6ffe7736f61ced248060d5d9ae35986",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "literal",
+            "value": "lost"
           }
         ]
       },
@@ -51517,10 +51793,10 @@
         ]
       },
       "names": [
-        "packages/experimental/agent-team/src/types.ts#TeamTaskSnapshot"
+        "packages/experimental/agent-team/src/types.ts#TeamTaskSnapshotV2"
       ],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:74"
+        "packages/experimental/agent-team/src/types.ts:103"
       ]
     },
     {
@@ -71305,6 +71581,31 @@
       "sources": []
     },
     {
+      "digest": "9c6db63046b0b1efca43992dc54fb5af9b657e51830af7b6b95a1c1d7f6dd818",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "union",
+            "types": [
+              1,
+              2
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "owner-failed"
+          },
+          {
+            "kind": "literal",
+            "value": "run-ended"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
+    },
+    {
       "digest": "9d80129e13edfb6feb03ed327e6085c6ef60b97ad074244b2f5fd4667424a6a4",
       "schema": {
         "root": 0,
@@ -71312,6 +71613,20 @@
           {
             "kind": "literal",
             "value": "other"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
+    },
+    {
+      "digest": "9da5b2fb6e928fc90291c7a1f90a544eef47cc51e75a562fca91aecbe346caba",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "literal",
+            "value": "owner-failed"
           }
         ]
       },
@@ -72025,6 +72340,151 @@
       "sources": []
     },
     {
+      "digest": "a2c71c5fb188606992ab92d23a8a1cc7d47d558fdb9144b89fcb19befb319dd4",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "task",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "teamId",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 14,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "blockedBy",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "id",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "lostCause",
+                "type": 4,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 3,
+                "optional": true
+              },
+              {
+                "name": "revision",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 8,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 2,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 3
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "union",
+            "types": [
+              5,
+              6
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "owner-failed"
+          },
+          {
+            "kind": "literal",
+            "value": "run-ended"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "union",
+            "types": [
+              9,
+              10,
+              11,
+              12,
+              13
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "completed"
+          },
+          {
+            "kind": "literal",
+            "value": "pending"
+          },
+          {
+            "kind": "literal",
+            "value": "deleted"
+          },
+          {
+            "kind": "literal",
+            "value": "in_progress"
+          },
+          {
+            "kind": "literal",
+            "value": "lost"
+          },
+          {
+            "kind": "literal",
+            "value": 3
+          }
+        ]
+      },
+      "names": [],
+      "sources": [
+        "packages/experimental/agent-team/src/types.ts:263"
+      ]
+    },
+    {
       "digest": "a3a259a1aa5401af786ce08c4a8419681d3000d73467991b5fc563389bc4ebd2",
       "schema": {
         "root": 0,
@@ -72212,7 +72672,7 @@
       },
       "names": [],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:212"
+        "packages/experimental/agent-team/src/types.ts:262"
       ]
     },
     {
@@ -77149,7 +77609,7 @@
       },
       "names": [],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:210"
+        "packages/experimental/agent-team/src/types.ts:256"
       ]
     },
     {
@@ -77334,12 +77794,8 @@
           }
         ]
       },
-      "names": [
-        "packages/experimental/agent-team/src/types.ts#TeamTaskStatus"
-      ],
-      "sources": [
-        "packages/experimental/agent-team/src/types.ts:71"
-      ]
+      "names": [],
+      "sources": []
     },
     {
       "digest": "b3681c026a0b98e98b103f057dfd217fbe904129c090efd668253ec9aea7fece",
@@ -79277,6 +79733,236 @@
           {
             "kind": "literal",
             "value": "finish"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
+    },
+    {
+      "digest": "be117e9cf439bcc42c4a0e21515f68cdc6ac8204456509e8105211f29b29c0c4",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "union",
+            "types": [
+              1,
+              16
+            ]
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "task",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "teamId",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 15,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "blockedBy",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "id",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "lostCause",
+                "type": 5,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 4,
+                "optional": true
+              },
+              {
+                "name": "revision",
+                "type": 8,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 3,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 4
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "union",
+            "types": [
+              6,
+              7
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "owner-failed"
+          },
+          {
+            "kind": "literal",
+            "value": "run-ended"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "union",
+            "types": [
+              10,
+              11,
+              12,
+              13,
+              14
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "completed"
+          },
+          {
+            "kind": "literal",
+            "value": "deleted"
+          },
+          {
+            "kind": "literal",
+            "value": "in_progress"
+          },
+          {
+            "kind": "literal",
+            "value": "lost"
+          },
+          {
+            "kind": "literal",
+            "value": "pending"
+          },
+          {
+            "kind": "literal",
+            "value": 3
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "task",
+                "type": 17,
+                "optional": false
+              },
+              {
+                "name": "teamId",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 19,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "blockedBy",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "id",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 4,
+                "optional": true
+              },
+              {
+                "name": "revision",
+                "type": 8,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 18,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 3,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              10,
+              11,
+              12,
+              14
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": 2
           }
         ]
       },
@@ -85876,6 +86562,275 @@
       "sources": []
     },
     {
+      "digest": "cc80b86c80b0f4a334297abb4b6aa0398ef60abf81d54d3de632b37247458c4f",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 21,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 22,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              2,
+              17
+            ]
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "task",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "teamId",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 16,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "blockedBy",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "id",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "lostCause",
+                "type": 6,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 5,
+                "optional": true
+              },
+              {
+                "name": "revision",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 10,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 5
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "union",
+            "types": [
+              7,
+              8
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "owner-failed"
+          },
+          {
+            "kind": "literal",
+            "value": "run-ended"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "union",
+            "types": [
+              11,
+              12,
+              13,
+              14,
+              15
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "completed"
+          },
+          {
+            "kind": "literal",
+            "value": "deleted"
+          },
+          {
+            "kind": "literal",
+            "value": "in_progress"
+          },
+          {
+            "kind": "literal",
+            "value": "lost"
+          },
+          {
+            "kind": "literal",
+            "value": "pending"
+          },
+          {
+            "kind": "literal",
+            "value": 3
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "task",
+                "type": 18,
+                "optional": false
+              },
+              {
+                "name": "teamId",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 20,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "blockedBy",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "id",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 5,
+                "optional": true
+              },
+              {
+                "name": "revision",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 19,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              11,
+              12,
+              13,
+              15
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": 2
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "literal",
+            "value": "team/task"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
+    },
+    {
       "digest": "cd186c309e2bef305705e1d324139240f5e681f4f6a957d6a25b0225f65560df",
       "schema": {
         "root": 0,
@@ -86375,6 +87330,50 @@
       "sources": []
     },
     {
+      "digest": "d3a9e48528b41c28dad0e7b06d7be59d571702ef972baced676146ff3f47f043",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "union",
+            "types": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "completed"
+          },
+          {
+            "kind": "literal",
+            "value": "deleted"
+          },
+          {
+            "kind": "literal",
+            "value": "in_progress"
+          },
+          {
+            "kind": "literal",
+            "value": "lost"
+          },
+          {
+            "kind": "literal",
+            "value": "pending"
+          }
+        ]
+      },
+      "names": [
+        "packages/experimental/agent-team/src/types.ts#TeamTaskStatus"
+      ],
+      "sources": [
+        "packages/experimental/agent-team/src/types.ts:75"
+      ]
+    },
+    {
       "digest": "d4b739491689cc6bb13d07ffac1a32239875abda364c0d5edd8f74faf5e9c00d",
       "schema": {
         "root": 0,
@@ -86710,163 +87709,6 @@
           {
             "kind": "literal",
             "value": "canceled"
-          }
-        ]
-      },
-      "names": [],
-      "sources": []
-    },
-    {
-      "digest": "d595ec73b32b016a6055333c67a5d646032b22e672da1d4a09c5b1ae398a093a",
-      "schema": {
-        "root": 0,
-        "nodes": [
-          {
-            "kind": "object",
-            "properties": [
-              {
-                "name": "data",
-                "type": 1,
-                "optional": false
-              },
-              {
-                "name": "ignorable",
-                "type": 12,
-                "optional": true
-              },
-              {
-                "name": "seq",
-                "type": 5,
-                "optional": false
-              },
-              {
-                "name": "time",
-                "type": 5,
-                "optional": false
-              },
-              {
-                "name": "type",
-                "type": 13,
-                "optional": false
-              }
-            ],
-            "indices": []
-          },
-          {
-            "kind": "object",
-            "properties": [
-              {
-                "name": "task",
-                "type": 2,
-                "optional": false
-              },
-              {
-                "name": "teamId",
-                "type": 4,
-                "optional": false
-              },
-              {
-                "name": "version",
-                "type": 11,
-                "optional": false
-              }
-            ],
-            "indices": []
-          },
-          {
-            "kind": "object",
-            "properties": [
-              {
-                "name": "blockedBy",
-                "type": 3,
-                "optional": false
-              },
-              {
-                "name": "description",
-                "type": 4,
-                "optional": false
-              },
-              {
-                "name": "id",
-                "type": 4,
-                "optional": false
-              },
-              {
-                "name": "ownerId",
-                "type": 4,
-                "optional": true
-              },
-              {
-                "name": "revision",
-                "type": 5,
-                "optional": false
-              },
-              {
-                "name": "status",
-                "type": 6,
-                "optional": false
-              },
-              {
-                "name": "subject",
-                "type": 4,
-                "optional": false
-              },
-              {
-                "name": "writeScopes",
-                "type": 3,
-                "optional": false
-              }
-            ],
-            "indices": []
-          },
-          {
-            "kind": "array",
-            "element": 4
-          },
-          {
-            "kind": "primitive",
-            "type": "string"
-          },
-          {
-            "kind": "primitive",
-            "type": "number"
-          },
-          {
-            "kind": "union",
-            "types": [
-              7,
-              8,
-              9,
-              10
-            ]
-          },
-          {
-            "kind": "literal",
-            "value": "completed"
-          },
-          {
-            "kind": "literal",
-            "value": "deleted"
-          },
-          {
-            "kind": "literal",
-            "value": "in_progress"
-          },
-          {
-            "kind": "literal",
-            "value": "pending"
-          },
-          {
-            "kind": "literal",
-            "value": 2
-          },
-          {
-            "kind": "literal",
-            "value": true
-          },
-          {
-            "kind": "literal",
-            "value": "team/task"
           }
         ]
       },
@@ -95324,7 +96166,7 @@
       },
       "names": [],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:214"
+        "packages/experimental/agent-team/src/types.ts:265"
       ]
     },
     {
