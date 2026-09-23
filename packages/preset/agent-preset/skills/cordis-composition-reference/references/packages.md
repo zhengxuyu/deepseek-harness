@@ -191,6 +191,7 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 | `@deepseek-ai/dsh-experimental-speech-to-text` | yes | Experimental speech recognition with independently selectable providers |
 | `@deepseek-ai/dsh-experimental-speech-to-text-sensevoice` | yes | Local SenseVoice ONNX transcription with a managed sherpa-onnx process |
 | `@deepseek-ai/dsh-experimental-tool-agent-team` | yes | Scoped model-facing Agent Teams tools over ctx.agentTeams |
+| `@deepseek-ai/dsh-experimental-turn-continuation` | yes | Continue an agent turn that ended with nothing to act on: an empty or reasoning-only message, or one cut off at the output limit, bounded per turn |
 
 ## extensions
 

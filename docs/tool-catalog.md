@@ -2036,7 +2036,7 @@ Source: [`packages/experimental/tool-agent-team/src/index.ts`](../packages/exper
 
 ### `list_agents`
 
-List the Lead and every durable teammate with an addressable target and current availability. inactive means no turn is executing, not a task result. provisioning and failed describe member creation.
+List the Lead and every durable teammate with an addressable target, current availability, and lastStop, how its latest turn ended. inactive means no turn is executing, not a task result. provisioning and failed describe member creation.
 
 ```json
 {
@@ -2282,7 +2282,7 @@ Source: [`packages/experimental/tool-agent-team/src/index.ts`](../packages/exper
 
 ### `wait_agent`
 
-Wait for the next teammate status, mailbox, or shared-task change after this call starts. This never wakes inactive members and returns noProgress immediately when no other member is running or provisioning. Re-list after wakeup or timeout instead of polling.
+Wait for the next teammate status, mailbox, or shared-task change after this call starts, and return the members and tasks that changed. This never wakes inactive members and returns noProgress immediately when no other member is running or provisioning.
 
 ```json
 {

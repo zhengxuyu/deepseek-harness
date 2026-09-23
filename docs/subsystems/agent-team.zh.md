@@ -9,7 +9,7 @@
 `TeamId` 是具有独立[品牌](core.zh.md#branded-ids)的 Root `SessionId`。`TeamTaskId` 在 Team 内按 `task-<n>` 单调分配；`TeamMessageId` 是全局随机值。teammate 的 Session id 始终是持久身份，而 `name` 是不可变的模型／UI 标签。
 
 ```ts type-equiv
-/** Whole durable value written on every teammate lifecycle change. */
+/** Whole durable value written on every teammate lifecycle change and turn end. */
 interface TeamMemberSnapshot {
   readonly id: SessionId
   readonly name: string
@@ -18,10 +18,12 @@ interface TeamMemberSnapshot {
   readonly context: 'fresh' | 'fork'
   readonly phase: TeamMemberPhase
   readonly error?: string
+  /** How the member's latest turn ended; present once an active member's first turn has ended. */
+  readonly lastStop?: TeamStopReason
 }
 ```
 
-每个 member 都从 `provisioning` 开始，并且只到达一个终态 roster phase：`active` 或 `failed`。roster 的 `running`／`inactive` 状态单独派生，绝不会重写该记录。
+每个 member 都从 `provisioning` 开始，并且只到达一个终态 roster phase：`active` 或 `failed`。roster 的 `running`／`inactive` 状态单独派生，绝不会重写该记录。此后，active 成员每结束一个回合都会追加一条只改变 `lastStop`（该 epoch 的 stop reason：`completed`、`aborted`、`error`、`max-tokens`、`refusal`）的记录，以 payload 版本 3 写入；版本 2 记录仍可读取。
 
 ## 持久 mailbox
 
@@ -68,12 +70,14 @@ interface TeamTaskSnapshot {
   readonly ownerId?: SessionId
   /** Present exactly while {@link status} is `lost`. */
   readonly lostCause?: TeamTaskLostCause
+  /** How the owning run ended when it lost the task; present only with an `owner-failed` cause from a tracked run. */
+  readonly ownerStop?: TeamStopReason
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
 }
 ```
 
-`pending` 表示尚未开始或已经释放，`in_progress` 携带 owner，`completed` 满足 blocker，`lost` 是 harness 已放弃其 owner 的进行中任务（`lostCause` 为 `owner-failed` 或 `run-ended`；owner 记录保留到 `reopen` 为止），`deleted` 是保留的 tombstone。`in_progress` 与 `completed` 任务是冻结的：其文本、边与分配不再改变。view 会添加 owner name、readiness、lost cause 和 write-scope 重叠警告，但不会改变持久快照。
+`pending` 表示尚未开始或已经释放，`in_progress` 携带 owner，`completed` 满足 blocker，`lost` 是 harness 已放弃其 owner 的进行中任务（`lostCause` 为 `owner-failed` 或 `run-ended`；owner 记录保留到 `reopen` 为止），`deleted` 是保留的 tombstone。`in_progress` 与 `completed` 任务是冻结的：其文本、边与分配不再改变。因被跟踪的运行未完成而 lost 的任务还会把该运行的 stop reason 记为 `ownerStop`。view 会添加 owner name、readiness、lost cause、owner stop 和 write-scope 重叠警告，但不会改变持久快照。
 
 ## 回放
 
@@ -167,9 +171,10 @@ outstandingTasks(caller: Agent): OutstandingTeamTask[]
  * @param caller - exact live Team member whose board holds the task.
  * @param id - task whose owner can no longer finish it.
  * @param cause - why the harness gave up on the owner.
+ * @param ownerStop - how the owning run ended, when the cause is a run's stop reason.
  * @returns the lost task view.
  */
-async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause): Promise<TeamTaskView>
+async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause, ownerStop?: SubagentStopReason): Promise<TeamTaskView>
 
 /**
  * Wait for the next Team-domain or member-status change.
@@ -203,7 +208,7 @@ tryMembership(agent: Agent): TeamMembership | undefined
 @Remote('view') remoteView(agent: Agent): TeamView
 ```
 
-Types: [Agent](core.zh.md)
+Types: [Agent](core.zh.md) · [SubagentStopReason](subagent.zh.md)
 
 Source: [`packages/experimental/agent-team/src/index.ts`](../../packages/experimental/agent-team/src/index.ts)
 <!-- END GENERATED cordis-surface -->

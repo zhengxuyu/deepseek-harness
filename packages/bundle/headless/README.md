@@ -85,7 +85,7 @@ The patch rides over `dsh-base`: it inherits the projection cache and shared PTC
 
 ### Exit mapping
 
-A completed final `turn/end` with nothing unsettled exits 0; any other outcome — aborted, error, no turn in the owned interval, or a settlement report with rows — exits 1. An `error` reason also writes `dsh: <code>: <message>` to stderr, and each unsettled row is written as `dsh: unsettled: <row>`. A direct driver failure (for example, Agent creation or an unusable `--session-id`) writes `dsh: <message>` to stderr and exits 1, and in `--json` mode also emits an `error` event.
+A completed final `turn/end` with nothing unsettled exits 0; any other outcome — aborted, error, no turn in the owned interval, or a settlement report with rows — exits 1. An `error` reason also writes `dsh: <code>: <message>` to stderr, a `max-tokens` reason (a final message cut off at the output limit) writes `dsh: turn ended: max-tokens`, and each unsettled row is written as `dsh: unsettled: <row>`. A direct driver failure (for example, Agent creation or an unusable `--session-id`) writes `dsh: <message>` to stderr and exits 1, and in `--json` mode also emits an `error` event.
 
 ### Source map
 

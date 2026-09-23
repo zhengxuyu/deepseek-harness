@@ -196,6 +196,35 @@ describe('Agent Teams projection events', () => {
     }
   })
 
+  it('projects a lost task with its owner stop reason only under the owner-failed cause', () => {
+    const lost = taskV3({ status: 'lost', lostCause: 'owner-failed', ownerStop: 'max-tokens', ownerId: SessionId('owner') })
+    expect(projectTeam(ROOT, [event('team/task', { version: 3, teamId: TEAM, task: lost }, SessionSeq(0))]).tasks[0])
+      .toMatchObject({ status: 'lost', lostCause: 'owner-failed', ownerStop: 'max-tokens' })
+    const ended = taskV3({ status: 'lost', lostCause: 'run-ended', ownerStop: 'max-tokens', ownerId: SessionId('owner') })
+    expect(() => projectTeam(ROOT, [event('team/task', { version: 3, teamId: TEAM, task: ended }, SessionSeq(0))]))
+      .toThrow(/persisted Agent Teams team\/task payload is invalid/)
+  })
+
+  it('records a member turn outcome as an active-to-active version-3 record and nothing else after settlement', () => {
+    const provisioning = event('team/member', { version: 2, teamId: TEAM, member: member() }, SessionSeq(0))
+    const active = event('team/member', { version: 3, teamId: TEAM, member: member({ phase: 'active' }) }, SessionSeq(1))
+    const stopped = event('team/member', {
+      version: 3, teamId: TEAM, member: member({ phase: 'active', lastStop: 'max-tokens' }),
+    }, SessionSeq(2))
+    expect(projectTeam(ROOT, [provisioning, active, stopped]).members[0]).toMatchObject({ phase: 'active', lastStop: 'max-tokens' })
+    // A version-2 record cannot carry the outcome, an active record without one repeats no transition,
+    // and a failed member never changes again.
+    expect(() => projectTeam(ROOT, [provisioning, active, event('team/member', {
+      version: 2, teamId: TEAM, member: member({ phase: 'active', lastStop: 'completed' } as never),
+    }, SessionSeq(2))])).toThrow(/persisted Agent Teams team\/member payload is invalid/)
+    expect(() => projectTeam(ROOT, [provisioning, active, { ...active, seq: SessionSeq(2) }]))
+      .toThrow(/invalid active -> active transition/)
+    const failed = event('team/member', { version: 3, teamId: TEAM, member: member({ phase: 'failed', error: 'boom' }) }, SessionSeq(1))
+    expect(() => projectTeam(ROOT, [provisioning, failed, event('team/member', {
+      version: 3, teamId: TEAM, member: member({ phase: 'failed', error: 'boom', lastStop: 'error' }),
+    }, SessionSeq(2))])).toThrow(/invalid failed -> failed transition/)
+  })
+
   it('rejects every invalid persisted task dependency relation', () => {
     const first = event('team/task', { version: 2, teamId: TEAM, task: task() }, SessionSeq(0))
     const second = event('team/task', {
@@ -417,9 +446,9 @@ describe('Agent Teams projection events', () => {
     const state = project(ROOT, [invalid, later])
     expect(state.failure).toMatch(/unsupported Agent Teams event version 1/)
     expect(isEmptyState(state)).toBe(true)
-    // Only team/task has a version 3; the other Team events stop at 2.
-    const memberV3 = event('team/member', { version: 3 as 2, teamId: TEAM, member: member() }, SessionSeq(0))
-    expect(project(ROOT, [memberV3]).failure).toMatch(/unsupported Agent Teams event version 3/)
+    // team/task and team/member have a version 3; the mailbox events stop at 2.
+    const queuedV3 = event('team/message/queued', { version: 3 as 2, teamId: TEAM, message: message() }, SessionSeq(0))
+    expect(project(ROOT, [queuedV3]).failure).toMatch(/unsupported Agent Teams event version 3/)
   })
 
   it('isolates unsupported inherited Team records from the current Team', () => {

@@ -144,7 +144,7 @@ Lead 可以停止 teammate 的当前轮次，而不会删除其排队的消息�
 
 `lost` 是 harness 的状态，绝不是成员动作：`markLost(caller, id, cause)` 把一个 `in_progress` 任务移入该状态并保留其 owner 记录；provisioning 失败的成员会丢失它在 provisioning 期间认领的一切（`owner-failed`）。lost 任务不能被 claim 或 complete；`reopen` 把它变回无 owner 的 `pending`，在此之前可以先用 `edit` 或 `set_dependencies` 修订它。它的依赖方保持阻塞，它的写范围不再产生警告。`outstandingTasks(caller)` 列出调用方任务板上的 `in_progress` 任务以及每个 owner 当前是否在运行（进程外 provider 承载的被跟踪运行在结束前都视为运行中），这正是一次性宿主在退出前等待的东西。
 
-`trackSubagentRuns` 会把 Team 之下的每一次 `subagent/start` 记录为该 Team Lead 任务板上一个有 owner 的 `in_progress` 任务，并根据配对的 `subagent/end` 结算：`completed` 完成该任务，其他任何 stop reason 都把它标记为 `lost`，原因为 `owner-failed`。Lead 通过沿委派 parent 的谱系向上查找最近的成员或 Root 得到；roster 成员自身的 epoch 不会被记录，因为 roster 已经拥有它们。
+`trackSubagentRuns` 会把 Team 之下的每一次 `subagent/start` 记录为该 Team Lead 任务板上一个有 owner 的 `in_progress` 任务，并根据配对的 `subagent/end` 结算：`completed` 完成该任务，其他任何 stop reason 都把它标记为 `lost`，原因为 `owner-failed`，并把该 stop reason 记为 `ownerStop`。Lead 通过沿委派 parent 的谱系向上查找最近的成员或 Root 得到；roster 成员自身的 epoch 不会被记录，因为 roster 已经拥有它们。
 
 ### 等待与中断
 
@@ -156,7 +156,7 @@ Team 事件追加到精确的 live Lead 会话，并在操作报告成功或唤�
 
 原生 V4 的 Team 事件及检查点准入会拒绝退役的 `tool-result` 内容，防止它进入邮箱状态。历史转换由 Session 格式迁移负责，Team 投影不转换旧包装。
 
-Mailbox 投影与 checkpoint 准入保留本地声明的校验器之外获准内容中全部已解码 JSON 字段，包括自有 `__proto__` 键。本地字段检查覆盖 `text`、`reasoning`、`image` 和 `tool-call`；获准的未知标签保持不透明。Team 投影缓存版本 4 从 Session 日志重建较早缓存版本的 checkpoint；Session 格式版本保持不变。`team/task` 记录以 payload 版本 3 写入，新增 `lost` 状态与 `lostCause`；之前写入的版本 2 记录仍可读取，其他 Team event 保持版本 2。
+Mailbox 投影与 checkpoint 准入保留本地声明的校验器之外获准内容中全部已解码 JSON 字段，包括自有 `__proto__` 键。本地字段检查覆盖 `text`、`reasoning`、`image` 和 `tool-call`；获准的未知标签保持不透明。Team 投影缓存版本 4 从 Session 日志重建较早缓存版本的 checkpoint；Session 格式版本保持不变。`team/task` 记录以 payload 版本 3 写入，新增 `lost` 状态、`lostCause` 与 `ownerStop`；`team/member` 记录以版本 3 写入，新增 `lastStop`，即成员最近一次结束的回合的 stop reason，active 成员每结束一个回合追加一条。此前写入的版本 2 记录仍可读取，mailbox event 保持版本 2。
 
 ### Dispose
 

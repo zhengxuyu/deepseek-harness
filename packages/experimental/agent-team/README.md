@@ -144,7 +144,7 @@ The executed part of the graph is frozen. `edit`, `set_dependencies`, and `delet
 
 `lost` is the harness's status, never a member action: `markLost(caller, id, cause)` moves one `in_progress` task there and keeps its owner recorded, and a member that fails provisioning loses whatever it claimed while provisioning (`owner-failed`). A lost task cannot be claimed or completed; `reopen` returns it to `pending` with no owner, and `edit` or `set_dependencies` may revise it first. Its dependents stay blocked and its write scopes no longer warn. `outstandingTasks(caller)` lists the `in_progress` tasks on the caller's board with whether each owner is currently running (a tracked run behind an out-of-process provider counts as running until it ends), which is what a one-shot host waits on before it exits.
 
-`trackSubagentRuns` records every `subagent/start` below a Team as an owned `in_progress` task on that Team's Lead board and settles it from the paired `subagent/end`: `completed` completes the task, every other stop reason marks it `lost` with cause `owner-failed`. The Lead is found by walking the delegating parent's lineage to the nearest member or root; roster members' own epochs are not recorded, because the roster already owns them.
+`trackSubagentRuns` records every `subagent/start` below a Team as an owned `in_progress` task on that Team's Lead board and settles it from the paired `subagent/end`: `completed` completes the task, every other stop reason marks it `lost` with cause `owner-failed` and that reason as `ownerStop`. The Lead is found by walking the delegating parent's lineage to the nearest member or root; roster members' own epochs are not recorded, because the roster already owns them.
 
 ### Waiting and interruption
 
@@ -156,7 +156,7 @@ Team events are appended to the exact live Lead Session and flushed before the o
 
 Native V4 Team event and checkpoint admission reject retired `tool-result` content before it can enter mailbox state. Historical conversion belongs to the Session-format migration; the Team projection does not convert old wrappers.
 
-Mailbox projection and checkpoint admission preserve every decoded JSON field of accepted content outside the locally declared validators, including an own `__proto__` key. Local field checks cover `text`, `reasoning`, `image`, and `tool-call`; accepted unknown tags remain opaque. Team projection cache version 4 rebuilds checkpoints from earlier cache versions from the Session log; the Session format version is unchanged. `team/task` records are written at payload version 3, which adds the `lost` status and `lostCause`; version 2 records written before it remain readable, and the other Team events stay at version 2.
+Mailbox projection and checkpoint admission preserve every decoded JSON field of accepted content outside the locally declared validators, including an own `__proto__` key. Local field checks cover `text`, `reasoning`, `image`, and `tool-call`; accepted unknown tags remain opaque. Team projection cache version 4 rebuilds checkpoints from earlier cache versions from the Session log; the Session format version is unchanged. `team/task` records are written at payload version 3, which adds the `lost` status, `lostCause`, and `ownerStop`; `team/member` records at version 3, which adds `lastStop`, the stop reason of the member's latest ended turn, appended once per ended turn of an active member. Version 2 records written before either remain readable, and the mailbox events stay at version 2.
 
 ### Disposal
 

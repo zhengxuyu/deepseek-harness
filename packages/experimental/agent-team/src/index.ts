@@ -7,7 +7,7 @@ import { carrierKeyOf } from '@deepseek-ai/dsh-scope'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
 import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
-import type { SubagentRuntime, SubagentRunEndInfo, SubagentRunId, SubagentRunInfo } from '@deepseek-ai/dsh-subagent'
+import type { SubagentRuntime, SubagentRunEndInfo, SubagentRunId, SubagentRunInfo, SubagentStopReason } from '@deepseek-ai/dsh-subagent'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { TeamActivity } from './activity.ts'
 import { errorMessage, TeamError } from './error.ts'
@@ -52,13 +52,13 @@ const DEFAULT_MAX_PENDING_MESSAGES = 64
 const DEFAULT_MAX_MESSAGE_BYTES = 65_536
 const DEFAULT_DISPOSAL_TIMEOUT_MS = 5_000
 
-/** One delegated run recorded on a Lead board, keyed by its lifecycle run id. */
+/** One delegated run below a Lead, keyed by its lifecycle run id: a member's turn or a tracked plain run. */
 interface TrackedRun {
   readonly root: Agent
   readonly childId: SessionId
   readonly local: boolean
-  /** The board row, settled once the run's creation transaction commits. */
-  readonly task: Promise<TeamTaskView>
+  /** The board row of a tracked plain run, settled once its creation transaction commits; absent for a member's turn. */
+  readonly task?: Promise<TeamTaskView>
 }
 
 /** Validate one positive safe-integer deployment limit. */
@@ -84,7 +84,7 @@ export class TeamService extends TypertRemoteService {
 
   /** Validated deployment limits used by every Team operation. */
   private readonly config: Required<Config>
-  /** Delegated runs still in flight, present only while `trackSubagentRuns` is on. */
+  /** Member turns and, with `trackSubagentRuns`, plain delegated runs still in flight. */
   private readonly runs = new Map<SubagentRunId, TrackedRun>()
 
   private readonly activity: TeamActivity
@@ -134,14 +134,12 @@ export class TeamService extends TypertRemoteService {
       const membership = this.roster.tryMembership(agent)
       if (membership !== undefined) this.activity.notify(membership.id)
     })
-    if (this.config.trackSubagentRuns) {
-      const observeRunStart = (parent: Agent, info: SubagentRunInfo): void => { this.observeRunStart(parent, info) }
-      // The delegating parent travels as the scoped dispatch carrier, not in the payload.
-      ctx.on('subagent/start', function (this: Scoped<SubagentRuntime>, info: SubagentRunInfo) {
-        observeRunStart(carrierKeyOf(this) as Agent, info)
-      })
-      ctx.on('subagent/end', (info: SubagentRunEndInfo) => { this.observeRunEnd(info) })
-    }
+    const observeRunStart = (parent: Agent, info: SubagentRunInfo): void => { this.observeRunStart(parent, info) }
+    // The delegating parent travels as the scoped dispatch carrier, not in the payload.
+    ctx.on('subagent/start', function (this: Scoped<SubagentRuntime>, info: SubagentRunInfo) {
+      observeRunStart(carrierKeyOf(this) as Agent, info)
+    })
+    ctx.on('subagent/end', (info: SubagentRunEndInfo) => { this.observeRunEnd(info) })
     ctx.effect(() => {
       const disposeProjection = ctx.root.sessionProjections.register(teamProjectionDefinition)
       return async () => {
@@ -241,7 +239,7 @@ export class TeamService extends TypertRemoteService {
     const { root } = this.roster.membership(caller)
     const inFlight = new Set<SessionId>()
     for (const run of this.runs.values()) {
-      if (run.root === root && !run.local) inFlight.add(run.childId)
+      if (run.root === root && run.task !== undefined && !run.local) inFlight.add(run.childId)
     }
     return this.tasks.outstanding(root, ownerId =>
       inFlight.has(ownerId) || this.ctx.agents.get(ownerId)?.status === 'running')
@@ -252,10 +250,11 @@ export class TeamService extends TypertRemoteService {
    * @param caller - exact live Team member whose board holds the task.
    * @param id - task whose owner can no longer finish it.
    * @param cause - why the harness gave up on the owner.
+   * @param ownerStop - how the owning run ended, when the cause is a run's stop reason.
    * @returns the lost task view.
    */
-  async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause): Promise<TeamTaskView> {
-    return await this.tasks.markLost(this.roster.membership(caller).root, id, cause)
+  async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause, ownerStop?: SubagentStopReason): Promise<TeamTaskView> {
+    return await this.tasks.markLost(this.roster.membership(caller).root, id, cause, ownerStop)
   }
 
   /**
@@ -316,10 +315,15 @@ export class TeamService extends TypertRemoteService {
     })
   }
 
-  /** Record a delegated run on the nearest Team board above its parent, except roster epochs the roster already owns. */
+  /** Follow a member's turn for its outcome, or record a plain delegated run on the nearest Team board above its parent. */
   private observeRunStart(parent: Agent, info: SubagentRunInfo): void {
     const root = this.leadOf(parent)
-    if (root === undefined || this.journal.state(root).members.some(member => member.id === info.id)) return
+    if (root === undefined) return
+    if (this.journal.state(root).members.some(member => member.id === info.id)) {
+      this.runs.set(info.runId, { root, childId: info.id, local: info.local })
+      return
+    }
+    if (!this.config.trackSubagentRuns) return
     const task = this.tasks.trackRun(root, {
       subject: `subagent run via ${info.provider}`,
       description: `Delegated by ${parent.id} to provider ${info.provider}; child session ${info.id}.`,
@@ -331,16 +335,25 @@ export class TeamService extends TypertRemoteService {
     this.runs.set(info.runId, { root, childId: info.id, local: info.local, task })
   }
 
-  /** Settle the tracked row: a completed run completes it, any other stop reason loses it. */
+  /**
+   * Record a member turn's outcome, or settle a tracked row: a completed run
+   * completes it, any other stop reason loses it with that reason.
+   */
   private observeRunEnd(info: SubagentRunEndInfo): void {
     const run = this.runs.get(info.runId)
     if (run === undefined) return
     this.runs.delete(info.runId)
+    if (run.task === undefined) {
+      void this.roster.recordStop(run.root, run.childId, info.stopReason).catch((error: unknown) => {
+        this.ctx.logger.warn(`Agent Teams could not record the turn outcome of member "${run.childId}": ${errorMessage(error)}`)
+      })
+      return
+    }
     // A row that was never recorded was already reported at start.
     void run.task.then(
       view => info.stopReason === 'completed'
         ? this.tasks.completeRun(run.root, view.id)
-        : this.tasks.markLost(run.root, view.id, 'owner-failed'),
+        : this.tasks.markLost(run.root, view.id, 'owner-failed', info.stopReason),
       () => undefined,
     ).catch((error: unknown) => {
       this.ctx.logger.warn(`Agent Teams could not settle subagent run "${info.runId}": ${errorMessage(error)}`)

@@ -86,6 +86,7 @@ function content(text: string) {
 interface TeamServiceInternals {
   readonly roster: {
     readonly inFlightCreations: Set<Promise<unknown>>
+    recordStop(root: Agent, memberId: SessionId, reason: string): Promise<boolean>
     checkpointInitialPrompt(childId: SessionId, messageId: string, signal: AbortSignal): Promise<void>
     reconcileProvisioning(root: Agent, signal: AbortSignal): Promise<void>
     liveChildrenByRoot(): Map<Agent, SessionId[]>
@@ -1962,6 +1963,41 @@ describe('Lost tasks and the frozen executed graph', () => {
   })
 })
 
+describe('Member turn outcomes', () => {
+  it('records how each teammate turn ended on the roster and in the Lead log', async () => {
+    const { ctx, lead } = await setup([textResponse('first turn done'), 'hang'])
+    const started = await spawn(ctx, lead, 'mate')
+    expect(started.member).not.toHaveProperty('lastStop')
+    await vi.waitFor(() => {
+      expect(ctx.agentTeams.listMembers(lead)[1]).toMatchObject({ name: 'mate', status: 'inactive', lastStop: 'completed' })
+    })
+    expect(durable(lead).members[0]).toMatchObject({ phase: 'active', lastStop: 'completed' })
+    // The next turn is interrupted; the record follows the latest outcome.
+    await ctx.agentTeams.sendMessage(lead, { target: 'mate', content: content('again'), signal: SIGNAL })
+    const mate = await waitRunning(ctx, started.member.id)
+    ctx.agentTeams.interrupt(lead, 'mate')
+    await waitNoAgent(ctx, mate.id)
+    await vi.waitFor(() => {
+      const row = ctx.agentTeams.listMembers(lead)[1]
+      expect(row).toMatchObject({ status: 'inactive' })
+      // The mock hangs until torn down, which the epoch reports as an error; either way it did not complete.
+      expect(row?.lastStop).toMatch(/^(aborted|error)$/)
+    })
+  })
+
+  it('ignores a turn outcome for a member that is not active and warns when the record fails', async () => {
+    const { ctx, lead } = await setup([textResponse('done')])
+    const internals = teamInternals(ctx)
+    await expect(internals.roster.recordStop(lead, SessionId('nobody'), 'completed')).resolves.toBe(false)
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    vi.spyOn(internals.roster, 'recordStop').mockRejectedValueOnce(new Error('disk full'))
+    await spawn(ctx, lead, 'mate')
+    await vi.waitFor(() => {
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not record the turn outcome of member'))
+    })
+  })
+})
+
 describe('Tracked subagent runs', () => {
   it('records a delegated run as an owned task and completes it when the run completes', async () => {
     const { ctx, lead } = await setup([textResponse('child done')], { trackSubagentRuns: true })
@@ -1997,8 +2033,13 @@ describe('Tracked subagent runs', () => {
     await run.result
     await run.dispose()
     await vi.waitFor(() => {
-      expect(ctx.agentTeams.listTasks(lead)[0]).toMatchObject({ status: 'lost', lostCause: 'owner-failed' })
+      expect(ctx.agentTeams.listTasks(lead)[0]).toMatchObject({ status: 'lost', lostCause: 'owner-failed', ownerStop: 'aborted' })
     })
+    // Reopening clears how the run ended along with the owner.
+    const lost = ctx.agentTeams.listTasks(lead)[0]!
+    const reopened = await ctx.agentTeams.updateTask(lead, { taskId: lost.id, expectedRevision: lost.revision, action: 'reopen' })
+    expect('ownerStop' in reopened).toBe(false)
+    expect(durable(lead).tasks[0]).not.toHaveProperty('ownerStop')
   })
 
   it('does not track roster epochs, orphaned parents, or unknown runs, and warns on a failed record', async () => {

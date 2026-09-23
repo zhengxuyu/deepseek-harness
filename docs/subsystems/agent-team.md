@@ -9,7 +9,7 @@ Types shared by the experimental implicit-root Team domain, model tools, and hos
 `TeamId` is the root `SessionId` under a distinct [brand](core.md#branded-ids). `TeamTaskId` is Team-local and monotonically allocated as `task-<n>`; `TeamMessageId` is globally random. A teammate's Session id remains its persistent identity, while `name` is an immutable model/UI label.
 
 ```ts type-equiv
-/** Whole durable value written on every teammate lifecycle change. */
+/** Whole durable value written on every teammate lifecycle change and turn end. */
 interface TeamMemberSnapshot {
   readonly id: SessionId
   readonly name: string
@@ -18,10 +18,12 @@ interface TeamMemberSnapshot {
   readonly context: 'fresh' | 'fork'
   readonly phase: TeamMemberPhase
   readonly error?: string
+  /** How the member's latest turn ended; present once an active member's first turn has ended. */
+  readonly lastStop?: TeamStopReason
 }
 ```
 
-Every member starts in `provisioning` and reaches exactly one terminal roster phase, `active` or `failed`. Roster `running`/`inactive` status is derived separately and never rewrites this record.
+Every member starts in `provisioning` and reaches exactly one terminal roster phase, `active` or `failed`. Roster `running`/`inactive` status is derived separately and never rewrites this record. After that, each ended turn of an active member appends one more record that changes only `lastStop`, the epoch's stop reason (`completed`, `aborted`, `error`, `max-tokens`, `refusal`), written at payload version 3; version 2 records remain readable.
 
 ## Durable mailbox
 
@@ -68,12 +70,14 @@ interface TeamTaskSnapshot {
   readonly ownerId?: SessionId
   /** Present exactly while {@link status} is `lost`. */
   readonly lostCause?: TeamTaskLostCause
+  /** How the owning run ended when it lost the task; present only with an `owner-failed` cause from a tracked run. */
+  readonly ownerStop?: TeamStopReason
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
 }
 ```
 
-`pending` is unstarted or released, `in_progress` carries an owner, `completed` satisfies blockers, `lost` is an in-progress task whose owner the harness gave up on (`lostCause` is `owner-failed` or `run-ended`; the owner stays recorded until `reopen`), and `deleted` is a retained tombstone. `in_progress` and `completed` tasks are frozen: their text, edges, and assignment do not change. Views add owner name, readiness, lost cause, and write-scope overlap warnings without changing the durable snapshot.
+`pending` is unstarted or released, `in_progress` carries an owner, `completed` satisfies blockers, `lost` is an in-progress task whose owner the harness gave up on (`lostCause` is `owner-failed` or `run-ended`; the owner stays recorded until `reopen`), and `deleted` is a retained tombstone. `in_progress` and `completed` tasks are frozen: their text, edges, and assignment do not change. A task lost because its tracked run ended without completing also records that run's stop reason as `ownerStop`. Views add owner name, readiness, lost cause, owner stop, and write-scope overlap warnings without changing the durable snapshot.
 
 ## Replay
 
@@ -167,9 +171,10 @@ outstandingTasks(caller: Agent): OutstandingTeamTask[]
  * @param caller - exact live Team member whose board holds the task.
  * @param id - task whose owner can no longer finish it.
  * @param cause - why the harness gave up on the owner.
+ * @param ownerStop - how the owning run ended, when the cause is a run's stop reason.
  * @returns the lost task view.
  */
-async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause): Promise<TeamTaskView>
+async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause, ownerStop?: SubagentStopReason): Promise<TeamTaskView>
 
 /**
  * Wait for the next Team-domain or member-status change.
@@ -203,7 +208,7 @@ tryMembership(agent: Agent): TeamMembership | undefined
 @Remote('view') remoteView(agent: Agent): TeamView
 ```
 
-Types: [Agent](core.md)
+Types: [Agent](core.md) · [SubagentStopReason](subagent.md)
 
 Source: [`packages/experimental/agent-team/src/index.ts`](../../packages/experimental/agent-team/src/index.ts)
 <!-- END GENERATED cordis-surface -->
