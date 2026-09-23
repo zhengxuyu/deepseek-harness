@@ -357,6 +357,10 @@
     - id: ui-goal
       name: '@deepseek-ai/dsh-client-ui-goal'
 
+    # Jev surface: the /jev question bubble that activates a fresh conversation.
+    - id: ui-jev
+      name: '@deepseek-ai/dsh-client-ui-jev'
+
     # The feedback surface: Like/Dislike in the assistant-message action
     # strip, the feedback dialog behind Dislike and /feedback with its
     # acknowledgement toast, over the messageFeedback and sessionFeedback Remotes.
@@ -532,6 +536,12 @@
   disabled: true
 
 - id: tool-web
+  disabled: true
+
+- id: command-jev
+  disabled: true
+
+- id: tool-jev
   disabled: true
 
 # The preset selection registry. The shipped preset declarations follow as

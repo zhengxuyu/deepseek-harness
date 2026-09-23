@@ -75,6 +75,7 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 | `@deepseek-ai/dsh-client-ui-directory-picker-native` | no | Native directory-picker surface: the renderless workspace directory-flow occupant driving the local Desktop or Host OS chooser |
 | `@deepseek-ai/dsh-client-ui-goal` | no | Session goal surface: GoalBar docked above the composer, read from the goal session projection |
 | `@deepseek-ai/dsh-client-ui-input-trigger` | no | Input trigger pipeline: '/' and '@' detection, candidate menu, pick routing to registered sources |
+| `@deepseek-ai/dsh-client-ui-jev` | no | Jev surface plugin, browser half: projects each /jev command input into the human transcript so a fresh session shows Jev's answer |
 | `@deepseek-ai/dsh-client-ui-jobs` | no | Session-header background-job list with on-demand streaming record panels |
 | `@deepseek-ai/dsh-client-ui-layout` | no | Shell plugin: three-column AppFrame with drag handles, ctx.layout viewing-state service (navigation + panels) |
 | `@deepseek-ai/dsh-client-ui-message-feedback` | no | The Web feedback surface: per-message Like/Dislike in the assistant-message action strip and the feedback dialog behind both ratings and /feedback, backed by the messageFeedback and sessionFeedback Host Remotes |
@@ -262,6 +263,14 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 | `@deepseek-ai/dsh-tool-ask-user` | no | Model-facing ask_user_question tool over the ctx.userQuestions seam |
 | `@deepseek-ai/dsh-user-approval` | yes | User-approval seam (ctx.approval) for the DeepSeek Harness: one-shot permission decisions dispatched to composed answerers over the approval/request waterfall, fail-closed by default |
 | `@deepseek-ai/dsh-user-questions` | no | Abstract user-questions seam (ctx.userQuestions) for asking the human during agent runs |
+
+## jev
+
+| Package | Config | Description |
+|---|---|---|
+| `@deepseek-ai/dsh-command-jev` | yes | Human-facing `/jev` slash command: the user consults Jev, the fast-thinking System One teammate, about the recent conversation; the judgment renders directly and is shared with the agent as a notice |
+| `@deepseek-ai/dsh-jev` | yes | Jev System One judgment seam (ctx.jev) for the DeepSeek Harness: typed choice/noul/score questions over TypeSafe's HTTP API with per-call credential resolution and the JevError taxonomy |
+| `@deepseek-ai/dsh-tool-jev` | yes | Model-facing `jev` tool: the agent consults Jev, a fast-thinking System One teammate, for calibrated choice/noul/score judgments over ctx.jev |
 
 ## jobs
 

@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/persistence-changes/2026-09-22-jev-consult-attribution.md
+2026-09-22-jev-consult-attribution.md: 0426fe0ef588d64c2260d78cc618ca2f3be5c976
+2026-09-22-jev-consult-attribution.zh.md: 64ee13eed282f220d4164f459ede355c3afcb822

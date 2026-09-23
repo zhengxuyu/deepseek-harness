@@ -480,6 +480,7 @@ const EXPECTED_TOOLS = [
   'exit_plan_mode',
   'get_goal',
   'interrupt_agent',
+  'jev',
   'job_kill',
   'job_list',
   'job_output',

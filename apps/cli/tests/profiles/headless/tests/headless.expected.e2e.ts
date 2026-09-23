@@ -33,6 +33,8 @@ const invalidCredentialScenarioDir = join(goldensDir, 'invalid-credential')
 const settlementScenarioDir = join(goldensDir, 'subagent-settlement')
 const settlementConfigPath = fileURLToPath(new URL('../subagent-settlement-snapshot.patch.yml', import.meta.url))
 const teamConfigPath = fileURLToPath(new URL('../team-snapshot.patch.yml', import.meta.url))
+const jevScenarioDir = join(goldensDir, 'jev-decision')
+const jevConfigPath = fileURLToPath(new URL('../jev-snapshot.patch.yml', import.meta.url))
 const startupFailureConfigPath = fileURLToPath(new URL('./fixtures/startup-activation-error/activation-error.patch.yml', import.meta.url))
 const startupFailurePluginUrl = new URL('./fixtures/startup-activation-error/activation-error.mjs', import.meta.url).href
 const startupFailureExpected = join(goldensDir, 'startup-activation-error', 'stderr.expected.txt')
@@ -727,6 +729,42 @@ describe('headless stream-json snapshots', () => {
     } finally {
       await server.close()
     }
+  }, LOADER_SMOKE_TEST_TIMEOUT_MS)
+
+  it('consults Jev through the real tool over a loopback TypeSafe stand-in', async () => {
+    const streamExpected = join(jevScenarioDir, 'stream-json.expected.jsonl')
+    let runCwd = ''
+    const result = await runLoaderSmoke({
+      label: 'Jev decision headless stream-json snapshot',
+      tempDirPrefix: 'headless-snapshot-jev-',
+      binScript,
+      libBinScript: binScript,
+      configPath: jevConfigPath,
+      binArgs: [jevConfigPath, 'Triage the Safari export ticket with Jev before answering.'],
+      tsconfigPath,
+      env: {
+        DSH_SNAPSHOT: 'jev',
+        NODE_OPTIONS: [process.env.NODE_OPTIONS, '--disable-warning=ExperimentalWarning'].filter(Boolean).join(' '),
+      },
+      prepare: (cwd) => { runCwd = cwd },
+      inspect: async (cwd) => {
+        const logs = await persistedLogs(cwd)
+        expect(logs).toHaveLength(1)
+        const rows = parseJsonl(logs[0]?.content ?? '')
+        const call = rows.find(row => row.type === 'tool/call')?.data as JsonObject | undefined
+        expect(call).toMatchObject({ name: 'jev' })
+        const toolResult = rows.find(row => row.type === 'tool/result')?.data as JsonObject | undefined
+        expect(toolResult?.message).toMatchObject({ role: 'tool', isError: false, toolCallId: 'jev-fixture-1' })
+      },
+    })
+    expect(result.stderr).toBe('')
+    expect(parseJsonl(result.stdout).at(-1)).toMatchObject({
+      type: 'result',
+      output: expect.stringContaining('JEV_DECISION_OK') as string,
+    })
+    const normalized = normalizeHeadlessStream(result.stdout, runCwd)
+    if (refreshing) await writeFile(streamExpected, normalized)
+    expect(normalized).toBe(await readFile(streamExpected, 'utf8'))
   }, LOADER_SMOKE_TEST_TIMEOUT_MS)
 
   it('runs a keyless Agent Team with peer mail, dependent tasks, waiting, and Lead aggregation', async () => {

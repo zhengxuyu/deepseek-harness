@@ -1,5 +1,7 @@
 # The summary output cap inherits the 1,800-token headroom. A 1,000-token
-# request output reservation lowers the proactive trigger to 7,500 tokens.
+# request output reservation lowers the proactive trigger to 8,132 tokens.
+# The 10,932-token window holds the shipped prefix, Jev tool included, in the
+# same position the original 10,300-token window held the prefix without it.
 
 - id: llm-deepseek
   name: '@deepseek-ai/dsh-llm-deepseek'
@@ -27,5 +29,5 @@
             name: DeepSeek
             models:
               - id: deepseek-v4-flash
-                contextWindow: 10300
+                contextWindow: 10932
                 defaultMaxTokens: 1000

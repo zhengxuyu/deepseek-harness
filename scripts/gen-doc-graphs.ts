@@ -82,6 +82,7 @@ const GROUP_ORDER = [
   'workflow',
   'web',
   'webhook',
+  'jev',
   'spill',
   'todo',
   'plan',
@@ -735,6 +736,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     implementations: ['web-search-exa', 'web-search-perplexity', 'web-search-deepseek', 'web-fetch-http'],
     consumers: ['tool-web'],
     note: 'Search and fetch providers register into one ctx.web seam; tool-web owns the stable model-facing names.',
+  },
+  {
+    key: 'jev',
+    pkg: 'jev',
+    title: 'Jev judgment seam',
+    mode: 'seam',
+    implementations: [],
+    consumers: ['tool-jev', 'command-jev'],
+    note: 'The seam validates typed choice/noul/score questions and posts them to TypeSafe; tool-jev lets the agent consult Jev and command-jev lets the user, sharing each consult with the agent as a notice.',
   },
   {
     key: 'spillStore',

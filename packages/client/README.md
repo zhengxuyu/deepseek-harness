@@ -59,6 +59,7 @@ The kernel packages boot and serve the page; the UI feature packages present it.
 | [`ui-trajectory/`](ui-trajectory/README.md) | Presents alternate views of agent activity | — |
 | [`ui-commands/`](ui-commands/README.md) | Provides session-aware command discovery and dispatch | — |
 | [`ui-input-trigger/`](ui-input-trigger/README.md) | Coordinates inline command and reference suggestions | — |
+| [`ui-jev/`](ui-jev/README.md) | Shows each `/jev` question in the transcript and renders Jev's answer as a message | — |
 | [`ui-skill/`](ui-skill/README.md) | Adds skill references to inline suggestions | — |
 | [`ui-reference/`](ui-reference/README.md) | Unified Web `@file` / `@session` reference source | — |
 | [`ui-subagent/`](ui-subagent/README.md) | Provides subagent navigation, child transcript states, and inline references | — |

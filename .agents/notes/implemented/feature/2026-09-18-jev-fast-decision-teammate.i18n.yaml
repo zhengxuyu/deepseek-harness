@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-18-jev-fast-decision-teammate.md
+2026-09-18-jev-fast-decision-teammate.md: 88298577820c0e3a1e105c8bb075b879d87bd94a
+2026-09-18-jev-fast-decision-teammate.zh.md: 124ff5ab39ae841d143efab8e20439461aa8351a

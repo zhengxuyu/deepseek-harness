@@ -1,0 +1,20 @@
+.row {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.bubble {
+  max-width: min(525px, 82%);
+  padding: 10px 16px;
+  overflow-wrap: anywhere;
+  border-radius: 22px;
+  background: var(--dsw-specific-bubble);
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-markdown-code);
+  white-space: pre-wrap;
+}
+
+.command {
+  margin-right: 0.5em;
+  opacity: 0.6;
+}

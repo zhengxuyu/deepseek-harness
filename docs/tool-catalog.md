@@ -44,6 +44,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`, `owning Agent session` | `tool/call`, `todo/write`, `tool/result` | - | todo_write is session-owned state; UIs render the latest todo/write event as a checklist. `allowParallelInProgress` is required with no default, so the catalog states its choice: `true`, whose description invites several `in_progress` items. A deployment choosing `false` receives the same tool with a description asking for exactly one active task. |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`, `ctx.workflowEngine`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents the script children)` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-workspace-dependencies` | `load_workspace_dependencies` | `ctx.tools` | `tool/call`, `tool/result` | - | - |
+| `@deepseek-ai/dsh-tool-jev` | `jev` | `ctx.tools`, `ctx.jev`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | jev is the model-facing consult of Jev, the fast-thinking System One teammate; the seam validates each answer before the tool renders it. |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`, `web_search` | `ctx.tools`, `ctx.web`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps. |
 
 <a id="deepseek-aidsh-plugin-manager"></a>
@@ -2463,6 +2464,85 @@ Get absolute paths to bundled Python and library directories, plus bundled Pytho
 ```
 
 Source: [`packages/skill/tool-workspace-dependencies/src/index.ts`](../packages/skill/tool-workspace-dependencies/src/index.ts)
+
+<a id="deepseek-aidsh-tool-jev"></a>
+
+## `@deepseek-ai/dsh-tool-jev`
+
+### `jev`
+
+Ask Jev, a fast-thinking teammate, for calibrated judgments about facts you supply. Jev is a System One model: it does not reason, browse, or write prose; it returns typed answers with probabilities. Send complete `state` (Jev sees nothing else) and one or more independent questions: `choice` picks one named option, `noul` gives the probability that a condition holds, `score` rates along ordered levels. Use it for quick decisions that hinge on semantic reading — picking between candidates, triage, ranking, checking a condition — not for lookups, arithmetic, or facts outside `state`. Ask every independent question about the same state in one call.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "state": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "additionalProperties": true
+        }
+      ],
+      "description": "Everything the judgment needs: source text, candidates, constraints, current facts. Prefer an object with named fields when the context has several parts."
+    },
+    "questions": {
+      "type": "array",
+      "description": "Independent questions about the same state, at most 16. Each id must be unique.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Your own handle for the answer; never shown to Jev."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "choice",
+              "noul",
+              "score"
+            ]
+          },
+          "instructions": {
+            "type": "string",
+            "description": "The complete question, standing alone. Reference nested state with backticked paths such as `ticket.messages[0].text`."
+          },
+          "options": {
+            "type": "object",
+            "description": "choice only: option name → short description, or null when the name explains itself. Include a no-match option when nothing may fit.",
+            "additionalProperties": true
+          },
+          "levels": {
+            "type": "array",
+            "description": "score only: 2–10 ordered level descriptions from lowest to highest, each a concrete situation.",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "instructions"
+        ]
+      }
+    }
+  },
+  "required": [
+    "state",
+    "questions"
+  ]
+}
+```
+
+Source: [`packages/jev/tool-jev/src/index.ts`](../packages/jev/tool-jev/src/index.ts)
+
+jev is the model-facing consult of Jev, the fast-thinking System One teammate; the seam validates each answer before the tool renders it.
 
 <a id="deepseek-aidsh-tool-web"></a>
 
