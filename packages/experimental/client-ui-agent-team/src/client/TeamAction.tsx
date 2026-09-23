@@ -38,6 +38,7 @@ function statusKey(status: TeamTask['status']): TeamKey {
     case 'pending': return 'status.pending'
     case 'in_progress': return 'status.in_progress'
     case 'completed': return 'status.completed'
+    case 'lost': return 'status.lost'
     /* v8 ignore next -- Team views omit deleted task tombstones. */
     case 'deleted': return 'status.completed'
   }
@@ -66,6 +67,7 @@ function taskDotState(task: TeamTask): StateDotState {
     case 'pending': return task.ready ? 'idle' : 'warning'
     case 'in_progress': return 'ongoing'
     case 'completed': return 'done'
+    case 'lost': return 'error'
     /* v8 ignore next -- Team views omit deleted task tombstones. */
     case 'deleted': return 'idle'
   }
