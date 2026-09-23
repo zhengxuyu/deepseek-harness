@@ -140,8 +140,10 @@
               searchTimeoutMs: 60000
           - id: command-jev
             name: '@deepseek-ai/dsh-command-jev'
+            disabled: !!js process.env.DSH_JEV_ENABLED !== 'yes'
           - id: tool-jev
             name: '@deepseek-ai/dsh-tool-jev'
+            disabled: !!js process.env.DSH_JEV_ENABLED !== 'yes'
           - id: tool-cordis
             name: '@deepseek-ai/dsh-tool-cordis'
           - id: skill-filesystem

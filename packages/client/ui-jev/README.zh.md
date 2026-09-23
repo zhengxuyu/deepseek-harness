@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-client-ui-jev` 把每条 `/jev` 提问显示为用户风格的气泡，并把 Jev 的最终回答渲染为来自 Jev 的消息，而非折叠的命令行。在挂载了 `dsh-command-jev` 的 Web 组合中选择它，这样在新会话上发起的咨询会激活对话，而不是藏在空白 hero 之下。它只投影持久的命令运行：没有模型消息、没有 store，也没有事件监听。
+`dsh-client-ui-jev` 把每条 `/jev` 提问显示为用户风格的气泡，并把 Jev 的最终回答渲染为来自 Jev 的消息，而非折叠的命令行。在挂载了 `dsh-command-jev` 的 Web 组合中选择它，这样在新会话上发起的咨询会激活对话，而不是藏在空白 hero 之下。它只投影持久的命令运行：没有模型消息、没有 store，也没有事件监听。仅当 `DSH_JEV_ENABLED=yes` 时才会挂载。
 
 ## 目录
 

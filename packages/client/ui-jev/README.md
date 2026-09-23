@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-client-ui-jev` shows each `/jev` question as a user-style bubble and renders Jev's settled answer as a message from Jev instead of a collapsed command row. Choose it in web compositions that mount `dsh-command-jev`, so a consult made on a fresh session activates the conversation instead of hiding under the empty hero. It projects the durable command run only: no model message, no store, and no event listener.
+`dsh-client-ui-jev` shows each `/jev` question as a user-style bubble and renders Jev's settled answer as a message from Jev instead of a collapsed command row. Choose it in web compositions that mount `dsh-command-jev`, so a consult made on a fresh session activates the conversation instead of hiding under the empty hero. It projects the durable command run only: no model message, no store, and no event listener. It mounts only when `DSH_JEV_ENABLED=yes`.
 
 ## Table of Contents
 

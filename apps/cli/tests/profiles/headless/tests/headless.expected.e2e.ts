@@ -744,6 +744,8 @@ describe('headless stream-json snapshots', () => {
       tsconfigPath,
       env: {
         DSH_SNAPSHOT: 'jev',
+        // Jev is opt-in: the shipped rows stay disabled until a deployment says yes.
+        DSH_JEV_ENABLED: 'yes',
         NODE_OPTIONS: [process.env.NODE_OPTIONS, '--disable-warning=ExperimentalWarning'].filter(Boolean).join(' '),
       },
       prepare: (cwd) => { runCwd = cwd },

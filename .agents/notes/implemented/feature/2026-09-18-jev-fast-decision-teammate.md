@@ -18,7 +18,7 @@ Jev joins the harness as a capability family under `packages/jev/`:
 2. `@deepseek-ai/dsh-tool-jev` (`packages/jev/tool-jev`) registers the model-facing `jev` tool and the `tool:jev` prompt section that introduces Jev as a fast-thinking teammate. The tool sends only the `state` the model supplies, accepts many independent questions in one call, enforces the cross-field rules the schema DSL cannot express, and renders every answer with whole-percent probabilities and confidence.
 3. `@deepseek-ai/dsh-command-jev` (`packages/jev/command-jev`) registers the human `/jev` command. Its grammar is `question` for a yes/no judgment or `question | option | option` for a choice; its state is the newest human and model text of the session, bounded by count and characters. The answer renders directly and is injected into the receiving agent as a `command-jev` notice, so the user's consult becomes shared context at the agent's next step.
 
-The `dsh-base` bundle mounts all three rows and routes the seam through OpenRouter (`baseURL: https://openrouter.ai/api`, `model: typesafe/jev-1.13`, `apiKeyEnv: OPENROUTER_API_KEY`), which serves TypeSafe's System One endpoint unchanged and lets one OpenRouter key cover Jev beside the other models a deployment already routes there; the package defaults stay on `api.typesafe.ai` for a direct TypeSafe key. The Web bundle disables the tool and command rows globally and lists them in its `cordis` and `standard` agent presets, as it does for the goal tool and command, so the tools an agent sees come from its preset. A deployment without the key keeps the tool and command visible; a call then fails as `JEV_CREDENTIAL_MISSING` with the reference to store, following the web seam's rule that credential state is an execution-time fact, not a registration-time one.
+The `dsh-base` bundle carries all three rows, disabled until the launching environment sets `DSH_JEV_ENABLED=yes`, and routes the seam through OpenRouter (`baseURL: https://openrouter.ai/api`, `model: typesafe/jev-1.13`, `apiKeyEnv: OPENROUTER_API_KEY`), which serves TypeSafe's System One endpoint unchanged and lets one OpenRouter key cover Jev beside the other models a deployment already routes there; the package defaults stay on `api.typesafe.ai` for a direct TypeSafe key. The Web bundle disables the tool and command rows globally and lists them in its `cordis` and `standard` agent presets, as it does for the goal tool and command, so the tools an agent sees come from its preset. A deployment without the key keeps the tool and command visible; a call then fails as `JEV_CREDENTIAL_MISSING` with the reference to store, following the web seam's rule that credential state is an execution-time fact, not a registration-time one.
 
 ### Why the seam and the vendor share one package
 
@@ -52,11 +52,13 @@ A teammate whose advice only one party hears splits the team. Injecting the cons
 
 **Gate the tool on a key at registration.** Rejected: credential availability is asynchronous and can change while the process runs, and the web seam already established that a stable schema with an execution-time failure is the right model-facing contract.
 
+**Mount Jev by default.** Rejected: every deployment would pay the schema and section tokens on every request and carry Jev in every keyless fixture, including deployments with no TypeSafe or OpenRouter key; an environment switch keeps the shipped prefix unchanged and lets one deployment opt in without a patch layer.
+
 **Ask score questions from `/jev`.** Deferred: a third grammar form would make the command line ambiguous between options and levels; the tool exposes score, and the command grows a form when a user need shows it.
 
 ## Consequences
 
-**Two model-visible additions on every base request.** The `jev` schema and the `tool:jev` section cost fixed tokens on every request in the base bundle, whether or not a key is present; a profile patch can disable the rows.
+**Two model-visible additions on every request of an opted-in deployment.** The `jev` schema and the `tool:jev` section cost fixed tokens on every request once `DSH_JEV_ENABLED=yes` is set, whether or not a key is present; deployments that never opt in pay nothing.
 
 **Judgments are only as good as the supplied state.** Jev sees nothing the caller does not send, so an incomplete `state` yields a confident answer about the wrong facts. The prompt section and the tool description both say so, and the command's bounded conversation window is documented as the whole of what the user's consult sees.
 
@@ -64,4 +66,4 @@ A teammate whose advice only one party hears splits the team. Injecting the cons
 
 **One vendor in one package.** Adding a second System One provider means splitting `dsh-jev` into a definition and two implementations, a rename the pre-release stance permits without a compatibility shim.
 
-Mounting `tool-jev` in `dsh-base` adds its schema and prompt section to every profile's request prefix, so the keyless snapshot corpus was refreshed rather than re-recorded, the `persistent-tools` SDK scenario excludes the tool to stay minimal, and the two compaction scenarios widen their context window by the added prefix (632 estimated tokens) so their triggers keep the same relative position.
+Because the rows ship disabled, the keyless snapshot corpus keeps its upstream request prefixes; only the two Jev scenarios set `DSH_JEV_ENABLED=yes`, the headless one through the driver's environment and the Web one in its test process before the scaffold boots.

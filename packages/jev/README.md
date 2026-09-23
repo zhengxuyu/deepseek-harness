@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-The jev group makes TypeSafe's System One model a fast-thinking teammate of the harness. The agent consults it through the `jev` tool, and the user consults it through `/jev`, whose answer is shared back with the agent. `jev` owns the seam, the request and answer vocabulary, and the TypeSafe transport; `tool-jev` and `command-jev` are its two consumers. Jev returns calibrated typed judgments, never prose, and sees only the state each consumer sends.
+The jev group makes TypeSafe's System One model a fast-thinking teammate of the harness. The agent consults it through the `jev` tool, and the user consults it through `/jev`, whose answer is shared back with the agent. `jev` owns the seam, the request and answer vocabulary, and the TypeSafe transport; `tool-jev` and `command-jev` are its two consumers. Jev returns calibrated typed judgments, never prose, and sees only the state each consumer sends. The rows ship disabled; `DSH_JEV_ENABLED=yes` in the launching environment mounts them.
 
 ## Table of Contents
 
