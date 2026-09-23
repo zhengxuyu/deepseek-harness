@@ -825,6 +825,17 @@ for (const [name, pull, requested, count] of [
   })
 }
 
+test('exempts a pull request from a repository other than the canonical one without any read', async (t) => {
+  const fixture = mockPolicyApi(t, { pull: { body: 'Fixes #2' }, issues: { 2: {} } })
+  const event = { pull_request: { number: 10 }, repository: { full_name: 'someone/deepseek-harness' } }
+  assert.deepEqual(await runPullRequestPreflight(event), { eligible: false, needsProject: false })
+  assert.equal(fixture.requests.length, 0)
+  assert.equal(fixture.workflowOutput(), 'eligible=false\nexempt=true\nneeds-project=false\nlegacy-automated=true\n')
+  assert.match(fixture.output.join(''), /Issue policy skipped/)
+  assert.deepEqual(await runPullRequestPreflight({ ...event, repository: { full_name: 'deepseek-harness/deepseek-harness' } }), { eligible: true, needsProject: true })
+  assert.ok(fixture.requests.length > 0)
+})
+
 test('validates informational Issues and ignores PR numbers without Project reads', async (t) => {
   const fixture = mockPolicyApi(t, { pull: { body: 'Refs #2; Fixes #3' }, issues: { 2: {}, 3: { pull_request: {} } } })
   const event = { pull_request: { number: 10, draft: true, body: 'Fixes #999' } }
@@ -928,6 +939,7 @@ test('runs trusted rollout selection with absent and present capability markers'
     { name: 'legacy app', type: 'App', marker: false, expected: 'legacy-automated=true\nneeds-project=false\n' },
     { name: 'modern exempt', type: 'Bot', marker: true, expected: 'exempt=true\nneeds-project=false\n' },
     { name: 'modern failure', type: 'User', marker: true, failure: true, expected: '' },
+    { name: 'fork exempt', type: 'User', marker: true, repository: 'someone/deepseek-harness', expected: 'eligible=false\nexempt=true\nneeds-project=false\nlegacy-automated=true\n' },
   ]
   for (const [index, fixture] of cases.entries()) {
     const cwd = join(directory, String(index))
@@ -943,7 +955,12 @@ test('runs trusted rollout selection with absent and present capability markers'
       : "throw new Error('preflight unavailable or failed')\n")
     const result = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', script], {
       cwd,
-      env: { PATH: process.env.PATH, GITHUB_EVENT_PATH: eventPath, GITHUB_OUTPUT: outputPath },
+      env: {
+        PATH: process.env.PATH,
+        GITHUB_EVENT_PATH: eventPath,
+        GITHUB_OUTPUT: outputPath,
+        ...(fixture.repository === undefined ? {} : { GITHUB_REPOSITORY: fixture.repository }),
+      },
       encoding: 'utf8',
       timeout: 30_000,
     })
