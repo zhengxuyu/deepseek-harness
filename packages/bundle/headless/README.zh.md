@@ -85,7 +85,7 @@ patch 叠加在 `dsh-base` 之上：继承投影缓存与共享 PTC 运行时，
 
 ### 退出映射
 
-最终 `turn/end` 完成且没有未结算项时退出码为 0；任何其他结果——aborted、error、所属区间内没有轮次，或结算报告含有行——退出码为 1。结束原因为 `error` 时还会向 stderr 写入 `dsh: <code>: <message>`，每个未结算的行写为 `dsh: unsettled: <id> "<subject>" owned by <owner>: <reason>`，该行没有 owner 时不带 `owned by` 部分。在 `--json` 模式下，只要有结算 provider 跟随了这次运行，`final` 事件就以 `unsettled` 携带同样的行，是一个 `{ id, subject, owner?, state, reason }` 数组；没有 provider 时没有这个字段。直接驱动器失败（例如 Agent 创建失败或不可用的 `--session-id`）向 stderr 写入 `dsh: <message>` 并退出 1，且在 `--json` 模式下额外发出一个 `error` 事件。
+最终 `turn/end` 完成且没有未结算项时退出码为 0；任何其他结果——aborted、error、所属区间内没有轮次，或结算报告含有行——退出码为 1。结束原因为 `error` 时还会向 stderr 写入 `dsh: <code>: <message>`，结束原因为 `max-tokens`（最终消息被输出上限截断）时写入 `dsh: turn ended: max-tokens`，每个未结算的行写为 `dsh: unsettled: <id> "<subject>" owned by <owner>: <reason>`，该行没有 owner 时不带 `owned by` 部分。在 `--json` 模式下，只要有结算 provider 跟随了这次运行，`final` 事件就以 `unsettled` 携带同样的行，是一个 `{ id, subject, owner?, state, reason }` 数组；没有 provider 时没有这个字段。直接驱动器失败（例如 Agent 创建失败或不可用的 `--session-id`）向 stderr 写入 `dsh: <message>` 并退出 1，且在 `--json` 模式下额外发出一个 `error` 事件。
 
 ### 源码地图
 

@@ -8,6 +8,7 @@ import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import type {
   TeamId,
   TeamMemberSnapshot,
+  TeamMemberSnapshotV2,
   TeamMessageId,
   TeamMessageSnapshot,
   TeamTaskSnapshot,
@@ -61,7 +62,7 @@ const contentBlockSchema: z.ZodType<ContentBlock> = z.lazy(() => z.union([
   }),
 ])) as z.ZodType<ContentBlock>
 
-const teamMemberSnapshotSchema = z.object({
+const teamMemberFields = {
   id: sessionIdSchema,
   name: z.string(),
   description: z.string(),
@@ -69,6 +70,15 @@ const teamMemberSnapshotSchema = z.object({
   context: z.enum(['fresh', 'fork']),
   phase: z.enum(['provisioning', 'active', 'failed']),
   error: z.string().optional(),
+}
+
+const teamMemberSnapshotV2Schema = z.object(teamMemberFields).strict() as z.ZodType<TeamMemberSnapshotV2>
+
+// Stop reasons are merge-extensible across subagent backends, so the record
+// keeps any non-empty string.
+const teamMemberSnapshotSchema = z.object({
+  ...teamMemberFields,
+  lastStop: z.string().min(1).optional(),
 }).strict() as z.ZodType<TeamMemberSnapshot>
 
 const teamTaskSnapshotV2Schema = z.object({
@@ -88,11 +98,15 @@ const teamTaskAttemptSchema = z.object({
   ownerId: sessionIdSchema,
   ended: z.enum(['released', 'reassigned', 'completed', 'lost']),
   lostCause: lostCauseSchema.optional(),
+  ownerStop: z.string().min(1).optional(),
   reason: z.string().min(1).optional(),
   goalRevision: positiveSafeInteger.optional(),
 }).strict().refine(
   attempt => (attempt.ended === 'lost') === (attempt.lostCause !== undefined),
   { message: 'an attempt carries lostCause exactly when it ended lost' },
+).refine(
+  attempt => attempt.ownerStop === undefined || attempt.lostCause === 'owner-failed',
+  { message: 'ownerStop requires the owner-failed cause' },
 )
 
 const teamTaskFields = {
@@ -112,9 +126,20 @@ const teamTaskSnapshotSchema = z.discriminatedUnion('status', [
   z.object({ ...teamTaskFields, status: z.literal('pending') }).strict(),
   z.object({ ...teamTaskFields, status: z.literal('in_progress'), ownerId: sessionIdSchema }).strict(),
   z.object({ ...teamTaskFields, status: z.literal('completed'), ownerId: sessionIdSchema }).strict(),
-  z.object({ ...teamTaskFields, status: z.literal('lost'), ownerId: sessionIdSchema, lostCause: lostCauseSchema, ownerGoalRevision: positiveSafeInteger.optional() }).strict(),
+  // Stop reasons are merge-extensible across subagent backends, so the record keeps any non-empty string.
+  z.object({
+    ...teamTaskFields,
+    status: z.literal('lost'),
+    ownerId: sessionIdSchema,
+    lostCause: lostCauseSchema,
+    ownerGoalRevision: positiveSafeInteger.optional(),
+    ownerStop: z.string().min(1).optional(),
+  }).strict(),
   z.object({ ...teamTaskFields, status: z.literal('deleted'), ownerId: sessionIdSchema.optional() }).strict(),
-]) as z.ZodType<TeamTaskSnapshot>
+]).refine(
+  task => task.status !== 'lost' || task.ownerStop === undefined || task.lostCause === 'owner-failed',
+  { message: 'ownerStop requires the owner-failed cause' },
+) as z.ZodType<TeamTaskSnapshot>
 
 const teamMessageSnapshotSchema = z.object({
   id: teamMessageIdSchema,
@@ -129,11 +154,18 @@ const teamEventSelectorSchema = z.object({
   teamId: teamIdSchema,
 }).loose()
 
-const teamMemberEventSchema = z.object({
-  version: z.literal(2),
-  teamId: teamIdSchema,
-  member: teamMemberSnapshotSchema,
-}).strict() as z.ZodType<SessionEventMap['team/member']>
+const teamMemberEventSchema = z.union([
+  z.object({
+    version: z.literal(2),
+    teamId: teamIdSchema,
+    member: teamMemberSnapshotV2Schema,
+  }).strict(),
+  z.object({
+    version: z.literal(3),
+    teamId: teamIdSchema,
+    member: teamMemberSnapshotSchema,
+  }).strict(),
+]) as z.ZodType<SessionEventMap['team/member']>
 
 const teamTaskEventSchema = z.union([
   z.object({
@@ -262,9 +294,10 @@ function applyProjectionEvent(state: TeamProjectionState, event: SessionEvent): 
   try {
     const selector = parsePersisted(event.type, teamEventSelectorSchema, event.data)
     if (selector.teamId !== state.id) return
-    // `team/task` gained version 3 with the `lost` status; every other Team
-    // event is still written at version 2.
-    const supported = event.type === 'team/task' ? selector.version === 2 || selector.version === 3 : selector.version === 2
+    // `team/task` gained version 3 with the `lost` status and `team/member`
+    // with `lastStop`; the mailbox events are still written at version 2.
+    const versioned = event.type === 'team/task' || event.type === 'team/member'
+    const supported = versioned ? selector.version === 2 || selector.version === 3 : selector.version === 2
     if (!supported) {
       throw new Error(`unsupported Agent Teams event version ${String(selector.version)}`)
     }
@@ -304,7 +337,11 @@ function applyCurrentTeamEvent(state: TeamState, event: TeamSessionEvent): void 
         if (prior.name !== member.name || prior.provider !== member.provider || prior.context !== member.context) {
           throw new Error(`teammate "${member.id}" changed immutable identity fields`)
         }
-        if (prior.phase !== 'provisioning' || member.phase === 'provisioning') {
+        // Provisioning settles once; afterwards only an active member's
+        // `lastStop` may change, one record per ended turn.
+        const settles = prior.phase === 'provisioning' && member.phase !== 'provisioning'
+        const stops = prior.phase === 'active' && member.phase === 'active' && 'lastStop' in member
+        if (!settles && !stops) {
           throw new Error(`teammate "${member.name}" has an invalid ${prior.phase} -> ${member.phase} transition`)
         }
       }

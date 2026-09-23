@@ -7,7 +7,7 @@ import { carrierKeyOf } from '@deepseek-ai/dsh-scope'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
 import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
-import type { SubagentRuntime, SubagentRunEndInfo, SubagentRunId, SubagentRunInfo } from '@deepseek-ai/dsh-subagent'
+import type { SubagentRuntime, SubagentRunEndInfo, SubagentRunId, SubagentRunInfo, SubagentStopReason } from '@deepseek-ai/dsh-subagent'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { TeamActivity } from './activity.ts'
 import { errorMessage, TeamError } from './error.ts'
@@ -284,10 +284,17 @@ export class TeamService extends TypertRemoteService {
    * @param cause - why the harness gave up on the owner.
    * @param ownerId - the owner the harness gave up on. A task another owner holds is refused with
    *   `TEAM_TASK_INVALID_TRANSITION`. Omit it when the run itself ended, which loses the task whoever holds it.
+   * @param ownerStop - how the owning run ended, when the cause is a run's stop reason.
    * @returns the lost task view.
    */
-  async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause, ownerId?: SessionId): Promise<TeamTaskView> {
-    return await this.tasks.markLost(this.roster.membership(caller).root, id, cause, ownerId)
+  async markLost(
+    caller: Agent,
+    id: TeamTaskId,
+    cause: TeamTaskLostCause,
+    ownerId?: SessionId,
+    ownerStop?: SubagentStopReason,
+  ): Promise<TeamTaskView> {
+    return await this.tasks.markLost(this.roster.membership(caller).root, id, cause, ownerId, ownerStop)
   }
 
   /**
@@ -398,19 +405,23 @@ export class TeamService extends TypertRemoteService {
   }
 
   /**
-   * Settle what the ended run held. A member's turn that ended any way other
-   * than `completed` or `aborted` loses the member's in-progress tasks: an
-   * aborted turn was interrupted on purpose and the member can continue, any
-   * other ending means it stopped without finishing. A tracked row completes
-   * when its run completed and is lost on any other stop reason.
+   * Record a member turn's outcome and settle what the ended run held. A
+   * member's turn that ended any way other than `completed` or `aborted`
+   * loses the member's in-progress tasks with that stop reason: an aborted
+   * turn was interrupted on purpose and the member can continue, any other
+   * ending means it stopped without finishing. A tracked row completes when
+   * its run completed and is lost with the stop reason on any other.
    */
   private observeRunEnd(info: SubagentRunEndInfo): void {
     const run = this.runs.get(info.runId)
     if (run === undefined) return
     this.runs.delete(info.runId)
     if (run.task === undefined) {
+      void this.roster.recordStop(run.root, run.childId, info.stopReason).catch((error: unknown) => {
+        this.ctx.logger.warn(`Agent Teams could not record the turn outcome of member "${run.childId}": ${errorMessage(error)}`)
+      })
       if (info.stopReason === 'completed' || info.stopReason === 'aborted') return
-      void this.tasks.markOwnerLost(run.root, run.childId, 'owner-failed').catch((error: unknown) => {
+      void this.tasks.markOwnerLost(run.root, run.childId, 'owner-failed', info.stopReason).catch((error: unknown) => {
         this.ctx.logger.warn(`Agent Teams could not mark tasks of member "${run.childId}" lost after its turn ended ${info.stopReason}: ${errorMessage(error)}`)
       })
       return
@@ -419,7 +430,7 @@ export class TeamService extends TypertRemoteService {
     void run.task.then(
       view => info.stopReason === 'completed'
         ? this.tasks.completeRun(run.root, view.id, run.childId)
-        : this.tasks.markLost(run.root, view.id, 'owner-failed', run.childId),
+        : this.tasks.markLost(run.root, view.id, 'owner-failed', run.childId, info.stopReason),
       () => undefined,
     ).catch((error: unknown) => {
       this.ctx.logger.warn(`Agent Teams could not settle subagent run "${info.runId}": ${errorMessage(error)}`)

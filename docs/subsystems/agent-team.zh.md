@@ -9,7 +9,7 @@
 `TeamId` 是具有独立[品牌](core.zh.md#branded-ids)的 Root `SessionId`。`TeamTaskId` 在 Team 内按 `task-<n>` 单调分配；`TeamMessageId` 是全局随机值。teammate 的 Session id 始终是持久身份，而 `name` 是不可变的模型／UI 标签。
 
 ```ts type-equiv
-/** Whole durable value written on every teammate lifecycle change. */
+/** Whole durable value written on every teammate lifecycle change and turn end. */
 interface TeamMemberSnapshot {
   readonly id: SessionId
   readonly name: string
@@ -18,10 +18,12 @@ interface TeamMemberSnapshot {
   readonly context: 'fresh' | 'fork'
   readonly phase: TeamMemberPhase
   readonly error?: string
+  /** How the member's latest turn ended; present once an active member's first turn has ended. */
+  readonly lastStop?: TeamStopReason
 }
 ```
 
-每个 member 都从 `provisioning` 开始，并且只到达一个终态 roster phase：`active` 或 `failed`。roster 的 `running`／`inactive` 状态单独派生，绝不会重写该记录。
+每个 member 都从 `provisioning` 开始，并且只到达一个终态 roster phase：`active` 或 `failed`。roster 的 `running`／`inactive` 状态单独派生，绝不会重写该记录。此后，active 成员每结束一个回合都会追加一条只改变 `lastStop`（该 epoch 的 stop reason：`completed`、`aborted`、`error`、`max-tokens`、`refusal`）的记录，以 payload 版本 3 写入；版本 2 记录仍可读取。
 
 ## 持久 mailbox
 
@@ -82,11 +84,13 @@ type TeamTaskSnapshot =
 | `lost` | owner 已不在 | 必有：当时持有它的 owner | 必有：`owner-failed` 或 `run-ended` |
 | `deleted` | 保留的 tombstone | 可选：由 `lost` 任务保留下来 | 没有 |
 
+原因为 `owner-failed` 的 `lost` 任务还会记录 `ownerStop`，即让它 lost 的那个成员 turn 或被跟踪运行的 stop reason，前提是 harness 观察到了这个 stop reason。其他状态都不带它。
+
 `lost` 只表示 owner 已不在。`owner-failed` 记录的是持有任务的成员的 turn，或持有任务的被跟踪运行，没有完成任务就结束了；`run-ended` 记录的是运行在任务完成之前结束。`lost` 不说明已完成的工作是否被接受，因此以后的验收检查需要自己的记录。`lost` 任务还可以带有下文说明的 `ownerGoalRevision`，其他状态都不带。
 
-**尝试记录与目标。** 任务在 `attempts` 里按结束的先后记录它之前的每一次持有。每条记录写明 owner 和这次持有如何结束：owner 或 Lead 把任务退回 `pending` 时是 `released`，Lead 把它转给另一个成员时是 `reassigned`，任务从 `completed` 或 `lost` 被 reopen 时是对应的状态，并带上当时的 `lostCause`。`release`、`reassign` 与 `reopen` 接受一个 `reason`，它记录在该动作结束的那次尝试上。只有 Lead 对成员正在做的任务取消指派或重新指派时，该成员收到的消息里才带有这个 reason；`reopen` 和 owner 自己的 `release` 不发消息，它们的 reason 只能通过 `attempts` 被成员读到。reason 是对工作的反馈：它不改变 `subject` 与 `description`。`edit` 改变的是目标，对 `subject` 或 `description` 的编辑会把 `goalRevision` 设为新的 revision；每次尝试记录它的 owner 当时对应的 `goalRevision`，因此读者能分清"对同一个目标的第二次尝试"和"对改过的目标的尝试"。没有 `goalRevision` 或值为 1 的尝试，对应的是任务创建时的文本。`lost` 任务可以在 reopen 之前被编辑，而它的 owner 从未见过这次编辑：第一次这样的编辑会把 owner 当时的目标存为 lost 任务上的 `ownerGoalRevision`，`reopen` 把这个值记到尝试上。`attempts` 与 `goalRevision` 在没有内容可记之前都不出现。
+**尝试记录与目标。** 任务在 `attempts` 里按结束的先后记录它之前的每一次持有。每条记录写明 owner 和这次持有如何结束：owner 或 Lead 把任务退回 `pending` 时是 `released`，Lead 把它转给另一个成员时是 `reassigned`，任务从 `completed` 或 `lost` 被 reopen 时是对应的状态，并带上当时的 `lostCause` 与 `ownerStop`。`release`、`reassign` 与 `reopen` 接受一个 `reason`，它记录在该动作结束的那次尝试上。只有 Lead 对成员正在做的任务取消指派或重新指派时，该成员收到的消息里才带有这个 reason；`reopen` 和 owner 自己的 `release` 不发消息，它们的 reason 只能通过 `attempts` 被成员读到。reason 是对工作的反馈：它不改变 `subject` 与 `description`。`edit` 改变的是目标，对 `subject` 或 `description` 的编辑会把 `goalRevision` 设为新的 revision；每次尝试记录它的 owner 当时对应的 `goalRevision`，因此读者能分清"对同一个目标的第二次尝试"和"对改过的目标的尝试"。没有 `goalRevision` 或值为 1 的尝试，对应的是任务创建时的文本。`lost` 任务可以在 reopen 之前被编辑，而它的 owner 从未见过这次编辑：第一次这样的编辑会把 owner 当时的目标存为 lost 任务上的 `ownerGoalRevision`，`reopen` 把这个值记到尝试上。`attempts` 与 `goalRevision` 在没有内容可记之前都不出现。
 
-三组状态在 `task-status.ts` 里只定义一次，所有判断都使用它们。任务处于 `in_progress` 时是 *outstanding*：跟随任务板的运行只等待 outstanding 任务。任务处于 `pending` 或 `lost` 时是 *open*：它的文本、边和存在与否都还可以改变。任务处于 `in_progress` 或 `completed` 时是 *started*：它被冻结，并且它的 `blockedBy` 中每个任务都是 `completed`。view 会添加 owner name、readiness、lost cause 和 write-scope 重叠警告，但不会改变持久快照。
+三组状态在 `task-status.ts` 里只定义一次，所有判断都使用它们。任务处于 `in_progress` 时是 *outstanding*：跟随任务板的运行只等待 outstanding 任务。任务处于 `pending` 或 `lost` 时是 *open*：它的文本、边和存在与否都还可以改变。任务处于 `in_progress` 或 `completed` 时是 *started*：它被冻结，并且它的 `blockedBy` 中每个任务都是 `completed`。view 会添加 owner name、readiness、lost cause、owner stop 和 write-scope 重叠警告，但不会改变持久快照。
 
 <a id="task-status-transitions"></a>
 
@@ -294,9 +298,10 @@ outstandingTasks(caller: Agent): OutstandingTeamTask[]
  * @param cause - why the harness gave up on the owner.
  * @param ownerId - the owner the harness gave up on. A task another owner holds is refused with
  *   `TEAM_TASK_INVALID_TRANSITION`. Omit it when the run itself ended, which loses the task whoever holds it.
+ * @param ownerStop - how the owning run ended, when the cause is a run's stop reason.
  * @returns the lost task view.
  */
-async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause, ownerId?: SessionId): Promise<TeamTaskView>
+async markLost( caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause, ownerId?: SessionId, ownerStop?: SubagentStopReason, ): Promise<TeamTaskView>
 
 /**
  * Wait for the next Team-domain or member-status change.
@@ -338,7 +343,7 @@ tryMembership(agent: Agent): TeamMembership | undefined
 @Remote('view') remoteView(agent: Agent): TeamView
 ```
 
-Types: [Agent](core.zh.md) · [SessionId](core.zh.md)
+Types: [Agent](core.zh.md) · [SessionId](core.zh.md) · [SubagentStopReason](subagent.zh.md)
 
 Source: [`packages/experimental/agent-team/src/index.ts`](../../packages/experimental/agent-team/src/index.ts)
 <!-- END GENERATED cordis-surface -->

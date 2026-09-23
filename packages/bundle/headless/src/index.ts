@@ -451,6 +451,11 @@ async function run(ctx: Context, config: Config, io: HeadlessIo): Promise<void> 
     else projection.finish(outcome.text, report?.unsettled)
     if (outcome.reason?.kind === 'error') {
       io.stderr.write(`dsh: ${outcome.reason.error.code}: ${outcome.reason.error.message}\n`)
+    } else if (outcome.reason?.kind === 'max-tokens') {
+      // A final message cut off at the output limit is a distinct outcome from
+      // a completed answer and from a model failure; name it so a driver can
+      // tell the three apart.
+      io.stderr.write('dsh: turn ended: max-tokens\n')
     }
     const unsettled = report?.unsettled ?? []
     for (const work of unsettled) io.stderr.write(`dsh: unsettled: ${unsettledLine(work)}\n`)
