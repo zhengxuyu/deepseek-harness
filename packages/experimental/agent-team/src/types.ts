@@ -4,6 +4,14 @@ import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm/types'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
+/**
+ * How a member's or delegated run's turn ended: the subagent stop reason
+ * (`completed`, `aborted`, `error`, `max-tokens`, `refusal`, or a backend's
+ * merged variant). Kept as a string so browser clients read Team records
+ * without the host-only subagent types.
+ */
+export type TeamStopReason = string
+
 /** Identifies the implicit team rooted at one top-level Session. */
 export type TeamId = Branded<'TeamId'>
 
@@ -43,8 +51,25 @@ export function TeamMessageId(id: string): TeamMessageId {
 /** Durable teammate lifecycle. */
 export type TeamMemberPhase = 'provisioning' | 'active' | 'failed'
 
-/** Whole durable value written on every teammate lifecycle change. */
+/** Whole durable value written on every teammate lifecycle change and turn end. */
 export interface TeamMemberSnapshot {
+  readonly id: SessionId
+  readonly name: string
+  readonly description: string
+  readonly provider: string
+  readonly context: 'fresh' | 'fork'
+  readonly phase: TeamMemberPhase
+  readonly error?: string
+  /** How the member's latest turn ended; present once an active member's first turn has ended. */
+  readonly lastStop?: TeamStopReason
+}
+
+/**
+ * Member record as written by `team/member` payload version 2, before turn
+ * outcomes were recorded: the same record with no `lastStop`. Read-only; new
+ * records are written at version 3 as {@link TeamMemberSnapshot}.
+ */
+export interface TeamMemberSnapshotV2 {
   readonly id: SessionId
   readonly name: string
   readonly description: string
@@ -65,6 +90,8 @@ export interface TeamMemberView {
   readonly context?: 'fresh' | 'fork'
   readonly model?: string
   readonly diagnostics: string[]
+  /** How the member's latest turn ended; absent until an active member's first turn has ended. */
+  readonly lastStop?: TeamStopReason
 }
 
 /**
@@ -91,6 +118,8 @@ export interface TeamTaskSnapshot {
   readonly ownerId?: SessionId
   /** Present exactly while {@link status} is `lost`. */
   readonly lostCause?: TeamTaskLostCause
+  /** How the owning run ended when it lost the task; present only with an `owner-failed` cause from a tracked run. */
+  readonly ownerStop?: TeamStopReason
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
 }
@@ -122,6 +151,7 @@ export interface TeamTaskView {
   readonly writeScopes: string[]
   readonly ownerName?: string
   readonly lostCause?: TeamTaskLostCause
+  readonly ownerStop?: TeamStopReason
   readonly ready: boolean
   readonly writeScopeWarnings: string[]
 }
@@ -252,8 +282,13 @@ export interface TeamWaitResult {
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
-    /** Whole teammate lifecycle value, stored only in the Team Lead Session. */
-    'team/member': { version: 2; teamId: TeamId; member: TeamMemberSnapshot }
+    /**
+     * Whole teammate lifecycle value, stored only in the Team Lead Session.
+     * Version 3 adds `lastStop`; version 2 records stay readable.
+     */
+    'team/member':
+      | { version: 2; teamId: TeamId; member: TeamMemberSnapshotV2 }
+      | { version: 3; teamId: TeamId; member: TeamMemberSnapshot }
     /**
      * Whole shared-task value, stored only in the Team Lead Session. Version 3
      * adds the `lost` status and `lostCause`; version 2 records stay readable.

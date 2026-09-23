@@ -2,6 +2,7 @@
 
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SubagentStopReason } from '@deepseek-ai/dsh-subagent'
 import type { TeamMembership } from './roster.ts'
 import { TeamError } from './error.ts'
 import type { TeamJournal } from './journal.ts'
@@ -98,10 +99,16 @@ export class TeamTaskBoard {
    * @param root - exact live Team Lead whose log holds the task.
    * @param id - task whose owner can no longer finish it.
    * @param cause - why the harness gave up on the owner.
+   * @param ownerStop - how the owning run ended, when the cause is a run's stop reason.
    * @returns the lost task view.
    */
-  async markLost(root: Agent, id: TeamTaskId, cause: TeamTaskLostCause): Promise<TeamTaskView> {
-    return this.transition(root, id, current => ({ ...current, status: 'lost', lostCause: cause }))
+  async markLost(root: Agent, id: TeamTaskId, cause: TeamTaskLostCause, ownerStop?: SubagentStopReason): Promise<TeamTaskView> {
+    return this.transition(root, id, current => ({
+      ...current,
+      status: 'lost',
+      lostCause: cause,
+      ...ownerStop === undefined ? {} : { ownerStop },
+    }))
   }
 
   /**
@@ -401,9 +408,9 @@ export class TeamTaskBoard {
     return task.blockedBy.every(id => state.tasks.find(candidate => candidate.id === id)?.status === 'completed')
   }
 
-  /** Remove the optional owner and lost-cause fields under exactOptionalPropertyTypes. */
+  /** Remove the optional owner, lost-cause, and owner-stop fields under exactOptionalPropertyTypes. */
   private withoutOwner(task: TeamTaskSnapshot): TeamTaskSnapshot {
-    const { ownerId: _ownerId, lostCause: _lostCause, ...without } = task
+    const { ownerId: _ownerId, lostCause: _lostCause, ownerStop: _ownerStop, ...without } = task
     return without
   }
 
@@ -438,6 +445,7 @@ export class TeamTaskBoard {
       writeScopes: structuredClone(task.writeScopes),
       ...ownerName === undefined ? {} : { ownerName },
       ...task.lostCause === undefined ? {} : { lostCause: task.lostCause },
+      ...task.ownerStop === undefined ? {} : { ownerStop: task.ownerStop },
       ready: task.status === 'pending' && this.taskReady(state, task),
       writeScopeWarnings: [...warnings],
     }

@@ -245,7 +245,7 @@
     },
     {
       "name": "list_agents",
-      "description": "List the Lead and every durable teammate with an addressable target and current availability. inactive means no turn is executing, not a task result. provisioning and failed describe member creation.",
+      "description": "List the Lead and every durable teammate with an addressable target, current availability, and lastStop, how its latest turn ended. inactive means no turn is executing, not a task result. provisioning and failed describe member creation.",
       "parameters": {
         "type": "object",
         "properties": {}
@@ -596,7 +596,7 @@
     },
     {
       "name": "wait_agent",
-      "description": "Wait for the next teammate status, mailbox, or shared-task change after this call starts. This never wakes inactive members and returns noProgress immediately when no other member is running or provisioning. Re-list after wakeup or timeout instead of polling.",
+      "description": "Wait for the next teammate status, mailbox, or shared-task change after this call starts, and return the members and tasks that changed. This never wakes inactive members and returns noProgress immediately when no other member is running or provisioning.",
       "parameters": {
         "type": "object",
         "properties": {

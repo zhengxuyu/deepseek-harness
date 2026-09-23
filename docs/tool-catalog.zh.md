@@ -2042,7 +2042,7 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 
 ### `list_agents`
 
-列出 Lead 与所有持久 teammate，以及可用于寻址的 target 和当前可用状态。inactive 表示没有轮次在执行，不表示任务结果。provisioning 与 failed 描述成员创建状态。
+列出 Lead 与所有持久 teammate，以及可用于寻址的 target、当前可用状态和 lastStop（其最近一次回合如何结束）。inactive 表示没有轮次在执行，不表示任务结果。provisioning 与 failed 描述成员创建状态。
 
 ```json
 {
@@ -2288,7 +2288,7 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 
 ### `wait_agent`
 
-等待本次调用开始后下一次 teammate 状态、mailbox 或共享任务变更。它绝不会唤醒 inactive member；若没有其他 member 正在 running 或 provisioning，则立即返回 noProgress。唤醒或超时后应重新列出状态，而不是轮询。
+等待本次调用开始后下一次 teammate 状态、mailbox 或共享任务变更，并返回发生变化的成员与任务。它绝不会唤醒 inactive member；若没有其他 member 正在 running 或 provisioning，则立即返回 noProgress。
 
 ```json
 {

@@ -4,7 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { TeamTaskId } from '@deepseek-ai/dsh-experimental-agent-team'
-import type { TeamMemberView } from '@deepseek-ai/dsh-experimental-agent-team'
+import type { TeamMemberView, TeamTaskView } from '@deepseek-ai/dsh-experimental-agent-team'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { InferValue, ValueSchemaSpec } from '@deepseek-ai/dsh-tools'
 
@@ -34,7 +34,7 @@ The Team Lead and all teammates share the same working directory and filesystem.
 
 Prefer read/edit/write for file changes. If a file operation returns FS_STALE_VERSION, read the current file, rebase your intended change onto the new content, and retry. Bash, formatters, code generators, and scripts are not fully protected by the filesystem version guard; coordinate them explicitly and have the Lead review the final diff and run tests.
 
-Use the target returned by spawn_teammate or list_agents for send_message and interrupt_agent, or as owner when assigning or filtering shared tasks. send_message steers a running target at its nearest step boundary and starts or resumes an inactive target. inactive means no turn is executing; it does not describe task completion, success, failure, or waiting for other agents. provisioning means member creation is in progress; failed means member creation failed. A delivered peer item starts with its stable message id and sender name. A successful send is already durable even when its result says queued; do not resend it. Shared-task workflow is list, get, claim with the current revision, perform the work, then complete. Task readiness never starts an owner. A lost task's owner can no longer finish it: reopen it, then claim or reassign it. In-progress and completed tasks cannot be edited, rewired, or deleted. Before wait_agent, use list_agents and make sure another required member is running or provisioning; use send_message first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Re-list after wakeup or timeout. The Lead must wait for required teammates before giving the final answer.`
+Use the target returned by spawn_teammate or list_agents for send_message and interrupt_agent, or as owner when assigning or filtering shared tasks. send_message steers a running target at its nearest step boundary and starts or resumes an inactive target. inactive means no turn is executing; it does not describe task completion, success, failure, or waiting for other agents. provisioning means member creation is in progress; failed means member creation failed. lastStop is how a member's latest turn ended: completed, aborted, error, max-tokens (cut off at the output limit), or refusal; an inactive member whose lastStop is not completed did not finish that turn's work. A delivered peer item starts with its stable message id and sender name. A successful send is already durable even when its result says queued; do not resend it. Shared-task workflow is list, get, claim with the current revision, perform the work, then complete. Task readiness never starts an owner. A lost task's owner can no longer finish it: reopen it, then claim or reassign it. In-progress and completed tasks cannot be edited, rewired, or deleted. Before wait_agent, use list_agents and make sure another required member is running or provisioning; use send_message first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Its result lists the members and tasks that changed while it waited; act on those before re-listing. The Lead must wait for required teammates before giving the final answer.`
 
 const ACTIVE_WAIT_STATUSES: ReadonlySet<TeamMemberView['status']> = new Set(['running', 'provisioning'])
 const NO_ACTIVE_PEER_MESSAGE = 'No other Team member is running or provisioning. wait_agent cannot make progress or wake inactive teammates. Re-list with list_agents and team_task_list, then use send_message to wake each required inactive teammate before waiting again.'
@@ -56,6 +56,7 @@ const MEMBER_VIEW_SCHEMA = {
     context: { type: 'string', enum: ['fresh', 'fork'] },
     model: { type: 'string' },
     diagnostics: { type: 'array', required: true, items: { type: 'string' } },
+    lastStop: { type: 'string' },
   },
 } as const
 
@@ -77,6 +78,7 @@ const TASK_VIEW_SCHEMA = {
     status: { type: 'string', required: true, enum: ['pending', 'in_progress', 'completed', 'lost', 'deleted'] },
     ownerName: { type: 'string' },
     lostCause: { type: 'string', enum: ['owner-failed', 'run-ended'] },
+    ownerStop: { type: 'string' },
     blockedBy: { type: 'array', required: true, items: { type: 'string' } },
     writeScopes: { type: 'array', required: true, items: { type: 'string' } },
     ready: { type: 'boolean', required: true },
@@ -103,12 +105,50 @@ const SEND_VALUE_SCHEMA = {
   },
 } as const
 
-/** `noProgress` is present only on the model-only shortcut that skips the wait. */
+/** A roster row as it changed while waiting: availability and latest turn outcome. */
+const MEMBER_CHANGE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    target: { type: 'string', required: true },
+    status: { type: 'string', required: true, enum: ['running', 'inactive', 'provisioning', 'failed'] },
+    lastStop: { type: 'string' },
+  },
+} as const
+
+/** A task row as it changed while waiting: status, revision, owner, and how it was lost. */
+const TASK_CHANGE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'string', required: true },
+    revision: { type: 'integer', required: true },
+    status: { type: 'string', required: true, enum: ['pending', 'in_progress', 'completed', 'lost', 'deleted'] },
+    ownerName: { type: 'string' },
+    lostCause: { type: 'string', enum: ['owner-failed', 'run-ended'] },
+    ownerStop: { type: 'string' },
+  },
+} as const
+
+/**
+ * `changes` lists what differs between the roster and board read when the wait
+ * started and when it ended; `noProgress` is present only on the model-only
+ * shortcut that skips the wait.
+ */
 const WAIT_VALUE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   properties: {
     timedOut: { type: 'boolean', required: true },
+    changes: {
+      type: 'object',
+      required: true,
+      additionalProperties: false,
+      properties: {
+        members: { type: 'array', required: true, items: MEMBER_CHANGE_SCHEMA },
+        tasks: { type: 'array', required: true, items: TASK_CHANGE_SCHEMA },
+      },
+    },
     noProgress: {
       type: 'object',
       additionalProperties: false,
@@ -119,6 +159,47 @@ const WAIT_VALUE_SCHEMA = {
     },
   },
 } as const
+
+type MemberChange = InferValue<typeof MEMBER_CHANGE_SCHEMA>
+type TaskChange = InferValue<typeof TASK_CHANGE_SCHEMA>
+type WaitChanges = InferValue<typeof WAIT_VALUE_SCHEMA>['changes']
+
+/** The roster and board facts a wait compares. */
+interface WaitObservation {
+  readonly members: readonly TeamMemberView[]
+  readonly tasks: readonly TeamTaskView[]
+}
+
+function memberChange(member: TeamMemberView): MemberChange {
+  return { target: member.name, status: member.status, ...member.lastStop === undefined ? {} : { lastStop: member.lastStop } }
+}
+
+function taskChange(task: TeamTaskView): TaskChange {
+  return {
+    id: task.id,
+    revision: task.revision,
+    status: task.status,
+    ...task.ownerName === undefined ? {} : { ownerName: task.ownerName },
+    ...task.lostCause === undefined ? {} : { lostCause: task.lostCause },
+    ...task.ownerStop === undefined ? {} : { ownerStop: task.ownerStop },
+  }
+}
+
+/** Rows whose model-facing change fields differ from the earlier observation, plus rows that appeared. */
+function waitChanges(before: WaitObservation, after: WaitObservation): WaitChanges {
+  const members = new Map(before.members.map(member => [member.id, JSON.stringify(memberChange(member))]))
+  const tasks = new Map(before.tasks.map(task => [task.id, JSON.stringify(taskChange(task))]))
+  return {
+    members: after.members.flatMap((member) => {
+      const row = memberChange(member)
+      return members.get(member.id) === JSON.stringify(row) ? [] : [row]
+    }),
+    tasks: after.tasks.flatMap((task) => {
+      const row = taskChange(task)
+      return tasks.get(task.id) === JSON.stringify(row) ? [] : [row]
+    }),
+  }
+}
 
 const INTERRUPT_VALUE_SCHEMA = {
   type: 'object',
@@ -224,7 +305,7 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
 
     register(scoped.tools.register(defineTool({
       name: 'list_agents',
-      description: 'List the Lead and every durable teammate with an addressable target and current availability. inactive means no turn is executing, not a task result. provisioning and failed describe member creation.',
+      description: 'List the Lead and every durable teammate with an addressable target, current availability, and lastStop, how its latest turn ended. inactive means no turn is executing, not a task result. provisioning and failed describe member creation.',
       parameters: {},
       output: jsonOutput(MEMBER_LIST_VALUE_SCHEMA),
       execute(_args, exec) {
@@ -234,7 +315,7 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
 
     register(scoped.tools.register(defineTool({
       name: 'wait_agent',
-      description: 'Wait for the next teammate status, mailbox, or shared-task change after this call starts. This never wakes inactive members and returns noProgress immediately when no other member is running or provisioning. Re-list after wakeup or timeout instead of polling.',
+      description: 'Wait for the next teammate status, mailbox, or shared-task change after this call starts, and return the members and tasks that changed. This never wakes inactive members and returns noProgress immediately when no other member is running or provisioning.',
       parameters: {
         timeout_ms: {
           type: 'integer',
@@ -248,22 +329,26 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
         // Preserve TeamService's authoritative timeout validation before the
         // model-only no-progress shortcut.
         if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 10_000 || timeoutMs > 3_600_000) {
-          return await ctx.agentTeams.waitForChange(caller, timeoutMs, exec.signal)
+          await ctx.agentTeams.waitForChange(caller, timeoutMs, exec.signal)
         }
         // The active-peer read and waiter registration must remain one synchronous
         // span; awaiting between them can lose the only peer-status edge.
-        const hasActivePeer = ctx.agentTeams.listMembers(caller).some(member =>
+        const before: WaitObservation = { members: ctx.agentTeams.listMembers(caller), tasks: ctx.agentTeams.listTasks(caller) }
+        const hasActivePeer = before.members.some(member =>
           member.id !== caller.id && ACTIVE_WAIT_STATUSES.has(member.status))
         if (!hasActivePeer) {
           return {
             timedOut: false,
+            changes: { members: [], tasks: [] },
             noProgress: {
               reason: 'no-active-peer' as const,
               message: NO_ACTIVE_PEER_MESSAGE,
             },
           }
         }
-        return await ctx.agentTeams.waitForChange(caller, timeoutMs, exec.signal)
+        const { timedOut } = await ctx.agentTeams.waitForChange(caller, timeoutMs, exec.signal)
+        const after: WaitObservation = { members: ctx.agentTeams.listMembers(caller), tasks: ctx.agentTeams.listTasks(caller) }
+        return { timedOut, changes: waitChanges(before, after) }
       },
     })))
 

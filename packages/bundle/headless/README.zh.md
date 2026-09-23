@@ -85,7 +85,7 @@ patch 叠加在 `dsh-base` 之上：继承投影缓存与共享 PTC 运行时，
 
 ### 退出映射
 
-最终 `turn/end` 完成且没有未结算项时退出码为 0；任何其他结果——aborted、error、所属区间内没有轮次，或结算报告含有行——退出码为 1。结束原因为 `error` 时还会向 stderr 写入 `dsh: <code>: <message>`，每个未结算的行写为 `dsh: unsettled: <row>`。直接驱动器失败（例如 Agent 创建失败或不可用的 `--session-id`）向 stderr 写入 `dsh: <message>` 并退出 1，且在 `--json` 模式下额外发出一个 `error` 事件。
+最终 `turn/end` 完成且没有未结算项时退出码为 0；任何其他结果——aborted、error、所属区间内没有轮次，或结算报告含有行——退出码为 1。结束原因为 `error` 时还会向 stderr 写入 `dsh: <code>: <message>`，结束原因为 `max-tokens`（最终消息被输出上限截断）时写入 `dsh: turn ended: max-tokens`，每个未结算的行写为 `dsh: unsettled: <row>`。直接驱动器失败（例如 Agent 创建失败或不可用的 `--session-id`）向 stderr 写入 `dsh: <message>` 并退出 1，且在 `--json` 模式下额外发出一个 `error` 事件。
 
 ### 源码地图
 

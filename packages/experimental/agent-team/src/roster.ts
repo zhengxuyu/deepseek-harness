@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { SubagentStopReason } from '@deepseek-ai/dsh-subagent'
 import type { MessageId } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { foldSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
@@ -154,9 +155,30 @@ export class TeamRoster {
         context: member.context,
         ...model === undefined ? {} : { model },
         diagnostics: member.error === undefined ? [] : [member.error],
+        ...member.lastStop === undefined ? {} : { lastStop: member.lastStop },
       })
     }
     return result
+  }
+
+  /**
+   * Record how one active member's latest turn ended.
+   * @param root - exact live Team Lead whose log holds the member.
+   * @param memberId - the member whose turn ended.
+   * @param reason - the epoch's terminal stop reason.
+   * @returns whether a record was appended; a member that is not active is left unchanged.
+   */
+  async recordStop(root: Agent, memberId: SessionId, reason: SubagentStopReason): Promise<boolean> {
+    return this.journal.transact(root.id, async () => {
+      const member = this.journal.state(root).members.find(candidate => candidate.id === memberId)
+      if (member === undefined || member.phase !== 'active') return false
+      await this.journal.appendAndFlush(root, 'team/member', {
+        version: 3,
+        teamId: TeamId(root.id),
+        member: { ...member, lastStop: reason },
+      })
+      return true
+    })
   }
 
   /**
@@ -274,7 +296,7 @@ export class TeamRoster {
       if (state.members.length >= this.maxMembers) {
         throw new TeamError(`Team member limit ${this.maxMembers} reached`, 'TEAM_MEMBER_LIMIT')
       }
-      await this.journal.appendAndFlush(root, 'team/member', { version: 2, teamId: TeamId(root.id), member })
+      await this.journal.appendAndFlush(root, 'team/member', { version: 3, teamId: TeamId(root.id), member })
     })
 
     let started: ContinuableStart
@@ -425,7 +447,7 @@ export class TeamRoster {
           ...phase === 'failed' ? { error: failure } : {},
         }
         await this.journal.appendAndFlush(root, 'team/member', {
-          version: 2,
+          version: 3,
           teamId: TeamId(root.id),
           member: settled,
         })
@@ -473,7 +495,7 @@ export class TeamRoster {
       }
       if (current.phase !== 'provisioning') return current.phase
       await this.journal.appendAndFlush(root, 'team/member', {
-        version: 2,
+        version: 3,
         teamId: TeamId(root.id),
         member: terminal,
       })
