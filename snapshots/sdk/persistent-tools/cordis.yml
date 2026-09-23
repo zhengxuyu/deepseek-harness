@@ -116,10 +116,6 @@
   name: '@deepseek-ai/dsh-tool-web'
   disabled: true
 
-- id: tool-jev
-  name: '@deepseek-ai/dsh-tool-jev'
-  disabled: true
-
 - id: plan-mode
   name: '@deepseek-ai/dsh-plan-mode'
   disabled: true

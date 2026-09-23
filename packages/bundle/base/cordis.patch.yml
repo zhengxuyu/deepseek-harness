@@ -352,6 +352,7 @@
     # each human consult with the agent as a notice.
     - id: jev
       name: '@deepseek-ai/dsh-jev'
+      disabled: !!js process.env.DSH_JEV_ENABLED !== 'yes'
       config:
         apiKeyEnv: OPENROUTER_API_KEY
         baseURL: https://openrouter.ai/api
@@ -359,6 +360,7 @@
 
     - id: command-jev
       name: '@deepseek-ai/dsh-command-jev'
+      disabled: !!js process.env.DSH_JEV_ENABLED !== 'yes'
 
     - id: subagent
       name: '@deepseek-ai/dsh-subagent'
@@ -507,6 +509,7 @@
       name: '@deepseek-ai/dsh-mcp-resources'
     - id: tool-jev
       name: '@deepseek-ai/dsh-tool-jev'
+      disabled: !!js process.env.DSH_JEV_ENABLED !== 'yes'
 
     # ── rows every mode mounts, whose values each overlay may state ──────────────
 

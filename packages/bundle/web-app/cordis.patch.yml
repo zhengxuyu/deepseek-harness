@@ -360,6 +360,7 @@
     # Jev surface: the /jev question bubble that activates a fresh conversation.
     - id: ui-jev
       name: '@deepseek-ai/dsh-client-ui-jev'
+      disabled: !!js process.env.DSH_JEV_ENABLED !== 'yes'
 
     # The feedback surface: Like/Dislike in the assistant-message action
     # strip, the feedback dialog behind Dislike and /feedback with its

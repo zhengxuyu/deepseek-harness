@@ -20,7 +20,6 @@
     "toolNames": [
       "cordis_inspect_list",
       "cordis_inspect_query",
-      "jev",
       "job_kill",
       "job_list",
       "job_output",
@@ -50,7 +49,6 @@
     "toolNames": [
       "cordis_inspect_list",
       "cordis_inspect_query",
-      "jev",
       "job_kill",
       "job_list",
       "job_output",

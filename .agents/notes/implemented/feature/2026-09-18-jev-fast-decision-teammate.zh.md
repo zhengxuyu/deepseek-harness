@@ -18,7 +18,7 @@ Jev 作为 `packages/jev/` 下的能力家族加入 harness：
 2. `@deepseek-ai/dsh-tool-jev`（`packages/jev/tool-jev`）注册面向模型的 `jev` 工具和把 Jev 介绍为快思考队友的 `tool:jev` 提示词区段。工具只发送模型提供的 `state`，接受一次调用中的多个独立问题，强制执行 schema DSL 无法表达的跨字段规则，并以整数百分比概率和 confidence 渲染每个答案。
 3. `@deepseek-ai/dsh-command-jev`（`packages/jev/command-jev`）注册用户的 `/jev` 命令。其语法是 `question` 表示是／否判断，或 `question | option | option` 表示 choice；其状态是会话中最新的人类文本和模型文本，按数量和字符数限制。答案直接渲染，并作为 `command-jev` 通知注入接收的 agent，使用户的咨询在 agent 的下一个步骤成为共享上下文。
 
-`dsh-base` 组合包挂载全部三行，并把该 seam 路由到 OpenRouter（`baseURL: https://openrouter.ai/api`、`model: typesafe/jev-1.13`、`apiKeyEnv: OPENROUTER_API_KEY`）：OpenRouter 原样提供 TypeSafe 的 System One 端点，一个 OpenRouter 密钥就能同时覆盖 Jev 和部署已经路由到那里的其他模型；包默认值仍指向 `api.typesafe.ai`，供直接持有 TypeSafe 密钥的场景使用。Web 组合包在全局禁用工具行与命令行，并把它们列入自己的 `cordis` 与 `standard` agent preset，与 goal 的工具和命令做法相同，因此 agent 看到的工具来自它的 preset。没有密钥的部署保持工具和命令可见；此时调用以 `JEV_CREDENTIAL_MISSING` 失败并给出应存储的引用，遵循 web seam 的规则：凭据状态是执行时事实，而非注册时事实。
+`dsh-base` 组合包携带全部三行，默认禁用，直到启动环境设置 `DSH_JEV_ENABLED=yes` 才挂载，并把该 seam 路由到 OpenRouter（`baseURL: https://openrouter.ai/api`、`model: typesafe/jev-1.13`、`apiKeyEnv: OPENROUTER_API_KEY`）：OpenRouter 原样提供 TypeSafe 的 System One 端点，一个 OpenRouter 密钥就能同时覆盖 Jev 和部署已经路由到那里的其他模型；包默认值仍指向 `api.typesafe.ai`，供直接持有 TypeSafe 密钥的场景使用。Web 组合包在全局禁用工具行与命令行，并把它们列入自己的 `cordis` 与 `standard` agent preset，与 goal 的工具和命令做法相同，因此 agent 看到的工具来自它的 preset。没有密钥的部署保持工具和命令可见；此时调用以 `JEV_CREDENTIAL_MISSING` 失败并给出应存储的引用，遵循 web seam 的规则：凭据状态是执行时事实，而非注册时事实。
 
 ### 为什么 seam 与厂商共用一个包
 
@@ -52,11 +52,13 @@ Web GUI 会把从未提示过的会话停留在空白欢迎页上，其 Chat 把
 
 **在注册时按密钥门控工具。** 否决：凭据可用性是异步的，且在进程运行期间可能变化，web seam 已经确立稳定 schema 加执行时失败才是正确的面向模型约定。
 
+**默认挂载 Jev。** 否决：每个部署都会在每次请求上支付 schema 和区段的 token，并让每个无密钥 fixture 都携带 Jev，包括没有 TypeSafe 或 OpenRouter 密钥的部署；环境开关保持随附前缀不变，让单个部署无需补丁层即可选择开启。
+
 **从 `/jev` 提出 score 问题。** 延后：第三种语法形式会让命令行在选项与等级之间产生歧义；工具已公开 score，命令在用户需求出现时再增加形式。
 
 ## 后果
 
-**每次 base 请求多两项模型可见内容。** `jev` schema 和 `tool:jev` 区段在 base 组合包的每次请求上花费固定 token，无论是否有密钥；profile 补丁可以禁用这些行。
+**选择开启的部署每次请求多两项模型可见内容。** 一旦设置 `DSH_JEV_ENABLED=yes`，`jev` schema 和 `tool:jev` 区段在每次请求上花费固定 token，无论是否有密钥；从未开启的部署不付任何代价。
 
 **判断的质量取决于提供的状态。** Jev 看不到调用方没有发送的任何内容，因此不完整的 `state` 会得到对错误事实的自信答案。提示词区段和工具描述都说明了这一点，命令的有界对话窗口也被记录为用户咨询所能看到的全部内容。
 
@@ -64,4 +66,4 @@ Web GUI 会把从未提示过的会话停留在空白欢迎页上，其 Chat 把
 
 **一个包里只有一个厂商。** 增加第二个 System One 提供方意味着把 `dsh-jev` 拆成一个定义和两个实现，这是预发布立场允许的、无需兼容垫片的重命名。
 
-在 `dsh-base` 中挂载 `tool-jev` 会把它的 schema 与提示词区段加入每个 profile 的请求前缀，因此无密钥快照语料采用刷新而非重新录制；`persistent-tools` SDK 场景排除该工具以保持最小化；两个 compaction 场景把上下文窗口按新增前缀（估算 632 个 token）放宽，使触发点保持相同的相对位置。
+由于这些行默认禁用，无密钥快照语料保持 upstream 的请求前缀不变；只有两个 Jev 场景设置 `DSH_JEV_ENABLED=yes`，headless 场景通过驱动器的环境变量，Web 场景在 scaffold 启动前于测试进程中设置。

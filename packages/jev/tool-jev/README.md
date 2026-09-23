@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-tool-jev` exposes Jev to the model as the `jev` tool with a fixed prompt section, so an agent can ask calibrated choice, yes/no, and score questions about state it supplies in one call. Choose it wherever `ctx.jev` is mounted and the agent should decide quickly on semantic reading; the tool bounds question count and state size and renders answers as whole-percent lines. The seam owns credentials, transport, and answer validation.
+`dsh-tool-jev` exposes Jev to the model as the `jev` tool with a fixed prompt section, so an agent can ask calibrated choice, yes/no, and score questions about state it supplies in one call. Choose it wherever `ctx.jev` is mounted and the agent should decide quickly on semantic reading; the tool bounds question count and state size and renders answers as whole-percent lines. The seam owns credentials, transport, and answer validation. It mounts only when `DSH_JEV_ENABLED=yes`.
 
 ## Table of Contents
 

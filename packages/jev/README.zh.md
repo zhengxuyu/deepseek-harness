@@ -9,7 +9,7 @@ kind: "package-group"
 
 ## 概述
 
-jev 包组把 TypeSafe 的 System One 模型变成 harness 的快思考队友。agent 通过 `jev` 工具咨询它，用户通过 `/jev` 咨询它，答案会共享回 agent。`jev` 拥有 seam、请求与答案词汇以及 TypeSafe 传输；`tool-jev` 与 `command-jev` 是它的两个消费者。Jev 只返回经校准的类型化判断而非散文，且只看到各消费者发送的状态。
+jev 包组把 TypeSafe 的 System One 模型变成 harness 的快思考队友。agent 通过 `jev` 工具咨询它，用户通过 `/jev` 咨询它，答案会共享回 agent。`jev` 拥有 seam、请求与答案词汇以及 TypeSafe 传输；`tool-jev` 与 `command-jev` 是它的两个消费者。Jev 只返回经校准的类型化判断而非散文，且只看到各消费者发送的状态。这些行默认禁用；在启动环境中设置 `DSH_JEV_ENABLED=yes` 即可挂载。
 
 ## 目录
 

@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-command-jev` gives users `/jev` to ask Jev a yes/no or multiple-choice question about the recent conversation without a model turn. The answer renders directly in the UI and is also injected into the agent as a bounded notice, so the lead agent sees what its teammate told the user. Choose it in interactive deployments with a command adapter and a mounted `ctx.jev`; grammar errors, failures, and deadlines inject nothing.
+`dsh-command-jev` gives users `/jev` to ask Jev a yes/no or multiple-choice question about the recent conversation without a model turn. The answer renders directly in the UI and is also injected into the agent as a bounded notice, so the lead agent sees what its teammate told the user. Choose it in interactive deployments with a command adapter and a mounted `ctx.jev`; grammar errors, failures, and deadlines inject nothing. It mounts only when `DSH_JEV_ENABLED=yes`.
 
 ## Table of Contents
 

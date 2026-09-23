@@ -60,6 +60,8 @@ OpenRouter 在 `https://openrouter.ai/api/v1/systemone` 提供同一端点，请
     model: typesafe/jev-1.13
 ```
 
+随附的每一行都带有 `disabled: !!js process.env.DSH_JEV_ENABLED !== 'yes'`，因此 Jev 默认不加载：在启动环境中导出 `DSH_JEV_ENABLED=yes` 即可一并挂载 seam、工具、命令和 Web 投影。其他取值或未设置该变量都不会挂载；profile 补丁仍可显式设置 `disabled`。
+
 <a id="service-api"></a>
 ## 服务 API
 

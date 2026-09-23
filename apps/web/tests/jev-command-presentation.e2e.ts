@@ -18,6 +18,9 @@ const SNAPSHOT_DIR = fileURLToPath(new URL('./expected/jev-command-presentation'
 const UI_EXPECTED = fileURLToPath(new URL('./expected/jev-command-presentation/ui.expected.md', import.meta.url))
 const OVERLAY = fileURLToPath(new URL('./jev-command-presentation.overlay.yml', import.meta.url))
 const MODE = webSnapshotMode()
+// Jev is opt-in: the shipped rows stay disabled until a deployment says yes,
+// and the scaffold boots the profile in this process.
+process.env.DSH_JEV_ENABLED = 'yes'
 const QUESTION = 'Which storage fits? | sqlite | jsonl'
 const ANSWER_PREFIX = 'Jev is unavailable (JEV_CREDENTIAL_MISSING)'
 

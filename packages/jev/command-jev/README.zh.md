@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-command-jev` 让用户用 `/jev` 就最近的对话向 Jev 提出是否或多选问题，而不消耗模型回合。答案直接渲染在 UI 中，并作为有界通知注入 agent，因此 lead agent 能看到队友告诉用户的内容。在带有命令适配器且挂载了 `ctx.jev` 的交互式部署中选择它；语法错误、失败与超时不会注入任何内容。
+`dsh-command-jev` 让用户用 `/jev` 就最近的对话向 Jev 提出是否或多选问题，而不消耗模型回合。答案直接渲染在 UI 中，并作为有界通知注入 agent，因此 lead agent 能看到队友告诉用户的内容。在带有命令适配器且挂载了 `ctx.jev` 的交互式部署中选择它；语法错误、失败与超时不会注入任何内容。仅当 `DSH_JEV_ENABLED=yes` 时才会挂载。
 
 ## 目录
 

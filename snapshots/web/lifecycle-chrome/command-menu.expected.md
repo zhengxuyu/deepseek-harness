@@ -9,4 +9,3 @@
   - option "Permission Switch the permission preset (sandbox mode + approval policy)"
   - option "Model Select the model for this conversation"
   - option "Export Download this Session log as a ZIP archive"
-  - option "jev Ask Jev, the fast-thinking teammate, for a quick judgment"

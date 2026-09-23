@@ -25,8 +25,6 @@ Use the web_fetch tool to retrieve the content of a specific HTTP(S) URL (for ex
 
 Use goal tools for one long-running completion objective in the current session. create_goal may infer goal intent from a direct human request in any language; do not create a goal for routine single-turn work. Call get_goal before update_goal and copy its exact goal_id and revision. After session resume or fork, an active goal is disarmed: when a human asks to continue or resume in any wording or language, use update_goal action resume to rearm it. Mark complete only when the objective is actually achieved. Mark blocked only after the same blocking condition persists for at least 3 consecutive goal rounds, and report that concrete condition in blocked_reason; difficulty, uncertainty, or useful remaining work is not blocked.
 
-Jev is a fast-thinking teammate available through the `jev` tool: a System One model that returns calibrated judgments instead of prose. Consult it for quick decisions that hinge on reading rather than lookup or computation; put every fact the judgment needs in `state`, ask independent questions together, and treat the returned probabilities and confidence as signals to threshold on — a low-confidence answer on a consequential decision is a reason to gather more evidence or ask the user, not to guess. You keep responsibility for exact facts, calculations, and the final decision.
-
 Use the workflow tool ONLY when the user explicitly asks for a workflow or for large multi-agent orchestration: you write a JavaScript script (the tool description documents the exact format) that fans work out across many subagents with phases and structured results. For one or two delegations, prefer plain subagent calls.
 
 Use subagent in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set `run_in_background: false` only when your next action depends on that subagent's result. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message.
@@ -116,23 +114,6 @@ interface ToolArgsMap {
   interrupt_agent: {
     /** The agent id of the running agent to interrupt. */
     agent_id: string;
-  } & Record<string, JsonValue>;
-  /** Ask Jev, a fast-thinking teammate, for calibrated judgments about facts you supply. Jev is a System One model: it does not reason, browse, or write prose; it returns typed answers with probabilities. Send complete `state` (Jev sees nothing else) and one or more independent questions: `choice` picks one named option, `noul` gives the probability that a condition holds, `score` rates along ordered levels. Use it for quick decisions that hinge on semantic reading — picking between candidates, triage, ranking, checking a condition — not for lookups, arithmetic, or facts outside `state`. Ask every independent question about the same state in one call. */
-  jev: {
-    /** Everything the judgment needs: source text, candidates, constraints, current facts. Prefer an object with named fields when the context has several parts. */
-    state: string | Record<string, JsonValue>;
-    /** Independent questions about the same state, at most 16. Each id must be unique. */
-    questions: ({
-      /** Your own handle for the answer; never shown to Jev. */
-      id: string;
-      type: "choice" | "noul" | "score";
-      /** The complete question, standing alone. Reference nested state with backticked paths such as `ticket.messages[0].text`. */
-      instructions: string;
-      /** choice only: option name → short description, or null when the name explains itself. Include a no-match option when nothing may fit. */
-      options?: Record<string, JsonValue>;
-      /** score only: 2–10 ordered level descriptions from lowest to highest, each a concrete situation. */
-      levels?: string[];
-    })[];
   } & Record<string, JsonValue>;
   /** Request cancellation of a running background job by job id. Returns immediately; the job settles as killed once its work actually stops. */
   job_kill: {
@@ -365,31 +346,6 @@ interface ToolOutputMap {
   };
   interrupt_agent: {
     accepted: boolean;
-  };
-  jev: {
-    model: string;
-    answers: ({
-      id: string;
-      type: "choice";
-      choice: string;
-      probabilities: Record<string, JsonValue>;
-      confidence: number;
-    } | {
-      id: string;
-      type: "noul";
-      noul: number;
-    } | {
-      id: string;
-      type: "score";
-      score: number;
-      legend: Record<string, JsonValue>;
-      probabilities: Record<string, JsonValue>;
-      confidence: number;
-    })[];
-    usage: {
-      inputTokens: number;
-      outputTokens: number;
-    };
   };
   job_kill: {
     outcome: "cancellation-requested" | "already-finished";

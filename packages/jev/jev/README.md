@@ -60,6 +60,8 @@ OpenRouter serves the same endpoint under `https://openrouter.ai/api/v1/systemon
     model: typesafe/jev-1.13
 ```
 
+Every shipped row carries `disabled: !!js process.env.DSH_JEV_ENABLED !== 'yes'`, so Jev is off by default: export `DSH_JEV_ENABLED=yes` in the launching environment to mount the seam, the tool, the command, and the Web projection together. Any other value, or an unset variable, leaves them unmounted; a profile patch can still set `disabled` explicitly.
+
 <a id="service-api"></a>
 ## Service API
 
