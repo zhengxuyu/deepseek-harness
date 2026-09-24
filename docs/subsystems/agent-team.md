@@ -73,11 +73,17 @@ interface TeamTaskSnapshot {
   /** How the owning run ended when it lost the task; present only with an `owner-failed` cause from a tracked run. */
   readonly ownerStop?: TeamStopReason
   readonly blockedBy: TeamTaskId[]
+  /** What this task takes from each blocker's artifacts, keyed by blocker id; keys are a subset of {@link blockedBy}. */
+  readonly edgeInstructions?: Record<string, string>
   readonly writeScopes: string[]
+  /** Files the task must produce; absent means none declared. */
+  readonly outputs?: ArtifactContract[]
+  /** Outputs recorded at completion; present only while {@link status} is `completed` and outputs were declared. */
+  readonly artifacts?: TaskArtifact[]
 }
 ```
 
-`pending` is unstarted or released, `in_progress` carries an owner, `completed` satisfies blockers, `lost` is an in-progress task whose owner the harness gave up on (`lostCause` is `owner-failed` or `run-ended`; the owner stays recorded until `reopen`), and `deleted` is a retained tombstone. `in_progress` and `completed` tasks are frozen: their text, edges, and assignment do not change. A task lost because its tracked run ended without completing also records that run's stop reason as `ownerStop`. Views add owner name, readiness, lost cause, owner stop, and write-scope overlap warnings without changing the durable snapshot.
+`pending` is unstarted or released, `in_progress` carries an owner, `completed` satisfies blockers, `lost` is an in-progress task whose owner the harness gave up on (`lostCause` is `owner-failed` or `run-ended`; the owner stays recorded until `reopen`), and `deleted` is a retained tombstone. `in_progress` and `completed` tasks are frozen: their text, edges, and assignment do not change. A task lost because its tracked run ended without completing also records that run's stop reason as `ownerStop`. `outputs` is the task's definition of done: each `ArtifactContract` names a workspace-relative path and a kind (`file`, `json` with an optional schema, `csv`, `npy`, `image`, `python`), and `complete` is refused with `TEAM_TASK_OUTPUT_MISSING` until every non-optional output exists and passes its kind's check; the accepted outputs are then recorded as `artifacts` (path, bytes, sha256, and the earlier completed task an output at that path supersedes). Two live tasks cannot declare one output path. `edgeInstructions` says what the task takes from each blocker. Views add owner name, readiness, lost cause, owner stop, and write-scope overlap warnings without changing the durable snapshot; the `claim` and `reassign` results additionally carry the harness-composed `brief`.
 
 ## Replay
 

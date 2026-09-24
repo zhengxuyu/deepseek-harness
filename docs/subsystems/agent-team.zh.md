@@ -73,11 +73,17 @@ interface TeamTaskSnapshot {
   /** How the owning run ended when it lost the task; present only with an `owner-failed` cause from a tracked run. */
   readonly ownerStop?: TeamStopReason
   readonly blockedBy: TeamTaskId[]
+  /** What this task takes from each blocker's artifacts, keyed by blocker id; keys are a subset of {@link blockedBy}. */
+  readonly edgeInstructions?: Record<string, string>
   readonly writeScopes: string[]
+  /** Files the task must produce; absent means none declared. */
+  readonly outputs?: ArtifactContract[]
+  /** Outputs recorded at completion; present only while {@link status} is `completed` and outputs were declared. */
+  readonly artifacts?: TaskArtifact[]
 }
 ```
 
-`pending` 表示尚未开始或已经释放，`in_progress` 携带 owner，`completed` 满足 blocker，`lost` 是 harness 已放弃其 owner 的进行中任务（`lostCause` 为 `owner-failed` 或 `run-ended`；owner 记录保留到 `reopen` 为止），`deleted` 是保留的 tombstone。`in_progress` 与 `completed` 任务是冻结的：其文本、边与分配不再改变。因被跟踪的运行未完成而 lost 的任务还会把该运行的 stop reason 记为 `ownerStop`。view 会添加 owner name、readiness、lost cause、owner stop 和 write-scope 重叠警告，但不会改变持久快照。
+`pending` 表示尚未开始或已经释放，`in_progress` 携带 owner，`completed` 满足 blocker，`lost` 是 harness 已放弃其 owner 的进行中任务（`lostCause` 为 `owner-failed` 或 `run-ended`；owner 记录保留到 `reopen` 为止），`deleted` 是保留的 tombstone。`in_progress` 与 `completed` 任务是冻结的：其文本、边与分配不再改变。因被跟踪的运行未完成而 lost 的任务还会把该运行的 stop reason 记为 `ownerStop`。`outputs` 是任务的完成定义：每个 `ArtifactContract` 指定一个 workspace 相对路径和一种 kind（`file`、可带 schema 的 `json`、`csv`、`npy`、`image`、`python`），在每个非可选输出都存在于磁盘并通过其 kind 的检查之前，`complete` 以 `TEAM_TASK_OUTPUT_MISSING` 拒绝；通过的输出随后记为 `artifacts`（路径、字节数、sha256，以及该路径上被它取代的更早已完成任务）。两个活跃任务不能声明同一个输出路径。`edgeInstructions` 说明任务从每个 blocker 取什么。view 会添加 owner name、readiness、lost cause、owner stop 和 write-scope 重叠警告，但不会改变持久快照；`claim` 与 `reassign` 的结果还携带 harness 组合的 `brief`。
 
 ## 回放
 

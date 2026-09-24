@@ -3,6 +3,7 @@
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm/types'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 
 /**
  * How a member's or delegated run's turn ended: the subagent stop reason
@@ -108,6 +109,40 @@ export type TeamTaskStatus = 'pending' | 'in_progress' | 'completed' | 'lost' | 
  */
 export type TeamTaskLostCause = 'owner-failed' | 'run-ended'
 
+/** What kind of file an output contract names; each kind has its own check at `complete`. */
+export type ArtifactKind = 'file' | 'json' | 'csv' | 'npy' | 'image' | 'python'
+
+/**
+ * One file a task promises to produce: the definition of done the harness
+ * checks on disk when the task completes.
+ */
+export interface ArtifactContract {
+  /** Workspace-relative file path, normalized like a write scope. */
+  readonly path: string
+  /**
+   * `file` must exist and be non-empty; `json` must parse and, with `schema`,
+   * validate; `csv` needs a header line; `npy` and `image` must carry their
+   * format's magic bytes; `python` must parse as an entry file that imports no
+   * module defined in the workspace, so it runs alone.
+   */
+  readonly kind: ArtifactKind
+  /** JSON Schema (the subset `@deepseek-ai/dsh-tools` enforces) a `json` output must satisfy. */
+  readonly schema?: Record<string, JsonValue>
+  /** Whether completion may proceed without this file. */
+  readonly optional?: boolean
+}
+
+/** One produced output recorded at completion: where the artifact is and what it was. */
+export interface TaskArtifact {
+  readonly path: string
+  readonly bytes: number
+  readonly sha256: string
+  /** The earlier completed task whose artifact at this path this one replaced, when the content differs. */
+  readonly supersedes?: { readonly task: TeamTaskId; readonly sha256: string }
+  /** Harness-local path of the retained previous version, when `artifactRoot` retained it. */
+  readonly previousVersion?: string
+}
+
 /** Whole durable task snapshot; every mutation increments {@link revision}. */
 export interface TeamTaskSnapshot {
   readonly id: TeamTaskId
@@ -121,7 +156,13 @@ export interface TeamTaskSnapshot {
   /** How the owning run ended when it lost the task; present only with an `owner-failed` cause from a tracked run. */
   readonly ownerStop?: TeamStopReason
   readonly blockedBy: TeamTaskId[]
+  /** What this task takes from each blocker's artifacts, keyed by blocker id; keys are a subset of {@link blockedBy}. */
+  readonly edgeInstructions?: Record<string, string>
   readonly writeScopes: string[]
+  /** Files the task must produce; absent means none declared. */
+  readonly outputs?: ArtifactContract[]
+  /** Outputs recorded at completion; present only while {@link status} is `completed` and outputs were declared. */
+  readonly artifacts?: TaskArtifact[]
 }
 
 /**
@@ -152,6 +193,11 @@ export interface TeamTaskView {
   readonly ownerName?: string
   readonly lostCause?: TeamTaskLostCause
   readonly ownerStop?: TeamStopReason
+  readonly edgeInstructions?: Record<string, string>
+  readonly outputs: ArtifactContract[]
+  readonly artifacts?: TaskArtifact[]
+  /** The harness-composed brief for the owner, present on the result of `claim` and of `reassign` to a member. */
+  readonly brief?: string
   readonly ready: boolean
   readonly writeScopeWarnings: string[]
 }
@@ -214,6 +260,13 @@ export interface Config {
    * default: the board then holds only tasks members created.
    */
   readonly trackSubagentRuns?: boolean
+  /**
+   * Absolute harness-local directory under which every completed output is
+   * retained as `<team>/<task>/<path>`, so a later task that overwrites the
+   * same path leaves the previous version and its diff recoverable. Absent
+   * means outputs are hashed but not retained.
+   */
+  readonly artifactRoot?: string
 }
 
 /** Input for creating one durable teammate. */
@@ -249,7 +302,9 @@ export interface CreateTeamTaskRequest {
   readonly subject: string
   readonly description: string
   readonly blockedBy?: readonly TeamTaskId[]
+  readonly edgeInstructions?: Readonly<Record<string, string>>
   readonly writeScopes?: readonly string[]
+  readonly outputs?: readonly ArtifactContract[]
 }
 
 /** Supported task mutation actions. */
@@ -271,7 +326,9 @@ export interface UpdateTeamTaskRequest {
   readonly subject?: string
   readonly description?: string
   readonly blockedBy?: readonly TeamTaskId[]
+  readonly edgeInstructions?: Readonly<Record<string, string>>
   readonly writeScopes?: readonly string[]
+  readonly outputs?: readonly ArtifactContract[]
   readonly owner?: string
 }
 

@@ -92,6 +92,21 @@ const teamTaskSnapshotV2Schema = z.object({
   writeScopes: z.array(z.string()),
 }).strict() as z.ZodType<TeamTaskSnapshotV2>
 
+const artifactContractSchema = z.object({
+  path: z.string().min(1),
+  kind: z.enum(['file', 'json', 'csv', 'npy', 'image', 'python']),
+  schema: z.record(z.string(), z.unknown()).optional(),
+  optional: z.boolean().optional(),
+}).strict()
+
+const taskArtifactSchema = z.object({
+  path: z.string().min(1),
+  bytes: nonNegativeSafeInteger,
+  sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+  supersedes: z.object({ task: teamTaskIdSchema, sha256: z.string().regex(/^[0-9a-f]{64}$/u) }).strict().optional(),
+  previousVersion: z.string().min(1).optional(),
+}).strict()
+
 const teamTaskSnapshotSchema = z.object({
   id: teamTaskIdSchema,
   revision: positiveSafeInteger,
@@ -102,13 +117,22 @@ const teamTaskSnapshotSchema = z.object({
   lostCause: z.enum(['owner-failed', 'run-ended']).optional(),
   ownerStop: z.string().min(1).optional(),
   blockedBy: z.array(teamTaskIdSchema),
+  edgeInstructions: z.record(z.string(), z.string()).optional(),
   writeScopes: z.array(z.string()),
+  outputs: z.array(artifactContractSchema).optional(),
+  artifacts: z.array(taskArtifactSchema).optional(),
 }).strict().refine(
   task => (task.status === 'lost') === (task.lostCause !== undefined),
   { message: 'lostCause must be present exactly while status is lost' },
 ).refine(
   task => task.ownerStop === undefined || task.lostCause === 'owner-failed',
   { message: 'ownerStop requires the owner-failed cause' },
+).refine(
+  task => task.edgeInstructions === undefined || Object.keys(task.edgeInstructions).every(id => task.blockedBy.includes(toTeamTaskId(id))),
+  { message: 'edgeInstructions may name only blockers' },
+).refine(
+  task => task.artifacts === undefined || task.status === 'completed',
+  { message: 'artifacts are recorded only on a completed task' },
 ) as z.ZodType<TeamTaskSnapshot>
 
 const teamMessageSnapshotSchema = z.object({

@@ -2120,7 +2120,7 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 
 ### `team_task_create`
 
-在共享 Team 任务板上创建一个无 owner 的 pending task。
+在共享 Team 任务板上创建一个无 owner 的 pending task。 outputs 是完成定义：在每个非可选输出都存在并通过检查之前，complete 会被拒绝。
 
 ```json
 {
@@ -2134,11 +2134,72 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
       "type": "string",
       "description": "Complete task details and acceptance criteria."
     },
+    "outputs": {
+      "type": "array",
+      "description": "Files this task must produce; empty for a task with no file deliverable.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Workspace-relative file path."
+          },
+          "kind": {
+            "type": "string",
+            "description": "file: exists and non-empty; json: parses and matches schema when given; csv: has a header and rows; npy and image: format magic bytes; python: an entry file that imports no workspace module, so it runs alone.",
+            "enum": [
+              "file",
+              "json",
+              "csv",
+              "npy",
+              "image",
+              "python"
+            ]
+          },
+          "schema": {
+            "type": "object",
+            "description": "JSON Schema a json output must satisfy.",
+            "additionalProperties": true
+          },
+          "optional": {
+            "type": "boolean",
+            "description": "Whether completion may proceed without this file."
+          }
+        },
+        "required": [
+          "path",
+          "kind"
+        ]
+      }
+    },
     "blocked_by": {
       "type": "array",
-      "description": "Task ids that must complete first.",
+      "description": "Tasks that must complete first, each optionally with what this task takes from it.",
       "items": {
-        "type": "string"
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "task": {
+                "type": "string",
+                "description": "Blocking task id."
+              },
+              "instruction": {
+                "type": "string",
+                "description": "What this task takes from the blocker's artifacts."
+              }
+            },
+            "required": [
+              "task",
+              "instruction"
+            ]
+          }
+        ]
       }
     },
     "write_scopes": {
@@ -2151,7 +2212,8 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
   },
   "required": [
     "subject",
-    "description"
+    "description",
+    "outputs"
   ]
 }
 ```
@@ -2257,11 +2319,72 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
       "type": "string",
       "description": "Replacement details for edit."
     },
+    "outputs": {
+      "type": "array",
+      "description": "Replacement output contracts for edit.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Workspace-relative file path."
+          },
+          "kind": {
+            "type": "string",
+            "description": "file: exists and non-empty; json: parses and matches schema when given; csv: has a header and rows; npy and image: format magic bytes; python: an entry file that imports no workspace module, so it runs alone.",
+            "enum": [
+              "file",
+              "json",
+              "csv",
+              "npy",
+              "image",
+              "python"
+            ]
+          },
+          "schema": {
+            "type": "object",
+            "description": "JSON Schema a json output must satisfy.",
+            "additionalProperties": true
+          },
+          "optional": {
+            "type": "boolean",
+            "description": "Whether completion may proceed without this file."
+          }
+        },
+        "required": [
+          "path",
+          "kind"
+        ]
+      }
+    },
     "blocked_by": {
       "type": "array",
-      "description": "Complete blocker list for set_dependencies.",
+      "description": "Complete blocker list for set_dependencies, each optionally with an instruction.",
       "items": {
-        "type": "string"
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "task": {
+                "type": "string",
+                "description": "Blocking task id."
+              },
+              "instruction": {
+                "type": "string",
+                "description": "What this task takes from the blocker's artifacts."
+              }
+            },
+            "required": [
+              "task",
+              "instruction"
+            ]
+          }
+        ]
       }
     },
     "write_scopes": {

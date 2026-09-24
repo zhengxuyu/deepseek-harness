@@ -1,10 +1,14 @@
 /** Shared Team task DAG commands and runtime-enriched views. */
 
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { FileSystem } from '@deepseek-ai/dsh-fs'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SubagentStopReason } from '@deepseek-ai/dsh-subagent'
+import { assertSupportedJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { TeamMembership } from './roster.ts'
-import { TeamError } from './error.ts'
+import { taskBrief } from './brief.ts'
+import { errorMessage, TeamError } from './error.ts'
+import { checkOutputs } from './settle.ts'
 import type { TeamJournal } from './journal.ts'
 import type { TeamState } from './projection.ts'
 import { resolveActiveMember } from './roster.ts'
@@ -12,8 +16,10 @@ import { assertTaskGraphCandidate, TeamTaskGraphError } from './task-graph.ts'
 import type { TeamTaskGraphViolation } from './task-graph.ts'
 import { TeamId, TeamTaskId } from './types.ts'
 import type {
+  ArtifactContract,
   CreateTeamTaskRequest,
   OutstandingTeamTask,
+  TaskArtifact,
   TeamTaskLostCause,
   TeamTaskSnapshot,
   TeamTaskView,
@@ -44,6 +50,19 @@ function editable(task: TeamTaskSnapshot): boolean {
   return task.status === 'pending' || task.status === 'lost'
 }
 
+/** Whether a task may still produce its outputs, so its declared paths are taken. */
+function live(task: TeamTaskSnapshot): boolean {
+  return task.status === 'pending' || task.status === 'in_progress' || task.status === 'lost'
+}
+
+/** What the board needs from its host to check outputs at completion. */
+export interface TeamTaskBoardHost {
+  /** The workspace filesystem, read at completion; absent refuses to complete a task with declared outputs. */
+  readonly fs: () => FileSystem | undefined
+  /** Where completed outputs are retained, or undefined for hashing only. */
+  readonly artifactRoot: string | undefined
+}
+
 /** Owns Team task limits, authorization, transitions, and derived views. */
 export class TeamTaskBoard {
   /**
@@ -53,6 +72,7 @@ export class TeamTaskBoard {
   constructor(
     private readonly journal: TeamJournal,
     private readonly maxTasks: number,
+    private readonly host: TeamTaskBoardHost,
   ) {}
 
   /**
@@ -62,11 +82,17 @@ export class TeamTaskBoard {
    * @returns the revision-one task view.
    */
   async create(membership: TeamMembership, request: CreateTeamTaskRequest): Promise<TeamTaskView> {
-    return this.record(membership.root, request, state => ({
-      status: 'pending',
-      blockedBy: this.dependencies(request.blockedBy ?? [], state),
-      writeScopes: this.writeScopes(request.writeScopes ?? []),
-    }))
+    return this.record(membership.root, request, (state) => {
+      const blockedBy = this.dependencies(request.blockedBy ?? [], state)
+      const outputs = this.outputs(request.outputs ?? [])
+      return {
+        status: 'pending',
+        blockedBy,
+        ...this.edgeInstructions(request.edgeInstructions, blockedBy),
+        writeScopes: this.writeScopes(request.writeScopes ?? []),
+        ...outputs.length === 0 ? {} : { outputs },
+      }
+    })
   }
 
   /**
@@ -222,32 +248,42 @@ export class TeamTaskBoard {
           if (current.status !== 'in_progress') throw new TeamError('only an in-progress task can be released', 'TEAM_TASK_INVALID_TRANSITION')
           next = this.withoutOwner({ ...current, status: 'pending' })
           break
-        case 'edit':
+        case 'edit': {
           authorizeOwner()
           this.assertEditable(current, 'edited')
-          if (request.subject === undefined && request.description === undefined && request.writeScopes === undefined) {
-            throw new TeamError('task edit requires subject, description, or write_scopes', 'TEAM_INVALID_ARGUMENT')
+          if (request.subject === undefined && request.description === undefined && request.writeScopes === undefined
+            && request.outputs === undefined) {
+            throw new TeamError('task edit requires subject, description, write_scopes, or outputs', 'TEAM_INVALID_ARGUMENT')
           }
+          const { outputs: _outputs, ...withoutOutputs } = current
+          const outputs = request.outputs === undefined ? current.outputs : this.outputs(request.outputs)
           next = {
-            ...current,
+            ...withoutOutputs,
             ...request.subject === undefined ? {} : { subject: requiredText(request.subject, 'subject', 200) },
             ...request.description === undefined
               ? {}
               : { description: requiredText(request.description, 'description', 16_384) },
             ...request.writeScopes === undefined ? {} : { writeScopes: this.writeScopes(request.writeScopes) },
+            ...outputs === undefined || outputs.length === 0 ? {} : { outputs },
           }
           break
-        case 'set_dependencies':
+        }
+        case 'set_dependencies': {
           authorizeOwner()
           this.assertEditable(current, 'rewired')
           if (request.blockedBy === undefined) throw new TeamError('set_dependencies requires blocked_by', 'TEAM_INVALID_ARGUMENT')
-          next = { ...current, blockedBy: this.dependencies(request.blockedBy, state, current.id) }
+          const blockedBy = this.dependencies(request.blockedBy, state, current.id)
+          const { edgeInstructions: _edges, ...withoutEdges } = current
+          next = { ...withoutEdges, blockedBy, ...this.edgeInstructions(request.edgeInstructions, blockedBy) }
           break
-        case 'complete':
+        }
+        case 'complete': {
           authorizeOwner()
           if (current.status !== 'in_progress') throw new TeamError('only an in-progress task can complete', 'TEAM_TASK_INVALID_TRANSITION')
-          next = { ...current, status: 'completed' }
+          const artifacts = await this.settle(root, state, current)
+          next = { ...current, status: 'completed', ...artifacts.length === 0 ? {} : { artifacts } }
           break
+        }
         case 'reopen':
           authorizeOwner()
           if (current.status !== 'completed' && current.status !== 'lost') {
@@ -298,8 +334,29 @@ export class TeamTaskBoard {
         revision: current.revision + 1,
       }
       this.assertTaskGraph(state, task)
+      this.assertOutputsFree(state, task)
       await this.journal.appendAndFlush(root, 'team/task', { version: 3, teamId: TeamId(root.id), task })
-      return this.taskView(root, state, task)
+      const view = this.taskView(root, state, task)
+      // Starting work is where the owner reads what it is working to.
+      const starts = request.action === 'claim' || (request.action === 'reassign' && task.ownerId !== undefined)
+      return starts ? { ...view, brief: taskBrief(state, task) } : view
+    })
+  }
+
+  /** Check every declared output on disk and return the artifacts to record. */
+  private async settle(root: Agent, state: TeamState, task: TeamTaskSnapshot): Promise<TaskArtifact[]> {
+    if (task.outputs === undefined || task.outputs.length === 0) return []
+    const fs = this.host.fs()
+    if (fs === undefined) {
+      throw new TeamError('completing a task with declared outputs requires the fs service', 'TEAM_OUTPUTS_UNCHECKABLE')
+    }
+    return await checkOutputs({
+      fs,
+      task,
+      cwd: root.session.header.cwd,
+      teamId: TeamId(root.id),
+      completed: state.tasks.filter(candidate => candidate.status === 'completed' && candidate.id !== task.id),
+      artifactRoot: this.host.artifactRoot,
     })
   }
 
@@ -338,9 +395,64 @@ export class TeamTaskBoard {
         ...rest(state),
       }
       this.assertTaskGraph(state, task)
+      this.assertOutputsFree(state, task)
       await this.journal.appendAndFlush(root, 'team/task', { version: 3, teamId: TeamId(root.id), task })
       return this.taskView(root, state, task)
     })
+  }
+
+  /** Refuse an output path another task may still produce: two live nodes cannot claim one file. */
+  private assertOutputsFree(state: TeamState, task: TeamTaskSnapshot): void {
+    if (task.outputs === undefined || !live(task)) return
+    for (const contract of task.outputs) {
+      const other = state.tasks.find(candidate =>
+        candidate.id !== task.id && live(candidate) && (candidate.outputs ?? []).some(item => item.path === contract.path))
+      if (other !== undefined) {
+        throw new TeamError(`output ${JSON.stringify(contract.path)} is already declared by live task "${other.id}"`, 'TEAM_TASK_OUTPUT_CONFLICT')
+      }
+    }
+  }
+
+  /** Normalize and validate declared outputs: workspace-relative paths, unique within the task, schemas the harness can enforce. */
+  private outputs(values: readonly ArtifactContract[]): ArtifactContract[] {
+    const seen = new Set<string>()
+    const result: ArtifactContract[] = []
+    for (const contract of values) {
+      const path = writeScope(contract.path)
+      if (seen.has(path)) throw new TeamError(`duplicate output ${JSON.stringify(path)}`, 'TEAM_INVALID_ARGUMENT')
+      seen.add(path)
+      if (contract.schema !== undefined) {
+        if (contract.kind !== 'json') throw new TeamError(`output ${JSON.stringify(path)}: only a json output takes a schema`, 'TEAM_INVALID_ARGUMENT')
+        try {
+          assertSupportedJsonSchema(contract.schema)
+        } catch (error: unknown) {
+          throw new TeamError(`output ${JSON.stringify(path)}: ${errorMessage(error)}`, 'TEAM_INVALID_ARGUMENT', { cause: error })
+        }
+      }
+      result.push({
+        path,
+        kind: contract.kind,
+        ...contract.schema === undefined ? {} : { schema: structuredClone(contract.schema) },
+        ...contract.optional === undefined ? {} : { optional: contract.optional },
+      })
+    }
+    return result
+  }
+
+  /** Validate edge instructions: non-empty text keyed by a current blocker. */
+  private edgeInstructions(
+    values: Readonly<Record<string, string>> | undefined,
+    blockedBy: readonly TeamTaskId[],
+  ): { edgeInstructions?: Record<string, string> } {
+    if (values === undefined) return {}
+    const result: Record<string, string> = {}
+    for (const [id, instruction] of Object.entries(values)) {
+      if (!blockedBy.includes(TeamTaskId(id))) {
+        throw new TeamError(`edge instruction names "${id}", which is not a blocker`, 'TEAM_INVALID_ARGUMENT')
+      }
+      result[id] = requiredText(instruction, `edge instruction for ${id}`, 4096)
+    }
+    return Object.keys(result).length === 0 ? {} : { edgeInstructions: result }
   }
 
   /** Reserve the next numeric task id under the non-deleted task limit. */
@@ -408,9 +520,9 @@ export class TeamTaskBoard {
     return task.blockedBy.every(id => state.tasks.find(candidate => candidate.id === id)?.status === 'completed')
   }
 
-  /** Remove the optional owner, lost-cause, and owner-stop fields under exactOptionalPropertyTypes. */
+  /** Remove the owner, lost-cause, owner-stop, and recorded-artifact fields under exactOptionalPropertyTypes. */
   private withoutOwner(task: TeamTaskSnapshot): TeamTaskSnapshot {
-    const { ownerId: _ownerId, lostCause: _lostCause, ownerStop: _ownerStop, ...without } = task
+    const { ownerId: _ownerId, lostCause: _lostCause, ownerStop: _ownerStop, artifacts: _artifacts, ...without } = task
     return without
   }
 
@@ -446,6 +558,9 @@ export class TeamTaskBoard {
       ...ownerName === undefined ? {} : { ownerName },
       ...task.lostCause === undefined ? {} : { lostCause: task.lostCause },
       ...task.ownerStop === undefined ? {} : { ownerStop: task.ownerStop },
+      ...task.edgeInstructions === undefined ? {} : { edgeInstructions: structuredClone(task.edgeInstructions) },
+      outputs: structuredClone(task.outputs ?? []),
+      ...task.artifacts === undefined ? {} : { artifacts: structuredClone(task.artifacts) },
       ready: task.status === 'pending' && this.taskReady(state, task),
       writeScopeWarnings: [...warnings],
     }
