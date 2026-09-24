@@ -6,6 +6,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { carrierKeyOf } from '@deepseek-ai/dsh-scope'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
 import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type { SubagentRuntime, SubagentRunEndInfo, SubagentRunId, SubagentRunInfo, SubagentStopReason } from '@deepseek-ai/dsh-subagent'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
@@ -80,10 +81,11 @@ export class TeamService extends TypertRemoteService {
     maxMessageBytes: z.number().step(1).min(1).default(DEFAULT_MAX_MESSAGE_BYTES),
     disposalTimeoutMs: z.number().step(1).min(1).default(DEFAULT_DISPOSAL_TIMEOUT_MS),
     trackSubagentRuns: z.boolean().default(false),
+    artifactRoot: z.string(),
   })
 
   /** Validated deployment limits used by every Team operation. */
-  private readonly config: Required<Config>
+  private readonly config: Required<Omit<Config, 'artifactRoot'>> & Pick<Config, 'artifactRoot'>
   /** Member turns and, with `trackSubagentRuns`, plain delegated runs still in flight. */
   private readonly runs = new Map<SubagentRunId, TrackedRun>()
 
@@ -109,6 +111,7 @@ export class TeamService extends TypertRemoteService {
         config.disposalTimeoutMs ?? DEFAULT_DISPOSAL_TIMEOUT_MS,
       ),
       trackSubagentRuns: config.trackSubagentRuns ?? false,
+      ...config.artifactRoot === undefined ? {} : { artifactRoot: config.artifactRoot },
     }
 
     this.activity = new TeamActivity()
@@ -123,7 +126,10 @@ export class TeamService extends TypertRemoteService {
       this.config.maxPendingMessagesPerMember,
       this.config.maxMessageBytes,
     )
-    this.tasks = new TeamTaskBoard(this.journal, this.config.maxTasks)
+    this.tasks = new TeamTaskBoard(this.journal, this.config.maxTasks, {
+      fs: () => ctx.get('fs'),
+      artifactRoot: this.config.artifactRoot,
+    })
 
     ctx.on('session/event', (session, event) => {
       this.mailbox.observeSessionEvent(session, event)
@@ -227,7 +233,22 @@ export class TeamService extends TypertRemoteService {
    * @returns the committed next task revision.
    */
   async updateTask(caller: Agent, request: UpdateTeamTaskRequest): Promise<TeamTaskView> {
-    return await this.tasks.update(caller, this.roster.membership(caller), request)
+    const membership = this.roster.membership(caller)
+    const view = await this.tasks.update(caller, membership, request)
+    // The assignee starts from the recorded brief, delivered as durable mail
+    // from the Lead; a claim already hands the brief back to the caller. The
+    // send is not awaited: delivery to a running member waits for its next
+    // step boundary, and the assignment itself is already committed.
+    if (request.action === 'reassign' && view.brief !== undefined && view.ownerName !== undefined && view.ownerName !== 'lead') {
+      void this.mailbox.send(membership.root, {
+        target: view.ownerName,
+        content: [{ type: 'text', text: `You were assigned ${view.id} by the Lead.\n\n${view.brief}` }],
+        signal: this.lifecycle.signal,
+      }).catch((error: unknown) => {
+        this.ctx.logger.warn(`Agent Teams could not mail the brief of ${view.id} to "${view.ownerName}": ${errorMessage(error)}`)
+      })
+    }
+    return view
   }
 
   /**

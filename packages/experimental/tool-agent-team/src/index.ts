@@ -34,7 +34,7 @@ The Team Lead and all teammates share the same working directory and filesystem.
 
 Prefer read/edit/write for file changes. If a file operation returns FS_STALE_VERSION, read the current file, rebase your intended change onto the new content, and retry. Bash, formatters, code generators, and scripts are not fully protected by the filesystem version guard; coordinate them explicitly and have the Lead review the final diff and run tests.
 
-Use the target returned by spawn_teammate or list_agents for send_message and interrupt_agent, or as owner when assigning or filtering shared tasks. send_message steers a running target at its nearest step boundary and starts or resumes an inactive target. inactive means no turn is executing; it does not describe task completion, success, failure, or waiting for other agents. provisioning means member creation is in progress; failed means member creation failed. lastStop is how a member's latest turn ended: completed, aborted, error, max-tokens (cut off at the output limit), or refusal; an inactive member whose lastStop is not completed did not finish that turn's work. A delivered peer item starts with its stable message id and sender name. A successful send is already durable even when its result says queued; do not resend it. Shared-task workflow is list, get, claim with the current revision, perform the work, then complete. Task readiness never starts an owner. A lost task's owner can no longer finish it: reopen it, then claim or reassign it. In-progress and completed tasks cannot be edited, rewired, or deleted. Before wait_agent, use list_agents and make sure another required member is running or provisioning; use send_message first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Its result lists the members and tasks that changed while it waited; act on those before re-listing. The Lead must wait for required teammates before giving the final answer.`
+Use the target returned by spawn_teammate or list_agents for send_message and interrupt_agent, or as owner when assigning or filtering shared tasks. send_message steers a running target at its nearest step boundary and starts or resumes an inactive target. inactive means no turn is executing; it does not describe task completion, success, failure, or waiting for other agents. provisioning means member creation is in progress; failed means member creation failed. lastStop is how a member's latest turn ended: completed, aborted, error, max-tokens (cut off at the output limit), or refusal; an inactive member whose lastStop is not completed did not finish that turn's work. A delivered peer item starts with its stable message id and sender name. A successful send is already durable even when its result says queued; do not resend it. Shared-task workflow is list, get, claim with the current revision, perform the work, then complete. Every task declares outputs, the files it must produce; complete is refused until every non-optional output exists on disk and passes its kind's check, so a task is done only when its artifacts are. Two live tasks cannot declare the same output path. A blocker entry may carry an instruction saying what the task takes from that blocker's artifacts. claim returns a brief composed from the recorded task, its inputs, and its outputs; a reassigned member receives the same brief by mail. Task readiness never starts an owner. A lost task's owner can no longer finish it: reopen it, then claim or reassign it. In-progress and completed tasks cannot be edited, rewired, or deleted. Before wait_agent, use list_agents and make sure another required member is running or provisioning; use send_message first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Its result lists the members and tasks that changed while it waited; act on those before re-listing. The Lead must wait for required teammates before giving the final answer.`
 
 const ACTIVE_WAIT_STATUSES: ReadonlySet<TeamMemberView['status']> = new Set(['running', 'provisioning'])
 const NO_ACTIVE_PEER_MESSAGE = 'No other Team member is running or provisioning. wait_agent cannot make progress or wake inactive teammates. Re-list with list_agents and team_task_list, then use send_message to wake each required inactive teammate before waiting again.'
@@ -66,6 +66,55 @@ function modelMember(member: TeamMemberView): InferValue<typeof MEMBER_VIEW_SCHE
   return { target: name, ...details }
 }
 
+/** One declared output: the path and the check it must pass at completion. */
+const OUTPUT_CONTRACT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    path: { type: 'string', required: true, description: 'Workspace-relative file path.' },
+    kind: {
+      type: 'string',
+      required: true,
+      enum: ['file', 'json', 'csv', 'npy', 'image', 'python'],
+      description: 'file: exists and non-empty; json: parses and matches schema when given; csv: has a header and rows; npy and image: format magic bytes; python: an entry file that imports no workspace module, so it runs alone.',
+    },
+    schema: { type: 'object', additionalProperties: true, description: 'JSON Schema a json output must satisfy.' },
+    optional: { type: 'boolean', description: 'Whether completion may proceed without this file.' },
+  },
+} as const
+
+/** One recorded artifact of a completed task. */
+const TASK_ARTIFACT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    path: { type: 'string', required: true },
+    bytes: { type: 'integer', required: true },
+    sha256: { type: 'string', required: true },
+    supersedes: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { task: { type: 'string', required: true }, sha256: { type: 'string', required: true } },
+    },
+    previousVersion: { type: 'string' },
+  },
+} as const
+
+/** A blocker reference: a task id, or the id with what this task takes from that blocker's artifacts. */
+const BLOCKER_SCHEMA = {
+  oneOf: [
+    { type: 'string' },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        task: { type: 'string', required: true, description: 'Blocking task id.' },
+        instruction: { type: 'string', required: true, description: 'What this task takes from the blocker\'s artifacts.' },
+      },
+    },
+  ],
+} as const
+
 /** One shared task, matching the public `TeamTaskView`. */
 const TASK_VIEW_SCHEMA = {
   type: 'object',
@@ -80,11 +129,32 @@ const TASK_VIEW_SCHEMA = {
     lostCause: { type: 'string', enum: ['owner-failed', 'run-ended'] },
     ownerStop: { type: 'string' },
     blockedBy: { type: 'array', required: true, items: { type: 'string' } },
+    edgeInstructions: { type: 'object', additionalProperties: true },
     writeScopes: { type: 'array', required: true, items: { type: 'string' } },
+    outputs: { type: 'array', required: true, items: OUTPUT_CONTRACT_SCHEMA },
+    artifacts: { type: 'array', items: TASK_ARTIFACT_SCHEMA },
+    brief: { type: 'string' },
     ready: { type: 'boolean', required: true },
     writeScopeWarnings: { type: 'array', required: true, items: { type: 'string' } },
   },
 } as const
+
+type BlockerArg = InferValue<typeof BLOCKER_SCHEMA>
+
+/** Split blocker arguments into the id list and the instructions keyed by id. */
+function blockers(values: readonly BlockerArg[]): { blockedBy: TeamTaskId[]; edgeInstructions: Record<string, string> } {
+  const blockedBy: TeamTaskId[] = []
+  const edgeInstructions: Record<string, string> = {}
+  for (const value of values) {
+    if (typeof value === 'string') {
+      blockedBy.push(TeamTaskId(value))
+    } else {
+      blockedBy.push(TeamTaskId(value.task))
+      edgeInstructions[value.task] = value.instruction
+    }
+  }
+  return { blockedBy, edgeInstructions }
+}
 
 const SPAWN_VALUE_SCHEMA = {
   type: 'object',
@@ -366,11 +436,17 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
 
     register(scoped.tools.register(defineTool({
       name: 'team_task_create',
-      description: 'Create one unowned pending task on the shared Team task board.',
+      description: 'Create one unowned pending task on the shared Team task board. outputs is the definition of done: complete is refused until every non-optional output exists and passes its check.',
       parameters: {
         subject: { type: 'string', required: true, description: 'Concise task title.' },
         description: { type: 'string', required: true, description: 'Complete task details and acceptance criteria.' },
-        blocked_by: { type: 'array', items: { type: 'string' }, description: 'Task ids that must complete first.' },
+        outputs: {
+          type: 'array',
+          required: true,
+          items: OUTPUT_CONTRACT_SCHEMA,
+          description: 'Files this task must produce; empty for a task with no file deliverable.',
+        },
+        blocked_by: { type: 'array', items: BLOCKER_SCHEMA, description: 'Tasks that must complete first, each optionally with what this task takes from it.' },
         write_scopes: {
           type: 'array',
           items: { type: 'string' },
@@ -379,10 +455,12 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
       },
       output: jsonOutput(TASK_VIEW_SCHEMA),
       async execute(args, exec) {
+        const edges = args.blocked_by === undefined ? undefined : blockers(args.blocked_by)
         return await ctx.agentTeams.createTask(callingAgent(exec.agent, 'team_task_create'), {
           subject: args.subject,
           description: args.description,
-          ...args.blocked_by === undefined ? {} : { blockedBy: args.blocked_by.map(TeamTaskId) },
+          outputs: args.outputs,
+          ...edges === undefined ? {} : { blockedBy: edges.blockedBy, edgeInstructions: edges.edgeInstructions },
           ...args.write_scopes === undefined ? {} : { writeScopes: args.write_scopes },
         })
       },
@@ -449,19 +527,22 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
         },
         subject: { type: 'string', description: 'Replacement title for edit.' },
         description: { type: 'string', description: 'Replacement details for edit.' },
-        blocked_by: { type: 'array', items: { type: 'string' }, description: 'Complete blocker list for set_dependencies.' },
+        outputs: { type: 'array', items: OUTPUT_CONTRACT_SCHEMA, description: 'Replacement output contracts for edit.' },
+        blocked_by: { type: 'array', items: BLOCKER_SCHEMA, description: 'Complete blocker list for set_dependencies, each optionally with an instruction.' },
         write_scopes: { type: 'array', items: { type: 'string' }, description: 'Replacement advisory write scopes for edit.' },
         owner: { type: 'string', description: 'Member target from spawn_teammate or list_agents for Lead-only reassign; omit to unassign.' },
       },
       output: jsonOutput(TASK_VIEW_SCHEMA),
       async execute(args, exec) {
+        const edges = args.blocked_by === undefined ? undefined : blockers(args.blocked_by)
         return await ctx.agentTeams.updateTask(callingAgent(exec.agent, 'team_task_update'), {
           taskId: TeamTaskId(args.task_id),
           expectedRevision: args.expected_revision,
           action: args.action,
           ...args.subject === undefined ? {} : { subject: args.subject },
           ...args.description === undefined ? {} : { description: args.description },
-          ...args.blocked_by === undefined ? {} : { blockedBy: args.blocked_by.map(TeamTaskId) },
+          ...args.outputs === undefined ? {} : { outputs: args.outputs },
+          ...edges === undefined ? {} : { blockedBy: edges.blockedBy, edgeInstructions: edges.edgeInstructions },
           ...args.write_scopes === undefined ? {} : { writeScopes: args.write_scopes },
           ...args.owner === undefined ? {} : { owner: args.owner },
         })

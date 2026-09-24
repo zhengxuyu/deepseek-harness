@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
@@ -18,6 +20,7 @@ import * as SubagentFork from '@deepseek-ai/dsh-subagent-fork-in-process'
 import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import { MockAdapter, textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import TeamService, { TeamError, TeamId, TeamMessageId, TeamTaskId } from '../src/index.ts'
+import { pythonImports } from '../src/settle.ts'
 import { TeamRuntimeLifecycle } from '../src/lifecycle.ts'
 import { teamProjectionDefinition } from '../src/projection.ts'
 import type { TeamMemberSnapshot, TeamMessageSnapshot, TeamTaskSnapshot } from '../src/index.ts'
@@ -61,11 +64,14 @@ async function storedEvents(ctx: Context, id: SessionId): Promise<readonly Sessi
 async function setup(
   script: ConstructorParameters<typeof MockAdapter>[0],
   config: ConstructorParameters<typeof TeamService>[1] = {},
+  workspace?: string,
+  leadCwd = true,
 ) {
   const ctx = new Context()
   await mountAgentLoopTestDependencies(ctx)
   const storageRoot = mkdtempSync(join(tmpdir(), 'dsh-team-'))
   roots.push(storageRoot)
+  if (workspace !== undefined) await ctx.plugin(LocalFileSystem, { cwd: workspace })
   await ctx.plugin(JsonlSessionPersistence, { root: storageRoot })
   await ctx.plugin(TestSessionQuery)
   await ctx.plugin(AgentLoop, { agents: [] })
@@ -75,7 +81,11 @@ async function setup(
   const teamFiber = await ctx.plugin(TeamService, config)
   const adapter = new MockAdapter(script)
   ctx.llm.registerAdapter(['mock'], adapter)
-  const lead = await ctx.agentLoop.create(SessionId('lead'), { provider: 'mock', model: 'mock' })
+  const lead = await ctx.agentLoop.create(
+    SessionId('lead'),
+    { provider: 'mock', model: 'mock' },
+    workspace !== undefined && leadCwd ? { cwd: workspace } : {},
+  )
   return { ctx, lead, adapter, storageRoot, teamFiber }
 }
 
@@ -92,6 +102,7 @@ interface TeamServiceInternals {
     liveChildrenByRoot(): Map<Agent, SessionId[]>
   }
   readonly mailbox: {
+    send(caller: Agent, request: unknown): Promise<unknown>
     tryDispatch(root: Agent, message: TeamMessageSnapshot, signal: AbortSignal): Promise<boolean>
     serializeDispatch(message: TeamMessageSnapshot, operation: () => Promise<boolean>): Promise<boolean>
     markDelivered(root: Agent, messageId: ReturnType<typeof TeamMessageId>, targetId: SessionId): Promise<void>
@@ -746,7 +757,8 @@ describe('Team shared task DAG', () => {
   })
 
   it('supports Lead reassignment, completion, reopen, and deletion permissions', async () => {
-    const { ctx, lead } = await setup(['hang'])
+    // The reassignment mails the owner its brief; the second reply is the turn that mail resumes.
+    const { ctx, lead } = await setup(['hang', textResponse('brief received')])
     const started = await spawn(ctx, lead, 'owner')
     const owner = await waitRunning(ctx, started.member.id)
     const task = await ctx.agentTeams.createTask(owner, { subject: 'lifecycle', description: 'lifecycle' })
@@ -807,11 +819,13 @@ describe('Team shared task DAG', () => {
       subject: 'late',
     })).rejects.toMatchObject({ code: 'TEAM_TASK_DELETED' })
     ctx.agentTeams.interrupt(lead, 'owner')
-    await waitNoAgent(ctx, owner.id)
+    // The brief mail follows the owner across the interruption and is delivered on its resumed turn.
+    await vi.waitFor(() => { expect(durable(lead).pendingMessages).toEqual([]) }, { timeout: 5_000 })
+    await vi.waitFor(() => { expect(ctx.agents.get(owner.id)?.status).not.toBe('running') }, { timeout: 5_000 })
   })
 
   it('covers partial edits, Lead ownership, unassignment, and blocked reassignment', async () => {
-    const { ctx, lead } = await setup(['hang'])
+    const { ctx, lead } = await setup(['hang', textResponse('brief received')])
     const started = await spawn(ctx, lead, 'editor')
     const editor = await waitRunning(ctx, started.member.id)
     const blocker = await ctx.agentTeams.createTask(lead, { subject: 'blocker', description: 'blocker' })
@@ -897,7 +911,8 @@ describe('Team shared task DAG', () => {
       .toEqual([`write scopes overlap with ${narrow.id}`])
 
     ctx.agentTeams.interrupt(lead, 'editor')
-    await waitNoAgent(ctx, editor.id)
+    await vi.waitFor(() => { expect(durable(lead).pendingMessages).toEqual([]) }, { timeout: 5_000 })
+    await vi.waitFor(() => { expect(ctx.agents.get(editor.id)?.status).not.toBe('running') }, { timeout: 5_000 })
   })
 })
 
@@ -915,7 +930,10 @@ describe('Team Remote API', () => {
     const updated = await ctx.agentTeams.updateTask(lead, {
       taskId: created.id, expectedRevision: 1, action: 'claim',
     })
-    expect(ctx.agentTeams.remoteView(lead).tasks).toEqual([updated])
+    // The claim result adds the owner's brief; the listed row is the view without it.
+    const { brief, ...listed } = updated
+    expect(brief).toContain(`Task ${created.id}: Agent task`)
+    expect(ctx.agentTeams.remoteView(lead).tasks).toEqual([listed])
   })
 })
 
@@ -2127,5 +2145,242 @@ describe('Tracked subagent runs', () => {
     })
     ctx.agentTeams.interrupt(lead, 'mate')
     await waitNoAgent(ctx, mate.id)
+  })
+})
+
+describe('Artifact contracts', () => {
+  function workspace(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-team-workspace-'))
+    roots.push(dir)
+    return dir
+  }
+
+  const sha = (text: string) => createHash('sha256').update(text).digest('hex')
+
+  it('normalizes and validates declared outputs and refuses a path another live task declares', async () => {
+    const { ctx, lead } = await setup([], {}, workspace())
+    const bare = await ctx.agentTeams.createTask(lead, { subject: 'bare', description: 'no outputs', edgeInstructions: {} })
+    expect(bare).not.toHaveProperty('edgeInstructions')
+    expect(bare.outputs).toEqual([])
+    for (const [outputs, code] of [
+      [[{ path: '../escape.txt', kind: 'file' }], 'TEAM_INVALID_WRITE_SCOPE'],
+      [[{ path: 'a.txt', kind: 'file' }, { path: './a.txt', kind: 'file' }], 'TEAM_INVALID_ARGUMENT'],
+      [[{ path: 'a.csv', kind: 'csv', schema: { type: 'object' } }], 'TEAM_INVALID_ARGUMENT'],
+      [[{ path: 'a.json', kind: 'json', schema: { type: 'nonsense' } }], 'TEAM_INVALID_ARGUMENT'],
+    ] as const) {
+      await expect(ctx.agentTeams.createTask(lead, { subject: 'bad', description: 'bad', outputs }))
+        .rejects.toMatchObject({ code })
+    }
+    const first = await ctx.agentTeams.createTask(lead, {
+      subject: 'first', description: 'first', outputs: [{ path: './out/a.json', kind: 'json', schema: { type: 'object' }, optional: false }],
+    })
+    expect(first.outputs).toEqual([{ path: 'out/a.json', kind: 'json', schema: { type: 'object' }, optional: false }])
+    expect(durable(lead).tasks[1]?.outputs).toEqual(first.outputs)
+    await expect(ctx.agentTeams.createTask(lead, { subject: 'second', description: 'second', outputs: [{ path: 'out/a.json', kind: 'file' }] }))
+      .rejects.toMatchObject({ code: 'TEAM_TASK_OUTPUT_CONFLICT' })
+    const other = await ctx.agentTeams.createTask(lead, { subject: 'other', description: 'other', outputs: [{ path: 'b.txt', kind: 'file' }] })
+    await expect(ctx.agentTeams.updateTask(lead, {
+      taskId: other.id, expectedRevision: other.revision, action: 'edit', outputs: [{ path: 'out/a.json', kind: 'file' }],
+    })).rejects.toMatchObject({ code: 'TEAM_TASK_OUTPUT_CONFLICT' })
+    const cleared = await ctx.agentTeams.updateTask(lead, {
+      taskId: other.id, expectedRevision: other.revision, action: 'edit', outputs: [],
+    })
+    expect(cleared.outputs).toEqual([])
+    expect(durable(lead).tasks[2]).not.toHaveProperty('outputs')
+    // A task with no declared outputs still needs something to edit.
+    await expect(ctx.agentTeams.updateTask(lead, { taskId: other.id, expectedRevision: cleared.revision, action: 'edit' }))
+      .rejects.toMatchObject({ code: 'TEAM_INVALID_ARGUMENT' })
+  })
+
+  it('refuses completion until every declared output exists and passes its check, then records the artifacts', async () => {
+    const dir = workspace()
+    const { ctx, lead } = await setup([], {}, dir)
+    const task = await ctx.agentTeams.createTask(lead, {
+      subject: 'deliver', description: 'deliver', outputs: [
+        { path: 'out/a.json', kind: 'json', schema: { type: 'object', properties: { x: { type: 'number' } }, required: ['x'], additionalProperties: false } },
+        { path: 'data.csv', kind: 'csv' },
+        { path: 'arr.npy', kind: 'npy' },
+        { path: 'fig.png', kind: 'image' },
+        { path: 'entry.py', kind: 'python' },
+        { path: 'plain.bin', kind: 'file' },
+        { path: 'notes.txt', kind: 'file', optional: true },
+        { path: 'out/b.json', kind: 'json' },
+      ],
+    })
+    const claimed = await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action: 'claim' })
+    expect(claimed.brief).toContain('- out/a.json (json, schema declared)')
+    expect(claimed.brief).toContain('- entry.py (python, must run alone: no imports of workspace modules)')
+    expect(claimed.brief).toContain('- notes.txt (file, optional)')
+    const complete = () => ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: claimed.revision, action: 'complete' })
+    await expect(complete()).rejects.toMatchObject({ code: 'TEAM_TASK_OUTPUT_MISSING' })
+    await expect(complete()).rejects.toThrow('out/a.json: declared, not produced; data.csv: declared, not produced')
+
+    mkdirSync(join(dir, 'out'))
+    writeFileSync(join(dir, 'out/a.json'), '{not json')
+    writeFileSync(join(dir, 'data.csv'), 'a,b\n')
+    writeFileSync(join(dir, 'arr.npy'), 'nope')
+    writeFileSync(join(dir, 'fig.png'), 'nope')
+    mkdirSync(join(dir, 'helper'))
+    writeFileSync(join(dir, 'helper/__init__.py'), '')
+    writeFileSync(join(dir, 'sibling.py'), 'X = 1\n')
+    writeFileSync(join(dir, 'entry.py'), 'import os, sibling\nfrom helper.sub import thing\nfrom . import rel\nimport json\n')
+    mkdirSync(join(dir, 'plain.bin'))
+    await expect(complete()).rejects.toThrow(new RegExp([
+      'out/a\\.json: is not valid JSON .*',
+      'data\\.csv: has no data rows below its header',
+      'arr\\.npy: is not a NumPy \\.npy file',
+      'fig\\.png: is not a PNG, JPEG, GIF, or WebP image',
+      'entry\\.py: imports workspace modules \\(sibling, helper, a relative import\\), so it does not run alone',
+      'plain\\.bin: is a directory, not a file',
+    ].join('; '), 'u'))
+
+    writeFileSync(join(dir, 'out/a.json'), '{"x":"1"}')
+    await expect(complete()).rejects.toThrow('out/a.json: does not match its schema')
+    writeFileSync(join(dir, 'out/a.json'), '{"x":1}')
+    writeFileSync(join(dir, 'out/b.json'), '{}')
+    writeFileSync(join(dir, 'data.csv'), 'a,b\n1,2\n')
+    writeFileSync(join(dir, 'arr.npy'), Buffer.from([0x93, 0x4e, 0x55, 0x4d, 0x50, 0x59, 1, 0]))
+    writeFileSync(join(dir, 'fig.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]))
+    writeFileSync(join(dir, 'entry.py'), 'import os\nimport json\nprint(1)\n')
+    rmSync(join(dir, 'plain.bin'), { recursive: true })
+    writeFileSync(join(dir, 'plain.bin'), '')
+    await expect(complete()).rejects.toThrow('plain.bin: is empty')
+    writeFileSync(join(dir, 'plain.bin'), 'x')
+
+    const completed = await complete()
+    expect(completed.status).toBe('completed')
+    expect(completed.artifacts).toEqual([
+      { path: 'out/a.json', bytes: 7, sha256: sha('{"x":1}') },
+      { path: 'data.csv', bytes: 8, sha256: sha('a,b\n1,2\n') },
+      { path: 'arr.npy', bytes: 8, sha256: createHash('sha256').update(Buffer.from([0x93, 0x4e, 0x55, 0x4d, 0x50, 0x59, 1, 0])).digest('hex') },
+      { path: 'fig.png', bytes: 6, sha256: createHash('sha256').update(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a])).digest('hex') },
+      { path: 'entry.py', bytes: 31, sha256: sha('import os\nimport json\nprint(1)\n') },
+      { path: 'plain.bin', bytes: 1, sha256: sha('x') },
+      { path: 'out/b.json', bytes: 2, sha256: sha('{}') },
+    ])
+    expect(durable(lead).tasks[0]?.artifacts).toEqual(completed.artifacts)
+    const reopened = await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: completed.revision, action: 'reopen' })
+    expect(reopened).not.toHaveProperty('artifacts')
+    expect(durable(lead).tasks[0]).not.toHaveProperty('artifacts')
+  })
+
+  it('records supersession and retains the previous version under the artifact root', async () => {
+    const dir = workspace()
+    const artifactRoot = join(workspace(), 'retained')
+    // The Lead records no cwd here, so paths resolve against the filesystem's own base.
+    const { ctx, lead } = await setup([], { artifactRoot }, dir, false)
+    // A completed task with no outputs has no artifacts to supersede.
+    const bare = await ctx.agentTeams.createTask(lead, { subject: 'bare', description: 'bare' })
+    const bareClaim = await ctx.agentTeams.updateTask(lead, { taskId: bare.id, expectedRevision: bare.revision, action: 'claim' })
+    await ctx.agentTeams.updateTask(lead, { taskId: bare.id, expectedRevision: bareClaim.revision, action: 'complete' })
+    const produce = async (subject: string, content: string) => {
+      const task = await ctx.agentTeams.createTask(lead, { subject, description: subject, outputs: [{ path: 'r.py', kind: 'python' }] })
+      const claimed = await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action: 'claim' })
+      writeFileSync(join(dir, 'r.py'), content)
+      return ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: claimed.revision, action: 'complete' })
+    }
+    const one = 'import os\n'
+    const two = 'import sys\n'
+    const three = 'import json\n'
+    const record = (content: string) => ({ path: 'r.py', bytes: content.length, sha256: sha(content) })
+    const first = await produce('first', one)
+    expect(first.artifacts).toEqual([record(one)])
+    const retainedFirst = join(artifactRoot, 'lead', first.id, 'r.py')
+    expect(readFileSync(retainedFirst, 'utf8')).toBe(one)
+
+    const same = await produce('same', one)
+    expect(same.artifacts).toEqual([record(one)])
+
+    const second = await produce('second', two)
+    expect(second.artifacts).toEqual([{
+      ...record(two),
+      supersedes: { task: same.id, sha256: sha(one) },
+      previousVersion: join(artifactRoot, 'lead', same.id, 'r.py'),
+    }])
+    expect(readFileSync(second.artifacts![0]!.previousVersion!, 'utf8')).toBe(one)
+    expect(readFileSync(join(dir, 'r.py'), 'utf8')).toBe(two)
+
+    // A superseded version that was not retained is not named.
+    unlinkSync(join(artifactRoot, 'lead', second.id, 'r.py'))
+    const third = await produce('third', three)
+    expect(third.artifacts![0]).toMatchObject({ supersedes: { task: second.id } })
+    expect(third.artifacts![0]).not.toHaveProperty('previousVersion')
+  })
+
+  it('scans Python imports for workspace modules, tolerating malformed import lines', () => {
+    expect(pythonImports('import os, sibling,\nfrom .pkg import x\nfrom helper.sub import thing\nimport json as j\nprint(1)\n'))
+      .toEqual(['os', 'sibling', '.', 'helper', 'json'])
+  })
+
+  it('cannot complete a task with declared outputs without the fs service', async () => {
+    const { ctx, lead } = await setup([])
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'deliver', description: 'deliver', outputs: [{ path: 'a.txt', kind: 'file' }] })
+    const claimed = await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action: 'claim' })
+    await expect(ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: claimed.revision, action: 'complete' }))
+      .rejects.toMatchObject({ code: 'TEAM_OUTPUTS_UNCHECKABLE' })
+  })
+
+  it('carries edge instructions into the brief and mails the brief to a reassigned member', async () => {
+    const dir = workspace()
+    const { ctx, lead } = await setup([textResponse('mate initial'), textResponse('brief received')], {}, dir)
+    const source = await ctx.agentTeams.createTask(lead, { subject: 'source', description: 'source', outputs: [{ path: 'a.txt', kind: 'file' }] })
+    const claimed = await ctx.agentTeams.updateTask(lead, { taskId: source.id, expectedRevision: source.revision, action: 'claim' })
+    writeFileSync(join(dir, 'a.txt'), 'hello')
+    await ctx.agentTeams.updateTask(lead, { taskId: source.id, expectedRevision: claimed.revision, action: 'complete' })
+
+    await expect(ctx.agentTeams.createTask(lead, {
+      subject: 'bad', description: 'bad', blockedBy: [source.id], edgeInstructions: { 'task-9': 'nope' },
+    })).rejects.toMatchObject({ code: 'TEAM_INVALID_ARGUMENT' })
+    const consumer = await ctx.agentTeams.createTask(lead, {
+      subject: 'consumer', description: 'use the source', blockedBy: [source.id], edgeInstructions: { [source.id]: 'read a.txt' },
+    })
+    expect(consumer.edgeInstructions).toEqual({ [source.id]: 'read a.txt' })
+    const rewired = await ctx.agentTeams.updateTask(lead, {
+      taskId: consumer.id, expectedRevision: consumer.revision, action: 'set_dependencies', blockedBy: [source.id],
+    })
+    expect(rewired).not.toHaveProperty('edgeInstructions')
+    const restored = await ctx.agentTeams.updateTask(lead, {
+      taskId: consumer.id, expectedRevision: rewired.revision, action: 'set_dependencies', blockedBy: [source.id], edgeInstructions: { [source.id]: 'read a.txt' },
+    })
+    const briefed = await ctx.agentTeams.updateTask(lead, { taskId: consumer.id, expectedRevision: restored.revision, action: 'claim' })
+    expect(briefed.brief).toBe([
+      `Task ${consumer.id}: consumer`,
+      'use the source',
+      '',
+      'Inputs:',
+      `- ${source.id} "source" (completed): a.txt (5 bytes, sha256 ${sha('hello').slice(0, 12)}); instruction: read a.txt`,
+      '',
+      'Outputs (definition of done; complete is refused until every non-optional one exists on disk and passes its check):',
+      '- none declared',
+    ].join('\n'))
+    const released = await ctx.agentTeams.updateTask(lead, { taskId: consumer.id, expectedRevision: briefed.revision, action: 'release' })
+    expect(released).not.toHaveProperty('brief')
+
+    const started = await spawn(ctx, lead, 'mate')
+    await vi.waitFor(() => { expect(ctx.agentTeams.listMembers(lead)[1]?.lastStop).toBe('completed') })
+    const assigned = await ctx.agentTeams.updateTask(lead, {
+      taskId: consumer.id, expectedRevision: released.revision, action: 'reassign', owner: 'mate',
+    })
+    expect(assigned.brief).toContain(`Task ${consumer.id}: consumer`)
+    await vi.waitFor(() => { expect(durable(lead).pendingMessages).toEqual([]) }, { timeout: 5_000 })
+    const mail = (await storedEvents(ctx, started.member.id))
+      .filter((event): event is SessionEvent<'user/message'> => event.type === 'user/message' && event.data.source.kind === 'team-message')
+      .map(event => event.data.content.map(block => block.type === 'text' ? block.text : '').join(''))
+    expect(mail.some(text => text.includes(`You were assigned ${consumer.id} by the Lead.`) && text.includes('instruction: read a.txt'))).toBe(true)
+    // Reassigning to the Lead itself hands the brief back without mail.
+    const unassigned = await ctx.agentTeams.updateTask(lead, { taskId: consumer.id, expectedRevision: assigned.revision, action: 'reassign' })
+    const toLead = await ctx.agentTeams.updateTask(lead, { taskId: consumer.id, expectedRevision: unassigned.revision, action: 'reassign', owner: 'lead' })
+    expect(toLead.brief).toContain('Inputs:')
+    expect(durable(lead).pendingMessages).toEqual([])
+  })
+
+  it('warns when the brief mail cannot be sent', async () => {
+    const { ctx, lead } = await setup([textResponse('mate initial')])
+    await spawn(ctx, lead, 'mate')
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    vi.spyOn(teamInternals(ctx).mailbox, 'send').mockRejectedValueOnce(new Error('mailbox closed'))
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
+    await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action: 'reassign', owner: 'mate' })
+    await vi.waitFor(() => { expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not mail the brief')) })
   })
 })

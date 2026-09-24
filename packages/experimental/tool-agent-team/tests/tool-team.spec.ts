@@ -160,7 +160,7 @@ describe('dsh-tool-team', () => {
     // With the hanger still running the wait is real; a new task wakes it, and
     // the rows it compares carry the earlier outcomes.
     const wait = execute(ctx, lead, 'wait_agent', { timeout_ms: 10_000 })
-    setTimeout(() => { void execute(ctx, lead, 'team_task_create', { subject: 'wake', description: 'wake' }) }, 0)
+    setTimeout(() => { void execute(ctx, lead, 'team_task_create', { outputs: [], subject: 'wake', description: 'wake' }) }, 0)
     const woken = JSON.parse(text(await wait)) as { timedOut: boolean; changes: { members: unknown[]; tasks: unknown[] } }
     expect(woken.timedOut).toBe(false)
     expect(woken.changes.members).toEqual([])
@@ -173,6 +173,55 @@ describe('dsh-tool-team', () => {
     expect(stopped.changes.members.map(member => member.target)).toEqual(['hanger'])
     expect(stopped.changes.members[0]?.status).toBe('inactive')
     await vi.waitFor(() => { expect(ctx.agents.get(hanger)).toBeUndefined() }, { timeout: 5_000 })
+  })
+
+  it('requires declared outputs, accepts blocker instructions, and hands the brief back on claim', async () => {
+    const { ctx, lead } = await setup([])
+    const missing = await execute(ctx, lead, 'team_task_create', { subject: 'no outputs', description: 'd' })
+    expect(missing.isError).toBe(true)
+    expect(text(missing)).toContain('outputs')
+    const source = JSON.parse(text(await execute(ctx, lead, 'team_task_create', {
+      subject: 'source', description: 'd', outputs: [],
+    }))) as { id: string; revision: number; outputs: unknown[] }
+    expect(source.outputs).toEqual([])
+    const consumer = JSON.parse(text(await execute(ctx, lead, 'team_task_create', {
+      subject: 'consumer',
+      description: 'd',
+      outputs: [{ path: 'out/report.json', kind: 'json', schema: { type: 'object' } }, { path: 'notes.txt', kind: 'file', optional: true }],
+      blocked_by: [{ task: source.id, instruction: 'read what source wrote' }],
+    }))) as { id: string; revision: number; outputs: unknown[]; edgeInstructions: Record<string, string>; blockedBy: string[] }
+    expect(consumer).toMatchObject({
+      blockedBy: [source.id],
+      edgeInstructions: { [source.id]: 'read what source wrote' },
+      outputs: [{ path: 'out/report.json', kind: 'json', schema: { type: 'object' } }, { path: 'notes.txt', kind: 'file', optional: true }],
+    })
+    const trimmed = JSON.parse(text(await execute(ctx, lead, 'team_task_update', {
+      task_id: consumer.id, expected_revision: consumer.revision, action: 'edit', outputs: [{ path: 'out/report.json', kind: 'json', schema: { type: 'object' } }],
+    }))) as { revision: number; outputs: unknown[] }
+    expect(trimmed.outputs).toHaveLength(1)
+    const rewired = JSON.parse(text(await execute(ctx, lead, 'team_task_update', {
+      task_id: consumer.id, expected_revision: trimmed.revision, action: 'set_dependencies', blocked_by: [source.id],
+    }))) as { revision: number; edgeInstructions?: unknown }
+    expect(rewired).not.toHaveProperty('edgeInstructions')
+    const claimedSource = JSON.parse(text(await execute(ctx, lead, 'team_task_update', {
+      task_id: source.id, expected_revision: source.revision, action: 'claim',
+    }))) as { revision: number; brief: string }
+    expect(claimedSource.brief).toContain(`Task ${source.id}: source`)
+    const completedSource = JSON.parse(text(await execute(ctx, lead, 'team_task_update', {
+      task_id: source.id, expected_revision: claimedSource.revision, action: 'complete',
+    }))) as { status: string; brief?: string }
+    expect(completedSource.status).toBe('completed')
+    expect(completedSource).not.toHaveProperty('brief')
+    const claimedConsumer = JSON.parse(text(await execute(ctx, lead, 'team_task_update', {
+      task_id: consumer.id, expected_revision: rewired.revision, action: 'claim',
+    }))) as { brief: string }
+    expect(claimedConsumer.brief).toContain(`- ${source.id} "source" (completed): no recorded artifacts`)
+    expect(claimedConsumer.brief).toContain('- out/report.json (json, schema declared)')
+    const scope = scopeOf(lead.ctx)
+    const view = ctx.tools.get('team_task_get', scope)?.output.schema.properties
+    expect(view).toHaveProperty('outputs')
+    expect(view).toHaveProperty('artifacts')
+    expect(view).toHaveProperty('brief')
   })
 
   it('reports how a teammate turn ended on list_agents and in the wait changes', async () => {
@@ -244,7 +293,7 @@ describe('dsh-tool-team', () => {
     expect(member).not.toHaveProperty('name')
     const listed = JSON.parse(text(await execute(ctx, lead, 'list_agents', {}))) as Array<{ target: string }>
     expect(listed.map(row => row.target)).toEqual(['lead', member.target])
-    const created = await execute(ctx, lead, 'team_task_create', { subject: 'review', description: 'review changes' })
+    const created = await execute(ctx, lead, 'team_task_create', { outputs: [], subject: 'review', description: 'review changes' })
     const task = JSON.parse(text(created)) as { id: string; revision: number }
     const assigned = await execute(ctx, lead, 'team_task_update', {
       task_id: task.id, expected_revision: task.revision, action: 'reassign', owner: member.target,
@@ -543,7 +592,7 @@ describe('dsh-tool-team', () => {
     expect(JSON.parse(text(followup))).toMatchObject({ status: 'accepted' })
     await lead.whenIdle()
 
-    const created = await execute(ctx, lead, 'team_task_create', {
+    const created = await execute(ctx, lead, 'team_task_create', { outputs: [],
       subject: 'tool task',
       description: 'created through tool',
       blocked_by: [],
@@ -601,10 +650,10 @@ describe('dsh-tool-team', () => {
     const childId = spawnedChildId(ctx, lead, spawned)
     await waitRunning(ctx, childId)
 
-    const firstResult = await execute(ctx, lead, 'team_task_create', {
+    const firstResult = await execute(ctx, lead, 'team_task_create', { outputs: [],
       subject: 'first', description: 'first task',
     })
-    const secondResult = await execute(ctx, lead, 'team_task_create', {
+    const secondResult = await execute(ctx, lead, 'team_task_create', { outputs: [],
       subject: 'second', description: 'second task',
     })
     const first = JSON.parse(text(firstResult)) as { id: string; revision: number }
@@ -660,7 +709,7 @@ describe('dsh-tool-team', () => {
     const wait = execute(ctx, lead, 'wait_agent', {})
     const wake = new Promise<Awaited<ReturnType<typeof execute>>>((resolve, reject) => {
       setTimeout(() => {
-        void execute(ctx, lead, 'team_task_create', {
+        void execute(ctx, lead, 'team_task_create', { outputs: [],
           subject: 'wake', description: 'wake default wait',
         }).then(resolve, reject)
       }, 0)

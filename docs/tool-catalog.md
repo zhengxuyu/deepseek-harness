@@ -2114,7 +2114,7 @@ Source: [`packages/experimental/tool-agent-team/src/index.ts`](../packages/exper
 
 ### `team_task_create`
 
-Create one unowned pending task on the shared Team task board.
+Create one unowned pending task on the shared Team task board. outputs is the definition of done: complete is refused until every non-optional output exists and passes its check.
 
 ```json
 {
@@ -2128,11 +2128,72 @@ Create one unowned pending task on the shared Team task board.
       "type": "string",
       "description": "Complete task details and acceptance criteria."
     },
+    "outputs": {
+      "type": "array",
+      "description": "Files this task must produce; empty for a task with no file deliverable.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Workspace-relative file path."
+          },
+          "kind": {
+            "type": "string",
+            "description": "file: exists and non-empty; json: parses and matches schema when given; csv: has a header and rows; npy and image: format magic bytes; python: an entry file that imports no workspace module, so it runs alone.",
+            "enum": [
+              "file",
+              "json",
+              "csv",
+              "npy",
+              "image",
+              "python"
+            ]
+          },
+          "schema": {
+            "type": "object",
+            "description": "JSON Schema a json output must satisfy.",
+            "additionalProperties": true
+          },
+          "optional": {
+            "type": "boolean",
+            "description": "Whether completion may proceed without this file."
+          }
+        },
+        "required": [
+          "path",
+          "kind"
+        ]
+      }
+    },
     "blocked_by": {
       "type": "array",
-      "description": "Task ids that must complete first.",
+      "description": "Tasks that must complete first, each optionally with what this task takes from it.",
       "items": {
-        "type": "string"
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "task": {
+                "type": "string",
+                "description": "Blocking task id."
+              },
+              "instruction": {
+                "type": "string",
+                "description": "What this task takes from the blocker's artifacts."
+              }
+            },
+            "required": [
+              "task",
+              "instruction"
+            ]
+          }
+        ]
       }
     },
     "write_scopes": {
@@ -2145,7 +2206,8 @@ Create one unowned pending task on the shared Team task board.
   },
   "required": [
     "subject",
-    "description"
+    "description",
+    "outputs"
   ]
 }
 ```
@@ -2251,11 +2313,72 @@ Compare-and-set a shared task action using the latest revision from team_task_ge
       "type": "string",
       "description": "Replacement details for edit."
     },
+    "outputs": {
+      "type": "array",
+      "description": "Replacement output contracts for edit.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Workspace-relative file path."
+          },
+          "kind": {
+            "type": "string",
+            "description": "file: exists and non-empty; json: parses and matches schema when given; csv: has a header and rows; npy and image: format magic bytes; python: an entry file that imports no workspace module, so it runs alone.",
+            "enum": [
+              "file",
+              "json",
+              "csv",
+              "npy",
+              "image",
+              "python"
+            ]
+          },
+          "schema": {
+            "type": "object",
+            "description": "JSON Schema a json output must satisfy.",
+            "additionalProperties": true
+          },
+          "optional": {
+            "type": "boolean",
+            "description": "Whether completion may proceed without this file."
+          }
+        },
+        "required": [
+          "path",
+          "kind"
+        ]
+      }
+    },
     "blocked_by": {
       "type": "array",
-      "description": "Complete blocker list for set_dependencies.",
+      "description": "Complete blocker list for set_dependencies, each optionally with an instruction.",
       "items": {
-        "type": "string"
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "task": {
+                "type": "string",
+                "description": "Blocking task id."
+              },
+              "instruction": {
+                "type": "string",
+                "description": "What this task takes from the blocker's artifacts."
+              }
+            },
+            "required": [
+              "task",
+              "instruction"
+            ]
+          }
+        ]
       }
     },
     "write_scopes": {

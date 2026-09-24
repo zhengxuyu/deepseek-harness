@@ -27,6 +27,7 @@ const task: TeamTask = {
   blockedBy: [],
   writeScopes: ['src'],
   ready: false,
+  outputs: [],
   writeScopeWarnings: ['write scopes overlap with task-2'],
 }
 const view: TeamView = {

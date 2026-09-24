@@ -751,10 +751,17 @@ export interface Config {
    * default: the board then holds only tasks members created.
    */
   readonly trackSubagentRuns?: boolean
+  /**
+   * Absolute harness-local directory under which every completed output is
+   * retained as `<team>/<task>/<path>`, so a later task that overwrites the
+   * same path leaves the previous version and its diff recoverable. Absent
+   * means outputs are hashed but not retained.
+   */
+  readonly artifactRoot?: string
 }
 ```
 
-Source: [`packages/experimental/agent-team/src/types.ts:200`](../packages/experimental/agent-team/src/types.ts)
+Source: [`packages/experimental/agent-team/src/types.ts:246`](../packages/experimental/agent-team/src/types.ts)
 
 <a id="deepseek-aidsh-experimental-agent-team-settlement"></a>
 
