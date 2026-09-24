@@ -18,6 +18,9 @@ const FRONTIER_ROW_SCHEMA = {
     /** Declared outputs, and how many of them a completed task recorded as artifacts. */
     outputs: { type: 'integer', required: true },
     artifacts: { type: 'integer' },
+    /** Notes sent to the task, and holds on it that the Lead has not acknowledged. */
+    notes: { type: 'integer' },
+    holds: { type: 'integer' },
   },
 } as const
 
@@ -77,6 +80,8 @@ function row(task: TeamTaskView): FrontierRow {
     ...task.ownerName === undefined ? {} : { ownerName: task.ownerName },
     outputs: task.outputs.length,
     ...task.artifacts === undefined ? {} : { artifacts: task.artifacts.length },
+    ...task.notes === undefined ? {} : { notes: task.notes.length },
+    ...task.holds === undefined ? {} : { holds: task.holds.length },
   }
 }
 

@@ -107,6 +107,18 @@ const taskArtifactSchema = z.object({
   previousVersion: z.string().min(1).optional(),
 }).strict()
 
+const taskNoteSchema = z.object({
+  id: z.string().min(1),
+  from: z.string().min(1),
+  text: z.string().min(1),
+}).strict()
+
+const taskHoldSchema = z.object({
+  note: z.string().min(1),
+  task: teamTaskIdSchema,
+  from: z.string().min(1),
+}).strict()
+
 const teamTaskSnapshotSchema = z.object({
   id: teamTaskIdSchema,
   revision: positiveSafeInteger,
@@ -121,7 +133,15 @@ const teamTaskSnapshotSchema = z.object({
   writeScopes: z.array(z.string()),
   outputs: z.array(artifactContractSchema).optional(),
   artifacts: z.array(taskArtifactSchema).optional(),
+  notes: z.array(taskNoteSchema).optional(),
+  holds: z.array(taskHoldSchema).optional(),
 }).strict().refine(
+  task => task.notes === undefined || new Set(task.notes.map(note => note.id)).size === task.notes.length,
+  { message: 'note ids must be unique on a task' },
+).refine(
+  task => task.holds === undefined || task.status !== 'completed',
+  { message: 'a completed task holds nothing' },
+).refine(
   task => (task.status === 'lost') === (task.lostCause !== undefined),
   { message: 'lostCause must be present exactly while status is lost' },
 ).refine(

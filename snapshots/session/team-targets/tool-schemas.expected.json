@@ -511,6 +511,27 @@
       }
     },
     {
+      "name": "team_task_note",
+      "description": "Send a note to a shared task rather than to a member: recorded on the task, mailed to its current owner, and included in the brief of whoever claims it. A note naming another live task's declared output path holds that task from completing until the Lead acknowledges. The result carries the frontier.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "Shared task id the note is about."
+          },
+          "text": {
+            "type": "string",
+            "description": "Self-contained note for whoever works the task."
+          }
+        },
+        "required": [
+          "task_id",
+          "text"
+        ]
+      }
+    },
+    {
       "name": "team_task_update",
       "description": "Compare-and-set a shared task action using the latest revision from team_task_get or team_task_list. The result carries the frontier after the edit.",
       "parameters": {
@@ -526,7 +547,7 @@
           },
           "action": {
             "type": "string",
-            "description": "Task transition to apply.",
+            "description": "Task transition to apply; acknowledge clears one hold (Lead only).",
             "enum": [
               "claim",
               "release",
@@ -535,8 +556,13 @@
               "complete",
               "reopen",
               "reassign",
-              "delete"
+              "delete",
+              "acknowledge"
             ]
+          },
+          "note": {
+            "type": "string",
+            "description": "The hold to clear for acknowledge: a note id from the task's holds."
           },
           "subject": {
             "type": "string",

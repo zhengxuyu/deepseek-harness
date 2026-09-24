@@ -56,12 +56,12 @@ Try it by asking the Lead model: "create a teammate named reviewer to check the 
 
 ### What the model can do
 
-The nine tools group into four capabilities:
+The ten tools group into four capabilities:
 
 - **Create a teammate** — `spawn_teammate` takes a name, a description, and the initial task; only the Lead can call it.
 - **Send messages** — `send_message` steers a running member at its nearest step boundary, starts or resumes an inactive member.
 - **See and wait** — `list_agents` returns each member’s `target` and availability; `wait_agent` waits for the next team change; `interrupt_agent` stops a teammate's current turn (Lead only).
-- **Manage the task board** — `team_task_create`, `team_task_list`, `team_task_get`, and `team_task_update` add, browse, read, and update shared tasks.
+- **Manage the task board** — `team_task_create`, `team_task_list`, `team_task_get`, and `team_task_update` add, browse, read, and update shared tasks; `team_task_note` sends a note to a task rather than to a member.
 
 Creation and listing results identify members by `target`, with no member Session ID. Use that value in message and interrupt calls or the task tools’ `owner` parameter; task `ownerName` uses the same value. `inactive` means no turn is executing, whether the member is loaded or must be resumed; it does not describe task completion or outcome. `provisioning` and `failed` describe member creation. Any member can message any other member and use the task board; only the Lead creates and interrupts teammates. Task updates keep the domain's owner and revision checks, so an outdated edit is rejected instead of overwriting newer work.
 
@@ -93,7 +93,7 @@ The [Agent Teams Agent Note](../../../.agents/notes/implemented/feature/2026-08-
 
 | File | Role |
 |---|---|
-| [`src/index.ts`](src/index.ts) | Plugin entry: config, the fixed policy text, and the nine scoped tool registrations |
+| [`src/index.ts`](src/index.ts) | Plugin entry: config, the fixed policy text, and the ten scoped tool registrations |
 | — | No runtime invariant companion is published; the Team service owns durable and authorization relations. |
 
 ### Policy and tools
@@ -127,7 +127,7 @@ Read these pages when the package-level contract is not enough. They move from t
 
 #### What the model sees
 
-One shared system policy states the explicit-delegation requirement, shared-cwd behavior, filesystem stale-version recovery, Bash/formatter/codegen risk, task and write-scope coordination, Steer delivery, the no-retry mailbox rule, the recovery of a `lost` task through `reopen`, the frozen text and edges of in-progress and completed tasks, `lastStop` as how a member's latest turn ended, `wait_agent` returning the members and tasks that changed, `outputs` as the definition of done that `complete` checks on disk, one output path and one subject per live task, blocker instructions, the frontier carried by every task edit and wait, the brief returned by `claim` and mailed on `reassign`, and the Lead's duty to wait before answering. `team_task_create` requires `outputs`. All nine Team schemas are identical for Leads and teammates; execution enforces Lead-only operations. `spawn_teammate` prefixes its initial user message with `<system-reminder>\nYou are teammate "<name>".\n</system-reminder>`, followed by a blank line and the task. The prefix contains no Team id and works when runtime context is disabled. Forks inherit history without an additional Lead identity message.
+One shared system policy states the explicit-delegation requirement, shared-cwd behavior, filesystem stale-version recovery, Bash/formatter/codegen risk, task and write-scope coordination, Steer delivery, the no-retry mailbox rule, the recovery of a `lost` task through `reopen`, the frozen text and edges of in-progress and completed tasks, `lastStop` as how a member's latest turn ended, `wait_agent` returning the members and tasks that changed, `outputs` as the definition of done that `complete` checks on disk, one output path and one subject per live task, blocker instructions, the frontier carried by every task edit and wait, notes as edges with the hold a note places on the task whose output it names, the brief returned by `claim` and mailed on `reassign`, and the Lead's duty to wait before answering. `team_task_create` requires `outputs`. All ten Team schemas are identical for Leads and teammates; execution enforces Lead-only operations. `spawn_teammate` prefixes its initial user message with `<system-reminder>\nYou are teammate "<name>".\n</system-reminder>`, followed by a blank line and the task. The prefix contains no Team id and works when runtime context is disabled. Forks inherit history without an additional Lead identity message.
 
 #### Token effect
 

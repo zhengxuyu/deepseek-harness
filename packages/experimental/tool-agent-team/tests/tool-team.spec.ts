@@ -40,6 +40,7 @@ const TOOL_NAMES = [
   'team_task_list',
   'team_task_get',
   'team_task_update',
+  'team_task_note',
 ].sort()
 
 const roots: string[] = []
@@ -207,6 +208,33 @@ describe('dsh-tool-team', () => {
     expect(woken.frontier.members.map(member => member.target)).toEqual(['lead', 'hanger'])
     await execute(ctx, lead, 'interrupt_agent', { target: 'hanger' })
     await vi.waitFor(() => { expect(ctx.agents.get(hanger)).toBeUndefined() }, { timeout: 5_000 })
+  })
+
+  it('sends a note to a task, holds the task whose output it names, and clears the hold on acknowledge', async () => {
+    const { ctx, lead } = await setup([])
+    const producer = JSON.parse(text(await execute(ctx, lead, 'team_task_create', {
+      subject: 'Produce', description: 'd', outputs: [{ path: 'out/model.json', kind: 'json' }],
+    }))) as { id: string; revision: number }
+    const consumer = JSON.parse(text(await execute(ctx, lead, 'team_task_create', { subject: 'Consume', description: 'd', outputs: [] }))) as { id: string }
+    const noted = JSON.parse(text(await execute(ctx, lead, 'team_task_note', {
+      task_id: consumer.id, text: 'out/model.json needs the bias term',
+    }))) as { noteId: string; held: string[]; notes: unknown[]; frontier: { ready: Array<{ id: string; notes?: number; holds?: number }> } }
+    expect(noted.noteId).toBe('task-2-note-1')
+    expect(noted.held).toEqual([producer.id])
+    expect(noted.notes).toEqual([{ id: 'task-2-note-1', from: 'lead', text: 'out/model.json needs the bias term' }])
+    expect(noted.frontier.ready).toEqual([
+      { id: 'task-1', subject: 'Produce', status: 'pending', outputs: 1, holds: 1 },
+      { id: 'task-2', subject: 'Consume', status: 'pending', outputs: 0, notes: 1 },
+    ])
+    const held = JSON.parse(text(await execute(ctx, lead, 'team_task_get', { task_id: producer.id }))) as { revision: number; holds: unknown[] }
+    expect(held.holds).toEqual([{ note: 'task-2-note-1', task: consumer.id, from: 'lead' }])
+    const acknowledged = JSON.parse(text(await execute(ctx, lead, 'team_task_update', {
+      task_id: producer.id, expected_revision: held.revision, action: 'acknowledge', note: 'task-2-note-1',
+    }))) as { holds?: unknown[]; frontier: { ready: Array<{ holds?: number }> } }
+    expect(acknowledged.holds).toBeUndefined()
+    expect(acknowledged.frontier.ready[0]?.holds).toBeUndefined()
+    const missing = await execute(ctx, lead, 'team_task_note', { task_id: 'task-9', text: 'x' })
+    expect(missing.isError).toBe(true)
   })
 
   it('returns a live twin subject as an observation naming the existing task', async () => {
