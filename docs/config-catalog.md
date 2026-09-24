@@ -1111,16 +1111,20 @@ Source: [`packages/experimental/speech-to-text-sensevoice/src/config.ts:6`](../p
 Requires: `agents` · `agentTeams` · `tools` · `systemPrompt`
 
 ```ts config-catalog
-/** Tool routing configuration. */
+/** Tool routing and frontier configuration. */
 export interface Config {
   /** Continuable-subagent provider used for fresh teammates. */
   readonly freshProvider?: string
   /** Continuable-subagent provider used for completed-prefix fork teammates. */
   readonly forkProvider?: string
+  /** Dependency hops around an edited task that its result's `frontier.around` covers; `0` omits the neighbourhood. */
+  readonly frontierHops?: number
+  /** Rows kept per frontier list (ready, running, lost, upstream, downstream); a cut list sets `truncated`. */
+  readonly frontierRows?: number
 }
 ```
 
-Source: [`packages/experimental/tool-agent-team/src/index.ts:17`](../packages/experimental/tool-agent-team/src/index.ts)
+Source: [`packages/experimental/tool-agent-team/src/index.ts:19`](../packages/experimental/tool-agent-team/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-turn-continuation"></a>
 
