@@ -64,6 +64,11 @@ function classifyPiAiError(message: string): string {
     || /\bterminated\b|premature close/i.test(message)) {
     return 'TRANSPORT'
   }
+  // OpenRouter reports an upstream provider that failed while producing the
+  // response either as a bare `error` finish_reason, which pi-ai renders as
+  // `Provider finish_reason: error`, or as `Upstream error from <provider>: …`.
+  // The failure is the provider's, not the request's, so it retries like a 5xx.
+  if (/^Provider finish_reason: error$/.test(message) || /^Upstream error from /.test(message)) return 'SERVER'
   return 'PI_AI_ERROR'
 }
 
