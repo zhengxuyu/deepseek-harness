@@ -149,6 +149,8 @@ Lead 可以停止 teammate 的当前轮次，而不会删除其排队的消息�
 
 `outputs` 是任务的完成定义。每个 `ArtifactContract` 指定一个 workspace 相对路径（像写范围一样规范化，任务内唯一）和一种 kind：`file` 必须存在且非空；`json` 必须可解析，带 `schema` 时还须符合 `dsh-tools` 强制的 JSON Schema 子集；`csv` 需要表头和至少一行数据；`npy` 与 `image` 必须以其格式的魔数开头；`python` 必须是一个入口文件，其 import 不指向 workspace 中定义的模块，因此能单独运行。`complete` 通过 `ctx.fs` 相对 Lead 的工作目录检查每个非可选契约，以 `TEAM_TASK_OUTPUT_MISSING` 逐个指出不合格的输出；声明了输出的任务没有文件系统服务时无法完成（`TEAM_OUTPUTS_UNCHECKABLE`）。通过的输出记为 `artifacts`，带字节数与 sha256；若某路径上更早的已完成任务产出过不同内容，则记该任务为 `supersedes`；配置了 `artifactRoot` 时，每个已完成的输出以 `<artifactRoot>/<team>/<task>/<path>` 保留，被取代版本的保留副本记为 `previousVersion`。活跃任务（`pending`、`in_progress`、`lost`）不能声明另一个活跃任务已声明的路径（`TEAM_TASK_OUTPUT_CONFLICT`）；已完成任务的路径可以再次声明。`reopen` 清除记录的 artifacts。
 
+note 是收件方为任务的消息：`noteTask` 把它记录在任务上（`notes`），邮寄给任务当前的 owner，之后认领该任务的成员的简报里也会列出它。点名了另一个活跃任务所声明输出路径的 note 会 hold 住那个任务（`holds`）：在 Lead 用 `acknowledge` 点名该 note 逐个清除 hold 之前，`complete` 会以 `TEAM_TASK_HELD` 拒绝。note 需要一个活跃任务。
+
 任务板为每项工作只保留一个节点。`create` 以及改名的 `edit` 会拒绝另一个活跃（`pending`、`in_progress` 或 `lost`）任务已经使用的 subject，比较时忽略大小写和空白，以 `TEAM_TASK_DUPLICATE_SUBJECT` 指出该任务及其状态：调用方应依赖它、编辑它，或在它 lost 时 reopen 它。已完成或已删除的任务会释放其 subject，因此第二轮可以复用同名。
 
 `edgeInstructions` 记录任务从每个 blocker 取什么，按 blocker id 键控，随 `blockedBy` 一起由 `set_dependencies` 替换。`claim` 的结果与 `reassign` 给成员的结果携带 `brief`：任务文本、每个 blocker 的状态、记录的 artifacts 与说明，以及作为完成定义的输出契约。被重新分配的成员还会以来自 Lead 的持久邮件收到该简报，这会启动或恢复它。

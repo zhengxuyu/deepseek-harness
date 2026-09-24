@@ -42,7 +42,7 @@ The Team Lead and all teammates share the same working directory and filesystem.
 
 Prefer read/edit/write for file changes. If a file operation returns FS_STALE_VERSION, read the current file, rebase your intended change onto the new content, and retry. Bash, formatters, code generators, and scripts are not fully protected by the filesystem version guard; coordinate them explicitly and have the Lead review the final diff and run tests.
 
-Use the target returned by spawn_teammate or list_agents for send_message and interrupt_agent, or as owner when assigning or filtering shared tasks. send_message steers a running target at its nearest step boundary and starts or resumes an inactive target. inactive means no turn is executing; it does not describe task completion, success, failure, or waiting for other agents. provisioning means member creation is in progress; failed means member creation failed. lastStop is how a member's latest turn ended: completed, aborted, error, max-tokens (cut off at the output limit), or refusal; an inactive member whose lastStop is not completed did not finish that turn's work. A delivered peer item starts with its stable message id and sender name. A successful send is already durable even when its result says queued; do not resend it. Shared-task workflow is list, get, claim with the current revision, perform the work, then complete. Every task declares outputs, the files it must produce; complete is refused until every non-optional output exists on disk and passes its kind's check, so a task is done only when its artifacts are. Two live tasks cannot declare the same output path, and a subject a live task already carries is refused: depend on that task, edit it, or reopen it if it is lost, instead of creating a twin. A blocker entry may carry an instruction saying what the task takes from that blocker's artifacts. claim returns a brief composed from the recorded task, its inputs, and its outputs; a reassigned member receives the same brief by mail. Task readiness never starts an owner. A lost task's owner can no longer finish it: reopen it, then claim or reassign it. In-progress and completed tasks cannot be edited, rewired, or deleted. Before wait_agent, use list_agents and make sure another required member is running or provisioning; use send_message first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Its result lists the members and tasks that changed while it waited. Every task edit and every wait_agent result also carries frontier: the ready, running, and lost tasks, how many are blocked or completed, the edited task's upstream and downstream neighbours, and each member's status; read it instead of re-listing or remembering the board. The Lead must wait for required teammates before giving the final answer.`
+Use the target returned by spawn_teammate or list_agents for send_message and interrupt_agent, or as owner when assigning or filtering shared tasks. send_message steers a running target at its nearest step boundary and starts or resumes an inactive target. inactive means no turn is executing; it does not describe task completion, success, failure, or waiting for other agents. provisioning means member creation is in progress; failed means member creation failed. lastStop is how a member's latest turn ended: completed, aborted, error, max-tokens (cut off at the output limit), or refusal; an inactive member whose lastStop is not completed did not finish that turn's work. A delivered peer item starts with its stable message id and sender name. A successful send is already durable even when its result says queued; do not resend it. Shared-task workflow is list, get, claim with the current revision, perform the work, then complete. Every task declares outputs, the files it must produce; complete is refused until every non-optional output exists on disk and passes its kind's check, so a task is done only when its artifacts are. Two live tasks cannot declare the same output path, and a subject a live task already carries is refused: depend on that task, edit it, or reopen it if it is lost, instead of creating a twin. A blocker entry may carry an instruction saying what the task takes from that blocker's artifacts. claim returns a brief composed from the recorded task, its inputs, and its outputs; a reassigned member receives the same brief by mail. Task readiness never starts an owner. A lost task's owner can no longer finish it: reopen it, then claim or reassign it. In-progress and completed tasks cannot be edited, rewired, or deleted. Before wait_agent, use list_agents and make sure another required member is running or provisioning; use send_message first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Its result lists the members and tasks that changed while it waited. team_task_note sends a note to a task instead of a member: it is recorded on the task, mailed to the task's current owner, and shown in the brief of whoever claims the task later; a note that names another live task's declared output path holds that task from completing until the Lead acknowledges the hold with team_task_update action acknowledge. Every task edit and every wait_agent result also carries frontier: the ready, running, and lost tasks, how many are blocked or completed, the edited task's upstream and downstream neighbours, and each member's status; read it instead of re-listing or remembering the board. The Lead must wait for required teammates before giving the final answer.`
 
 const ACTIVE_WAIT_STATUSES: ReadonlySet<TeamMemberView['status']> = new Set(['running', 'provisioning'])
 const NO_ACTIVE_PEER_MESSAGE = 'No other Team member is running or provisioning. wait_agent cannot make progress or wake inactive teammates. Re-list with list_agents and team_task_list, then use send_message to wake each required inactive teammate before waiting again.'
@@ -124,6 +124,26 @@ const BLOCKER_SCHEMA = {
 } as const
 
 /** One shared task, matching the public `TeamTaskView`. */
+const TASK_NOTE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'string', required: true },
+    from: { type: 'string', required: true },
+    text: { type: 'string', required: true },
+  },
+} as const
+
+const TASK_HOLD_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    note: { type: 'string', required: true },
+    task: { type: 'string', required: true },
+    from: { type: 'string', required: true },
+  },
+} as const
+
 const TASK_VIEW_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -142,6 +162,8 @@ const TASK_VIEW_SCHEMA = {
     outputs: { type: 'array', required: true, items: OUTPUT_CONTRACT_SCHEMA },
     artifacts: { type: 'array', items: TASK_ARTIFACT_SCHEMA },
     brief: { type: 'string' },
+    notes: { type: 'array', items: TASK_NOTE_SCHEMA },
+    holds: { type: 'array', items: TASK_HOLD_SCHEMA },
     ready: { type: 'boolean', required: true },
     writeScopeWarnings: { type: 'array', required: true, items: { type: 'string' } },
   },
@@ -151,6 +173,16 @@ const TASK_VIEW_SCHEMA = {
 const TASK_EDIT_VALUE_SCHEMA = {
   ...TASK_VIEW_SCHEMA,
   properties: { ...TASK_VIEW_SCHEMA.properties, frontier: { ...FRONTIER_SCHEMA, required: true } },
+} as const
+
+/** A note's result: the noted task, the note id, the tasks the note holds, and the frontier. */
+const TASK_NOTE_VALUE_SCHEMA = {
+  ...TASK_EDIT_VALUE_SCHEMA,
+  properties: {
+    ...TASK_EDIT_VALUE_SCHEMA.properties,
+    noteId: { type: 'string', required: true },
+    held: { type: 'array', required: true, items: { type: 'string' } },
+  },
 } as const
 
 type BlockerArg = InferValue<typeof BLOCKER_SCHEMA>
@@ -550,9 +582,10 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
         action: {
           type: 'string',
           required: true,
-          enum: ['claim', 'release', 'edit', 'set_dependencies', 'complete', 'reopen', 'reassign', 'delete'],
-          description: 'Task transition to apply.',
+          enum: ['claim', 'release', 'edit', 'set_dependencies', 'complete', 'reopen', 'reassign', 'delete', 'acknowledge'],
+          description: 'Task transition to apply; acknowledge clears one hold (Lead only).',
         },
+        note: { type: 'string', description: 'The hold to clear for acknowledge: a note id from the task\'s holds.' },
         subject: { type: 'string', description: 'Replacement title for edit.' },
         description: { type: 'string', description: 'Replacement details for edit.' },
         outputs: { type: 'array', items: OUTPUT_CONTRACT_SCHEMA, description: 'Replacement output contracts for edit.' },
@@ -574,8 +607,24 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
           ...edges === undefined ? {} : { blockedBy: edges.blockedBy, edgeInstructions: edges.edgeInstructions },
           ...args.write_scopes === undefined ? {} : { writeScopes: args.write_scopes },
           ...args.owner === undefined ? {} : { owner: args.owner },
+          ...args.note === undefined ? {} : { note: args.note },
         })
         return withFrontier(caller, task)
+      },
+    })))
+
+    register(scoped.tools.register(defineTool({
+      name: 'team_task_note',
+      description: 'Send a note to a shared task rather than to a member: recorded on the task, mailed to its current owner, and included in the brief of whoever claims it. A note naming another live task\'s declared output path holds that task from completing until the Lead acknowledges. The result carries the frontier.',
+      parameters: {
+        task_id: { type: 'string', required: true, description: 'Shared task id the note is about.' },
+        text: { type: 'string', required: true, description: 'Self-contained note for whoever works the task.' },
+      },
+      output: jsonOutput(TASK_NOTE_VALUE_SCHEMA),
+      async execute(args, exec) {
+        const caller = callingAgent(exec.agent, 'team_task_note')
+        const noted = await ctx.agentTeams.noteTask(caller, { taskId: TeamTaskId(args.task_id), text: args.text, signal: exec.signal })
+        return { ...withFrontier(caller, noted), noteId: noted.noteId, held: noted.held }
       },
     })))
   } catch (error: unknown) {

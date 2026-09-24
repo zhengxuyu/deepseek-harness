@@ -37,12 +37,14 @@ export function taskBrief(state: TeamState, task: TeamTaskSnapshot): string {
     return `- ${id}${subject} (${status}): ${produced}${instruction === undefined ? '' : `; instruction: ${instruction}`}`
   })
   const outputs = (task.outputs ?? []).map(contractLine)
+  const notes = (task.notes ?? []).map(note => `- ${note.id} from ${note.from}: ${note.text}`)
   return [
     `Task ${task.id}: ${task.subject}`,
     task.description,
     '',
     'Inputs:',
     ...inputs.length === 0 ? ['- none'] : inputs,
+    ...notes.length === 0 ? [] : ['', 'Notes sent to this task:', ...notes],
     '',
     'Outputs (definition of done; complete is refused until every non-optional one exists on disk and passes its check):',
     ...outputs.length === 0 ? ['- none declared'] : outputs,
