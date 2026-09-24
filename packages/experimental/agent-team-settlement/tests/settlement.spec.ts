@@ -329,7 +329,9 @@ describe('agent-team-settlement', () => {
     expect(ctx.agentTeams.getTask(lead, own!.id)).toMatchObject({ status: 'in_progress', ownerName: 'mate', revision: given.revision })
     await ctx.agentTeams.updateTask(mate, { taskId: own!.id, expectedRevision: given.revision, action: 'complete' })
     await expect(settled).resolves.toEqual({ unsettled: [] })
+    // The interrupted teammate keeps the brief it was mailed with the task, so it is ended, not left idle.
     ctx.agentTeams.interrupt(lead, 'mate')
+    mate.cancel({ kind: 'parent' })
     await vi.waitFor(() => { expect(ctx.agents.get(mate.id)).toBeUndefined() }, { timeout: 5_000 })
   })
 
@@ -351,6 +353,7 @@ describe('agent-team-settlement', () => {
     })
     expect(closing).toHaveBeenCalledTimes(1)
     expect(mate.status).not.toBe('running')
+    mate.cancel({ kind: 'parent' })
     await vi.waitFor(() => { expect(ctx.agents.get(mate.id)).toBeUndefined() }, { timeout: 5_000 })
   })
 

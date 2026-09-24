@@ -54,6 +54,7 @@ kind: "package-reference"
 | `maxMessageBytes` | `65,536` | 单条发送消息的最大尺寸 |
 | `disposalTimeoutMs` | `5,000` | 关闭清理允许的时间 |
 | `trackSubagentRuns` | `false` | 把 Lead 之下的普通 `subagent` 运行记录为任务板上有 owner 的任务，并在每次运行结束时结算 |
+| `artifactRoot` | 无 | harness 本地的绝对目录，每个已完成的输出以 `<team>/<task>/<path>` 保留在其下；缺省时只做哈希不保留 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-experimental-agent-team)是每个受支持字段及其 JSDoc 的穷尽式真源。
 
@@ -97,6 +98,8 @@ stateDiagram-v2
 ```
 
 owner 已不在的任务是 `lost`，owner 仍然记着；重新打开它才能再次 claim。成员的 turn 没有完成就结束时（被 interrupt 的除外），它会失去进行中的任务。任务一旦进行中或已完成，其文本与依赖不再改变。Lead 仍然可以取消它的指派、一步转交给另一个成员，或把它标成完成；原来在做它的成员会收到通知并停下。
+
+任务声明它将产出的文件。在每个文件都在磁盘上且符合声明之前，完成会被拒绝，所以任务只有在产物存在时才算完成；两个任务不能同时承诺同一个文件。blocker 可以带一条说明，写明依赖它的任务从它取什么；开始一个任务的人会收到由记录的任务、其输入和输出组合而成的简报。
 
 ### 等待与中断
 
@@ -160,6 +163,10 @@ Lead 可以停止 teammate 的当前轮次，而不会删除其排队的消息�
 图中已执行的部分是冻结的。`edit`、`set_dependencies` 与 `delete` 只接受 `pending` 或 `lost` 任务；`reassign` 给成员接受 ready 的 `pending` 或 `in_progress` 任务；不带 owner 的 `reassign`（Lead 侧的释放）接受 `pending` 或 `in_progress`。其余情况一律回答 `TEAM_TASK_INVALID_TRANSITION`，因此运行中的任务保持其 owner 开始时的文本与边，已完成的任务保持其结果所对应的记录。只要 `completed` 任务所阻塞的某个任务处于进行中或已完成，对它的 `reopen` 就回答 `TEAM_TASK_HAS_DEPENDENTS`，因此 started 的任务不会有未完成的 blocker。`TeamTaskSnapshot` 按状态分成多个变体，每个变体写明该状态带有的 owner 与 cause 字段；表格见[子系统页面](../../../docs/subsystems/agent-team.zh.md#task-status-transitions)。`task-status.ts` 定义所有判断使用的状态分组：outstanding、open、started 和 uncollected。任务的 `attempts` 列出它之前的每次持有、各自如何结束，以及在 `release`、`reassign` 或 `reopen` 时给出的可选 `reason`；`goalRevision` 是最后一次改动 subject 或 description 的 revision，因此对工作的反馈和对目标的改动是分开记录的。尝试记录的是它的 owner 当时对应的目标；任务处于 `lost` 时所做的编辑不会改变它。
 
 harness 记录和结算工作时不经过成员动作。`beginTask(caller, request)` 把调用成员已经开始的工作记录为它名下的 `in_progress` 任务，对任何成员都适用；`markCompleted(caller, id, ownerId)` 完成一个仍由 `ownerId` 持有的 `in_progress` 任务。结算插件用这两个方法处理 headless 运行启动时的任务，该任务由 Lead 持有。`lost` 是 harness 的状态，绝不是成员动作：`markLost(caller, id, cause, ownerId?)` 把一个 `in_progress` 任务移入该状态并保留其 owner 记录，带 `ownerId` 时拒绝已由其他 owner 持有的任务；provisioning 失败的成员会丢失它在 provisioning 期间认领的一切，turn 以 `completed`、`aborted` 之外的 stop reason 结束的成员会丢失它持有的每个任务（两者都是 `owner-failed`）。Lead 对其他成员正在做的任务取消指派、重新指派或标成完成时，`updateTask` 会向该成员排入一条 Team mailbox 消息，说明是哪个任务、发生了什么；没有其他进行中任务的成员，当前 turn 还会被中断。`interruptTeammates(caller)` 中断每个正在运行的 teammate，并在它们都空闲后返回，一次性宿主在 deadline 到期时调用它。lost 任务不能被 claim 或 complete；`reopen` 把它变回无 owner 的 `pending`，在此之前可以先用 `edit` 或 `set_dependencies` 修订它。它的依赖方保持阻塞，它的写范围不再产生警告。`outstandingTasks(caller)` 列出调用方任务板上的 `in_progress` 任务以及每个 owner 当前是否在运行（进程外 provider 承载的被跟踪运行在结束前都视为运行中），这正是一次性宿主在退出前等待的东西。
+
+`outputs` 是任务的完成定义。每个 `ArtifactContract` 指定一个 workspace 相对路径（像写范围一样规范化，任务内唯一）和一种 kind：`file` 必须存在且非空；`json` 必须可解析，带 `schema` 时还须符合 `dsh-tools` 强制的 JSON Schema 子集；`csv` 需要表头和至少一行数据；`npy` 与 `image` 必须以其格式的魔数开头；`python` 必须是一个入口文件，其 import 不指向 workspace 中定义的模块，因此能单独运行。`complete` 通过 `ctx.fs` 相对 Lead 的工作目录检查每个非可选契约，以 `TEAM_TASK_OUTPUT_MISSING` 逐个指出不合格的输出；声明了输出的任务没有文件系统服务时无法完成（`TEAM_OUTPUTS_UNCHECKABLE`）。通过的输出记为 `artifacts`，带字节数与 sha256；若某路径上更早的已完成任务产出过不同内容，则记该任务为 `supersedes`；配置了 `artifactRoot` 时，每个已完成的输出以 `<artifactRoot>/<team>/<task>/<path>` 保留，被取代版本的保留副本记为 `previousVersion`。活跃任务（`pending`、`in_progress`、`lost`）不能声明另一个活跃任务已声明的路径（`TEAM_TASK_OUTPUT_CONFLICT`）；已完成任务的路径可以再次声明。`reopen` 清除记录的 artifacts。
+
+`edgeInstructions` 记录任务从每个 blocker 取什么，按 blocker id 键控，随 `blockedBy` 一起由 `set_dependencies` 替换。`claim` 的结果与 `reassign` 给成员的结果携带 `brief`：任务文本、每个 blocker 的状态、记录的 artifacts 与说明，以及作为完成定义的输出契约。被重新分配的成员还会以来自 Lead 的持久邮件收到该简报，这会启动或恢复它。
 
 `trackSubagentRuns` 会把 Team 之下的每一次 `subagent/start` 记录为该 Team Lead 任务板上一个有 owner 的 `in_progress` 任务，并根据配对的 `subagent/end` 结算：`completed` 完成该任务，其他任何 stop reason 都把它标记为 `lost`，原因为 `owner-failed`，并把该 stop reason 记为 `ownerStop`。这一行属于该运行：在运行结束之前，对它的 `release`、`reassign` 与 `complete` 回答 `TEAM_TASK_INVALID_TRANSITION`。Lead 通过沿委派 parent 的谱系向上查找最近的成员或 Root 得到。无论是否设置该选项，roster 成员自身的 turn 都会被跟踪，但不产生自己的任务行，这样每个 turn 的结果都记为该成员的 `lastStop`，失败的 turn 会让该成员失去任务，并把它的 stop reason 记为这些任务的 `ownerStop`。
 
@@ -230,6 +237,8 @@ Peer 消息追加在 target 可复用历史前缀之后。冷恢复会先复用�
 - **扁平且不可变的 roster**——只有 Lead 可以创建直接 teammate；不支持嵌套 Team、重命名、删除或名字复用。
 - **owner 只因有记录的事件而结束**——成员不活动、turn 正常完成、interrupt 与进程退出都不会释放任务 owner。成员的 turn 失败会把它的任务标记为 `lost`，放弃某个 owner 的一次性宿主也会这样做；owner 记录保留，只有 `reopen` 会清除它。
 - **被跟踪的运行不带契约**——通过 `trackSubagentRuns` 记录的运行只记下它的 provider 与子 Session，不记它收到的 prompt 或它应交付的产物；它的完成只是运行的 stop reason，不是对其产出的检查。
+- **输出检查看形式，不看正确性**——存在、格式、schema 和静态 import 扫描；格式良好但错误的结果照样完成，`python` 检查读的是 import 行，不是文件运行时做了什么。
+- **保留是进程本地的**——`artifactRoot` 通过运行 Team 服务的进程的 Node 文件系统复制，远端文件系统后端上的 workspace 只做哈希不保留。
 - **mailbox 不保证跨进程 exactly-once**——不支持多个 harness 进程并发操作同一 Team。
 
 <a id="dev-note"></a>
