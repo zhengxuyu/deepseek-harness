@@ -2120,7 +2120,7 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 
 ### `team_task_create`
 
-在共享 Team 任务板上创建一个无 owner 的 pending task。 outputs 是完成定义：在每个非可选输出都存在并通过检查之前，complete 会被拒绝。 活跃任务已使用的 subject 会被拒绝；请改为依赖该任务。
+在共享 Team 任务板上创建一个无 owner 的 pending task。 outputs 是完成定义：在每个非可选输出都存在并通过检查之前，complete 会被拒绝。 活跃任务已使用的 subject 会被拒绝；请改为依赖该任务。 结果携带编辑后的 frontier。
 
 ```json
 {
@@ -2283,7 +2283,7 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 
 ### `team_task_update`
 
-使用 team_task_get 或 team_task_list 返回的最新 revision，对共享任务操作执行 compare-and-set。
+使用 team_task_get 或 team_task_list 返回的最新 revision，对共享任务操作执行 compare-and-set。 结果携带编辑后的 frontier。
 
 ```json
 {

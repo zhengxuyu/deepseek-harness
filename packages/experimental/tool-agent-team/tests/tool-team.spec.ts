@@ -179,6 +179,36 @@ describe('dsh-tool-team', () => {
     await vi.waitFor(() => { expect(ctx.agents.get(hanger)).toBeUndefined() }, { timeout: 5_000 })
   })
 
+  it('hands the frontier back on every task edit and every wait', async () => {
+    const { ctx, lead } = await setup(['hang', 'hang'])
+    interface FrontierReply { ready: Array<{ id: string }>; around?: { task: string }; members: Array<{ target: string }> }
+    const createdResult = await execute(ctx, lead, 'team_task_create', { subject: 'Fit', description: 'd', outputs: [] })
+    const created = JSON.parse(text(createdResult)) as { id: string; revision: number; frontier: FrontierReply }
+    expect(created.frontier).toMatchObject({ ready: [{ id: 'task-1', subject: 'Fit', status: 'pending', outputs: 0 }], blocked: 0, completed: 0 })
+    expect(created.frontier.around).toEqual({ task: 'task-1', upstream: [], downstream: [] })
+    expect(created.frontier.members).toEqual([{ target: 'lead', status: 'inactive' }])
+    const claimed = JSON.parse(text(await execute(ctx, lead, 'team_task_update', {
+      task_id: created.id, expected_revision: created.revision, action: 'claim',
+    }))) as { frontier: { ready: unknown[]; running: Array<{ id: string; ownerName: string }> } }
+    expect(claimed.frontier.ready).toEqual([])
+    expect(claimed.frontier.running)
+      .toEqual([{ id: 'task-1', subject: 'Fit', status: 'in_progress', ownerName: 'lead', outputs: 0 }])
+
+    const noPeer = JSON.parse(text(await execute(ctx, lead, 'wait_agent', { timeout_ms: 10_000 }))) as { noProgress: unknown; frontier: { running: unknown[] } }
+    expect(noPeer.noProgress).toBeDefined()
+    expect(noPeer.frontier.running).toHaveLength(1)
+    const hanger = spawnedChildId(ctx, lead, await execute(ctx, lead, 'spawn_teammate', { name: 'hanger', description: 'd', prompt: 'hang' }))
+    await waitRunning(ctx, hanger)
+    const wait = execute(ctx, lead, 'wait_agent', { timeout_ms: 10_000 })
+    setTimeout(() => { void execute(ctx, lead, 'team_task_create', { outputs: [], subject: 'wake', description: 'wake' }) }, 0)
+    const woken = JSON.parse(text(await wait)) as { timedOut: boolean; frontier: FrontierReply }
+    expect(woken.timedOut).toBe(false)
+    expect(woken.frontier.ready.map(row => row.id)).toEqual(['task-2'])
+    expect(woken.frontier.members.map(member => member.target)).toEqual(['lead', 'hanger'])
+    await execute(ctx, lead, 'interrupt_agent', { target: 'hanger' })
+    await vi.waitFor(() => { expect(ctx.agents.get(hanger)).toBeUndefined() }, { timeout: 5_000 })
+  })
+
   it('returns a live twin subject as an observation naming the existing task', async () => {
     const { ctx, lead } = await setup([])
     await execute(ctx, lead, 'team_task_create', { subject: 'Fit the model', description: 'd', outputs: [] })
@@ -551,6 +581,14 @@ describe('dsh-tool-team', () => {
     expect(noProgress.isError).toBe(false)
     expect(JSON.parse(text(noProgress))).toEqual({
       timedOut: false,
+      frontier: {
+        ready: [],
+        running: [],
+        lost: [],
+        blocked: 0,
+        completed: 0,
+        members: [{ target: 'lead', status: 'inactive' }, { target: 'inactive-worker', status: 'inactive', lastStop: 'completed' }],
+      },
       changes: { members: [], tasks: [] },
       noProgress: {
         reason: 'no-active-peer',
