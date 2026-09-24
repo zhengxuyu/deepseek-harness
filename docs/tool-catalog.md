@@ -2114,7 +2114,7 @@ Source: [`packages/experimental/tool-agent-team/src/index.ts`](../packages/exper
 
 ### `team_task_create`
 
-Create one unowned pending task on the shared Team task board. outputs is the definition of done: complete is refused until every non-optional output exists and passes its check. A subject a live task already carries is refused; depend on that task instead.
+Create one unowned pending task on the shared Team task board. outputs is the definition of done: complete is refused until every non-optional output exists and passes its check. A subject a live task already carries is refused; depend on that task instead. The result carries the frontier after the edit.
 
 ```json
 {
@@ -2277,7 +2277,7 @@ Source: [`packages/experimental/tool-agent-team/src/index.ts`](../packages/exper
 
 ### `team_task_update`
 
-Compare-and-set a shared task action using the latest revision from team_task_get or team_task_list.
+Compare-and-set a shared task action using the latest revision from team_task_get or team_task_list. The result carries the frontier after the edit.
 
 ```json
 {

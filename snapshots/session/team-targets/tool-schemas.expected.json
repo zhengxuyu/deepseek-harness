@@ -364,7 +364,7 @@
     },
     {
       "name": "team_task_create",
-      "description": "Create one unowned pending task on the shared Team task board. outputs is the definition of done: complete is refused until every non-optional output exists and passes its check. A subject a live task already carries is refused; depend on that task instead.",
+      "description": "Create one unowned pending task on the shared Team task board. outputs is the definition of done: complete is refused until every non-optional output exists and passes its check. A subject a live task already carries is refused; depend on that task instead. The result carries the frontier after the edit.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -512,7 +512,7 @@
     },
     {
       "name": "team_task_update",
-      "description": "Compare-and-set a shared task action using the latest revision from team_task_get or team_task_list.",
+      "description": "Compare-and-set a shared task action using the latest revision from team_task_get or team_task_list. The result carries the frontier after the edit.",
       "parameters": {
         "type": "object",
         "properties": {
