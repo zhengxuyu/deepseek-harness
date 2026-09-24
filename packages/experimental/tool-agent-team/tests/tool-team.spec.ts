@@ -142,7 +142,11 @@ describe('dsh-tool-team', () => {
   it('lists a teammate whose turn ended and a task lost with its owner stop among the wait changes', async () => {
     const { ctx, lead } = await setup([textResponse('mate done'), 'hang', 'hang'], false, { trackSubagentRuns: true })
     await execute(ctx, lead, 'spawn_teammate', { name: 'mate', description: 'd', prompt: 'work' })
-    await vi.waitFor(() => { expect(ctx.agentTeams.listMembers(lead)[1]?.lastStop).toBe('completed') })
+    // The run-end record and the member's final status edge are separate wakes;
+    // wait for both so neither lands inside the wait below and wakes it early.
+    await vi.waitFor(() => {
+      expect(ctx.agentTeams.listMembers(lead)[1]).toMatchObject({ lastStop: 'completed', status: 'inactive' })
+    })
     const hanger = spawnedChildId(ctx, lead, await execute(ctx, lead, 'spawn_teammate', { name: 'hanger', description: 'd', prompt: 'hang' }))
     await waitRunning(ctx, hanger)
     const controller = new AbortController()
