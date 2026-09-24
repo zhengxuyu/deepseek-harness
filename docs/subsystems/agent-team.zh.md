@@ -80,10 +80,17 @@ interface TeamTaskSnapshot {
   readonly outputs?: ArtifactContract[]
   /** Outputs recorded at completion; present only while {@link status} is `completed` and outputs were declared. */
   readonly artifacts?: TaskArtifact[]
+  /** Notes sent to this task, in arrival order; absent means none. */
+  readonly notes?: TaskNote[]
+  /**
+   * Notes on other tasks that name one of this task's outputs and that the Lead has not acknowledged;
+   * `complete` is refused while any remain.
+   */
+  readonly holds?: TaskHold[]
 }
 ```
 
-`pending` 表示尚未开始或已经释放，`in_progress` 携带 owner，`completed` 满足 blocker，`lost` 是 harness 已放弃其 owner 的进行中任务（`lostCause` 为 `owner-failed` 或 `run-ended`；owner 记录保留到 `reopen` 为止），`deleted` 是保留的 tombstone。`in_progress` 与 `completed` 任务是冻结的：其文本、边与分配不再改变。因被跟踪的运行未完成而 lost 的任务还会把该运行的 stop reason 记为 `ownerStop`。`outputs` 是任务的完成定义：每个 `ArtifactContract` 指定一个 workspace 相对路径和一种 kind（`file`、可带 schema 的 `json`、`csv`、`npy`、`image`、`python`），在每个非可选输出都存在于磁盘并通过其 kind 的检查之前，`complete` 以 `TEAM_TASK_OUTPUT_MISSING` 拒绝；通过的输出随后记为 `artifacts`（路径、字节数、sha256，以及该路径上被它取代的更早已完成任务）。两个活跃任务不能声明同一个输出路径或使用同一个 subject（`TEAM_TASK_DUPLICATE_SUBJECT`，比较时忽略大小写与空白；已完成或已删除的任务释放其 subject）。`edgeInstructions` 说明任务从每个 blocker 取什么。view 会添加 owner name、readiness、lost cause、owner stop 和 write-scope 重叠警告，但不会改变持久快照；`claim` 与 `reassign` 的结果还携带 harness 组合的 `brief`。
+`pending` 表示尚未开始或已经释放，`in_progress` 携带 owner，`completed` 满足 blocker，`lost` 是 harness 已放弃其 owner 的进行中任务（`lostCause` 为 `owner-failed` 或 `run-ended`；owner 记录保留到 `reopen` 为止），`deleted` 是保留的 tombstone。`in_progress` 与 `completed` 任务是冻结的：其文本、边与分配不再改变。因被跟踪的运行未完成而 lost 的任务还会把该运行的 stop reason 记为 `ownerStop`。`outputs` 是任务的完成定义：每个 `ArtifactContract` 指定一个 workspace 相对路径和一种 kind（`file`、可带 schema 的 `json`、`csv`、`npy`、`image`、`python`），在每个非可选输出都存在于磁盘并通过其 kind 的检查之前，`complete` 以 `TEAM_TASK_OUTPUT_MISSING` 拒绝；通过的输出随后记为 `artifacts`（路径、字节数、sha256，以及该路径上被它取代的更早已完成任务）。两个活跃任务不能声明同一个输出路径或使用同一个 subject（`TEAM_TASK_DUPLICATE_SUBJECT`，比较时忽略大小写与空白；已完成或已删除的任务释放其 subject）。`edgeInstructions` 说明任务从每个 blocker 取什么。`notes` 是发给该任务的消息，`holds` 是别处点名了它某个输出的、尚未确认的 note；在 Lead 逐个确认之前，`complete` 会以 `TEAM_TASK_HELD` 拒绝。view 会添加 owner name、readiness、lost cause、owner stop 和 write-scope 重叠警告，但不会改变持久快照；`claim` 与 `reassign` 的结果还携带 harness 组合的 `brief`。
 
 ## 回放
 
@@ -164,6 +171,15 @@ listTasks(caller: Agent): TeamTaskView[]
  * @returns the committed next task revision.
  */
 async updateTask(caller: Agent, request: UpdateTeamTaskRequest): Promise<TeamTaskView>
+
+/**
+ * Send a note to a task: recorded on the task, mailed to its current owner, and folded into the brief of whoever claims it later.
+ * A note that names another live task's declared output holds that task from completing until the Lead acknowledges the hold.
+ * @param caller - exact live Team member sending the note.
+ * @param request - target task, text, and cancellation for the owner mail.
+ * @returns the task's next revision with the note id and the held task ids.
+ */
+async noteTask(caller: Agent, request: NoteTeamTaskRequest): Promise<NoteTeamTaskResult>
 
 /**
  * List in-progress tasks on the caller's Team board with whether each owner is still running.

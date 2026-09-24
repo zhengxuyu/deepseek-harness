@@ -80,10 +80,17 @@ interface TeamTaskSnapshot {
   readonly outputs?: ArtifactContract[]
   /** Outputs recorded at completion; present only while {@link status} is `completed` and outputs were declared. */
   readonly artifacts?: TaskArtifact[]
+  /** Notes sent to this task, in arrival order; absent means none. */
+  readonly notes?: TaskNote[]
+  /**
+   * Notes on other tasks that name one of this task's outputs and that the Lead has not acknowledged;
+   * `complete` is refused while any remain.
+   */
+  readonly holds?: TaskHold[]
 }
 ```
 
-`pending` is unstarted or released, `in_progress` carries an owner, `completed` satisfies blockers, `lost` is an in-progress task whose owner the harness gave up on (`lostCause` is `owner-failed` or `run-ended`; the owner stays recorded until `reopen`), and `deleted` is a retained tombstone. `in_progress` and `completed` tasks are frozen: their text, edges, and assignment do not change. A task lost because its tracked run ended without completing also records that run's stop reason as `ownerStop`. `outputs` is the task's definition of done: each `ArtifactContract` names a workspace-relative path and a kind (`file`, `json` with an optional schema, `csv`, `npy`, `image`, `python`), and `complete` is refused with `TEAM_TASK_OUTPUT_MISSING` until every non-optional output exists and passes its kind's check; the accepted outputs are then recorded as `artifacts` (path, bytes, sha256, and the earlier completed task an output at that path supersedes). Two live tasks cannot declare one output path or carry one subject (`TEAM_TASK_DUPLICATE_SUBJECT`, compared case- and whitespace-insensitively; a completed or deleted task frees its subject). `edgeInstructions` says what the task takes from each blocker. Views add owner name, readiness, lost cause, owner stop, and write-scope overlap warnings without changing the durable snapshot; the `claim` and `reassign` results additionally carry the harness-composed `brief`. The Team tools add the frontier to every task edit and wait result: the ready, running, and lost rows, blocked and completed counts, the edited task's neighbourhood within a configured number of hops, and member statuses, each list bounded by a configured row count.
+`pending` is unstarted or released, `in_progress` carries an owner, `completed` satisfies blockers, `lost` is an in-progress task whose owner the harness gave up on (`lostCause` is `owner-failed` or `run-ended`; the owner stays recorded until `reopen`), and `deleted` is a retained tombstone. `in_progress` and `completed` tasks are frozen: their text, edges, and assignment do not change. A task lost because its tracked run ended without completing also records that run's stop reason as `ownerStop`. `outputs` is the task's definition of done: each `ArtifactContract` names a workspace-relative path and a kind (`file`, `json` with an optional schema, `csv`, `npy`, `image`, `python`), and `complete` is refused with `TEAM_TASK_OUTPUT_MISSING` until every non-optional output exists and passes its kind's check; the accepted outputs are then recorded as `artifacts` (path, bytes, sha256, and the earlier completed task an output at that path supersedes). Two live tasks cannot declare one output path or carry one subject (`TEAM_TASK_DUPLICATE_SUBJECT`, compared case- and whitespace-insensitively; a completed or deleted task frees its subject). `edgeInstructions` says what the task takes from each blocker. `notes` are messages addressed to the task and `holds` are unacknowledged notes elsewhere that name one of its outputs; `complete` is refused with `TEAM_TASK_HELD` until the Lead acknowledges each hold. Views add owner name, readiness, lost cause, owner stop, and write-scope overlap warnings without changing the durable snapshot; the `claim` and `reassign` results additionally carry the harness-composed `brief`. The Team tools add the frontier to every task edit and wait result: the ready, running, and lost rows, blocked and completed counts, the edited task's neighbourhood within a configured number of hops, and member statuses, each list bounded by a configured row count.
 
 ## Replay
 
@@ -164,6 +171,15 @@ listTasks(caller: Agent): TeamTaskView[]
  * @returns the committed next task revision.
  */
 async updateTask(caller: Agent, request: UpdateTeamTaskRequest): Promise<TeamTaskView>
+
+/**
+ * Send a note to a task: recorded on the task, mailed to its current owner, and folded into the brief of whoever claims it later.
+ * A note that names another live task's declared output holds that task from completing until the Lead acknowledges the hold.
+ * @param caller - exact live Team member sending the note.
+ * @param request - target task, text, and cancellation for the owner mail.
+ * @returns the task's next revision with the note id and the held task ids.
+ */
+async noteTask(caller: Agent, request: NoteTeamTaskRequest): Promise<NoteTeamTaskResult>
 
 /**
  * List in-progress tasks on the caller's Team board with whether each owner is still running.
