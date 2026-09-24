@@ -65,7 +65,7 @@ function researcher(messages) {
   const names = calls(messages)
   if (!names.includes('team_task_create')) {
     return toolChunks([{ name: 'team_task_create', args: {
-      subject: 'Research', description: 'Collect the deterministic finding.', write_scopes: ['research'],
+      subject: 'Research', description: 'Collect the deterministic finding.', write_scopes: ['research'], outputs: [],
     } }])
   }
   if (!names.includes('team_task_update')) {
@@ -96,6 +96,7 @@ function implementer(messages) {
         description: 'Apply the deterministic finding.',
         blocked_by: ['task-1'],
         write_scopes: ['implementation'],
+        outputs: [],
       } }])
     }
     if (last.includes('wait_agent')) {
