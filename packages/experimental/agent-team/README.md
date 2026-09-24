@@ -53,6 +53,8 @@ With the tools installed, the model does the rest on request — for example, "c
 | `maxPendingMessagesPerMember` | `64` | Maximum queued messages for one member |
 | `maxMessageBytes` | `65,536` | Maximum size of one sent message |
 | `disposalTimeoutMs` | `5,000` | Time allowed for shutdown cleanup |
+| `trackSubagentRuns` | `false` | Record plain `subagent` runs below the Lead as owned board tasks and settle them when each run ends |
+| `artifactRoot` | none | Absolute harness-local directory under which every completed output is retained as `<team>/<task>/<path>`; absent hashes outputs without retaining them |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-experimental-agent-team) is the exhaustive source for every accepted field and its JSDoc.
 
@@ -77,6 +79,10 @@ Any member can add a task with a title, details, optional dependencies on other 
 Tasks have an owner: a member claims a task to start work, completes it when done, releases it back, or reopens it; the Lead can assign a task to any member. Every change is compare-and-set: an update based on an outdated copy is rejected, so two members cannot silently overwrite each other's work.
 
 File hints produce warnings when two in-progress tasks plan to touch overlapping paths — they never block anything. Deleted tasks remain in history but disappear from the active list.
+
+A task whose owner the harness gave up on is `lost`, with its owner still named; reopen it to make it claimable again. Once a task is in progress or completed, its text and dependencies no longer change, and a running task cannot be handed to another member.
+
+A task declares the files it will produce. Completing it is refused until every one of them is on disk and looks like what was declared, so a task is done only when its artifacts exist; two tasks cannot promise the same file at once. A blocker can carry a note saying what the dependent task takes from it, and whoever starts a task gets a brief composed from the recorded task, its inputs, and its outputs.
 
 ### Waiting and interruption
 
@@ -137,6 +143,16 @@ Lead delivery calls `Agent.steer()` directly. Teammate delivery uses the continu
 
 Tasks are complete versioned snapshots; every mutation carries `expectedRevision`, and a stale caller receives `TEAM_TASK_STALE_REVISION` instead of overwriting a newer value. Numeric `task-<n>` ids require a safe-integer suffix, and id-space exhaustion reports `TEAM_TASK_LIMIT` instead of reusing the final id. Deleted tasks remain tombstones for replay and id stability but do not consume `maxTasks` or appear in `listTasks()`. `writeScopes` are normalized workspace-relative prefixes; views warn on overlap with in-progress tasks but never block claim or authorize writes.
 
+The executed part of the graph is frozen. `edit`, `set_dependencies`, and `delete` are accepted only on `pending` or `lost` tasks; `reassign` to a member only on a ready `pending` task; `reassign` with no owner (a Lead-side release) on `pending` or `in_progress`. Everything else answers `TEAM_TASK_INVALID_TRANSITION`, so a running task keeps the text and edges its owner started from and a completed task keeps the record its result was produced for.
+
+`lost` is the harness's status, never a member action: `markLost(caller, id, cause)` moves one `in_progress` task there and keeps its owner recorded, and a member that fails provisioning loses whatever it claimed while provisioning (`owner-failed`). A lost task cannot be claimed or completed; `reopen` returns it to `pending` with no owner, and `edit` or `set_dependencies` may revise it first. Its dependents stay blocked and its write scopes no longer warn. `outstandingTasks(caller)` lists the `in_progress` tasks on the caller's board with whether each owner is currently running (a tracked run behind an out-of-process provider counts as running until it ends), which is what a one-shot host waits on before it exits.
+
+`outputs` is a task's definition of done. Each `ArtifactContract` names a workspace-relative path (normalized like a write scope, unique within the task) and a kind: `file` must exist and be non-empty; `json` must parse and, with `schema`, validate against the JSON Schema subset `dsh-tools` enforces; `csv` needs a header and at least one row; `npy` and `image` must start with their format's magic bytes; `python` must be an entry file whose imports name no module defined in the workspace, so it runs alone. `complete` checks every non-optional contract through `ctx.fs` against the Lead's working directory and answers `TEAM_TASK_OUTPUT_MISSING` naming each unacceptable output; a task with declared outputs cannot complete without the filesystem service (`TEAM_OUTPUTS_UNCHECKABLE`). Accepted outputs are recorded as `artifacts` with their byte count and sha256; an output at a path an earlier completed task produced with different content records that task as `supersedes`, and with `artifactRoot` configured every completed output is retained as `<artifactRoot>/<team>/<task>/<path>` and the superseded version's retained copy is named as `previousVersion`. A live task (`pending`, `in_progress`, `lost`) cannot declare a path another live task declares (`TEAM_TASK_OUTPUT_CONFLICT`); a completed task's paths may be declared again. `reopen` clears the recorded artifacts.
+
+`edgeInstructions` records what a task takes from each blocker, keyed by blocker id and replaced together with `blockedBy` by `set_dependencies`. The `claim` result and the `reassign`-to-member result carry `brief`: the task's text, each blocker with its status, recorded artifacts, and instruction, and the output contracts as the definition of done. A reassigned member also receives the brief as durable mail from the Lead, which starts or resumes it.
+
+`trackSubagentRuns` records every `subagent/start` below a Team as an owned `in_progress` task on that Team's Lead board and settles it from the paired `subagent/end`: `completed` completes the task, every other stop reason marks it `lost` with cause `owner-failed` and that reason as `ownerStop`. The Lead is found by walking the delegating parent's lineage to the nearest member or root; roster members' own epochs are not recorded, because the roster already owns them.
+
 ### Waiting and interruption
 
 `waitForChange()` waits for one roster, task, mailbox, or live-status edge that occurs after registration, from ten seconds through one hour, and reports only whether it timed out; runtime disposal releases current waits. Cancellation preserves an Error reason or reports a non-Error reason through `TEAM_WAIT_ABORTED`. `interrupt()` is Lead-only and delegates to the continuable-subagent interrupt path, which cancels only a live teammate's current turn with `keepInbox`; it neither releases task ownership nor deletes durable mail.
@@ -147,7 +163,7 @@ Team events are appended to the exact live Lead Session and flushed before the o
 
 Native V4 Team event and checkpoint admission reject retired `tool-result` content before it can enter mailbox state. Historical conversion belongs to the Session-format migration; the Team projection does not convert old wrappers.
 
-Mailbox projection and checkpoint admission preserve every decoded JSON field of accepted content outside the locally declared validators, including an own `__proto__` key. Local field checks cover `text`, `reasoning`, `image`, and `tool-call`; accepted unknown tags remain opaque. Team projection cache version 4 rebuilds checkpoints from earlier cache versions from the Session log; the Session format version is unchanged.
+Mailbox projection and checkpoint admission preserve every decoded JSON field of accepted content outside the locally declared validators, including an own `__proto__` key. Local field checks cover `text`, `reasoning`, `image`, and `tool-call`; accepted unknown tags remain opaque. Team projection cache version 4 rebuilds checkpoints from earlier cache versions from the Session log; the Session format version is unchanged. `team/task` records are written at payload version 3, which adds the `lost` status, `lostCause`, and `ownerStop`; `team/member` records at version 3, which adds `lastStop`, the stop reason of the member's latest ended turn, appended once per ended turn of an active member. Version 2 records written before either remain readable, and the mailbox events stay at version 2.
 
 ### Disposal
 
@@ -202,7 +218,10 @@ These limits describe what a team cannot do yet or what needs special operationa
 - **One process and one shared checkout** — members share cwd and observe edits immediately; this package provides no worktree, remote member, merge, or filesystem lock.
 - **Advisory write scopes** — Bash, formatters, code generators, and direct external writers can bypass filesystem version checks; Leads must coordinate ownership and review the final diff.
 - **Flat immutable roster** — only the Lead creates direct teammates; there is no nested Team, rename, deletion, or name reuse.
-- **No automatic ownership release** — inactivity, interruption, process exit, and failed work do not release a task owner.
+- **No automatic ownership release** — inactivity, interruption, process exit, and failed work do not release a task owner; a one-shot host that gives up on an owner marks the task `lost` with the owner still recorded, and only `reopen` clears it.
+- **Tracked runs carry no contract** — a run recorded through `trackSubagentRuns` names its provider and child Session, not the prompt it was given or the artifact it owes; its completion is the run's stop reason, not a check of what it produced.
+- **Output checks are shape, not correctness** — presence, format, schema, and a static import scan; a well-formed wrong result still completes, and the `python` check reads import lines, not what the file does when run.
+- **Retention is process-local** — `artifactRoot` copies through Node's filesystem on the process running the Team service, so a workspace on a remote filesystem backend is hashed but not retained.
 - **Mailbox is not cross-process exactly-once** — concurrent harness processes over one Team are unsupported.
 
 <a id="dev-note"></a>

@@ -745,10 +745,44 @@ export interface Config {
   readonly maxMessageBytes?: number
   /** Maximum milliseconds allowed for Team-owned runtime disposal. */
   readonly disposalTimeoutMs?: number
+  /**
+   * Record every subagent run delegated below the Lead as an owned in-progress
+   * task on the Lead's board, completed or lost when the run ends. Off by
+   * default: the board then holds only tasks members created.
+   */
+  readonly trackSubagentRuns?: boolean
+  /**
+   * Absolute harness-local directory under which every completed output is
+   * retained as `<team>/<task>/<path>`, so a later task that overwrites the
+   * same path leaves the previous version and its diff recoverable. Absent
+   * means outputs are hashed but not retained.
+   */
+  readonly artifactRoot?: string
 }
 ```
 
-Source: [`packages/experimental/agent-team/src/types.ts:130`](../packages/experimental/agent-team/src/types.ts)
+Source: [`packages/experimental/agent-team/src/types.ts:246`](../packages/experimental/agent-team/src/types.ts)
+
+<a id="deepseek-aidsh-experimental-agent-team-settlement"></a>
+
+## `@deepseek-ai/dsh-experimental-agent-team-settlement`
+
+Requires: `agentTeams`
+
+```ts config-catalog
+/** Deployment limits for how long a one-shot run follows delegated work. */
+export interface Config {
+  /** Milliseconds after the root turn ends before every task still in progress is marked lost. */
+  readonly deadlineMs: number
+  /**
+   * Milliseconds without any Team change, while no task owner is running, before
+   * the remaining tasks are marked lost. At least ten seconds, at most one hour.
+   */
+  readonly stallMs: number
+}
+```
+
+Source: [`packages/experimental/agent-team-settlement/src/index.ts:26`](../packages/experimental/agent-team-settlement/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-api-speech-to-text"></a>
 
@@ -1088,6 +1122,22 @@ export interface Config {
 
 Source: [`packages/experimental/tool-agent-team/src/index.ts:17`](../packages/experimental/tool-agent-team/src/index.ts)
 
+<a id="deepseek-aidsh-experimental-turn-continuation"></a>
+
+## `@deepseek-ai/dsh-experimental-turn-continuation`
+
+```ts config-catalog
+/** Deployment bounds for how often one turn is continued. */
+export interface Config {
+  /** Maximum continuation notices sent within one turn before it is allowed to end as it is. */
+  readonly maxContinuations: number
+  /** Whether a message cut off at the output limit is continued too, not only an empty one. */
+  readonly onMaxTokens: boolean
+}
+```
+
+Source: [`packages/experimental/turn-continuation/src/index.ts:49`](../packages/experimental/turn-continuation/src/index.ts)
+
 <a id="deepseek-aidsh-file-reference-local"></a>
 
 ## `@deepseek-ai/dsh-file-reference-local`
@@ -1181,7 +1231,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/bundle/headless/src/index.ts:42`](../packages/bundle/headless/src/index.ts)
+Source: [`packages/bundle/headless/src/index.ts:43`](../packages/bundle/headless/src/index.ts)
 
 <a id="deepseek-aidsh-hmr"></a>
 

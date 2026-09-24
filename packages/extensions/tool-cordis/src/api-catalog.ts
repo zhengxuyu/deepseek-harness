@@ -359,6 +359,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the committed next task revision.',
       },
       {
+        signature: 'outstandingTasks(caller: Agent): OutstandingTeamTask[]',
+        description: 'List in-progress tasks on the caller\'s Team board with whether each owner is still running.',
+        parameters: [{ name: 'caller', description: 'exact live Team member reading the board.' }],
+        returns: 'outstanding rows in creation order; empty once every claimed task settled.',
+      },
+      {
+        signature: 'async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause, ownerStop?: SubagentStopReason): Promise<TeamTaskView>',
+        description: 'Mark one in-progress task `lost` on behalf of the harness; the owner stays recorded.',
+        parameters: [{ name: 'caller', description: 'exact live Team member whose board holds the task.' }, { name: 'id', description: 'task whose owner can no longer finish it.' }, { name: 'cause', description: 'why the harness gave up on the owner.' }, { name: 'ownerStop', description: 'how the owning run ended, when the cause is a run\'s stop reason.' }],
+        returns: 'the lost task view.',
+      },
+      {
         signature: 'async waitForChange(caller: Agent, timeoutMs: number, signal: AbortSignal): Promise<TeamWaitResult>',
         description: 'Wait for the next Team-domain or member-status change.',
         parameters: [{ name: 'caller', description: 'exact live Team member waiting for activity.' }, { name: 'timeoutMs', description: 'bounded wait duration from ten seconds through one hour.' }, { name: 'signal', description: 'caller cancellation for the wait only.' }],
@@ -4344,6 +4356,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ArchiveSessionOptions {\n    readonly stopActivity?: boolean;\n}',
   },
   {
+    name: 'ArtifactContract',
+    declaration: 'export interface ArtifactContract {\n    readonly path: string;\n    readonly kind: ArtifactKind;\n    readonly schema?: Record<string, JsonValue>;\n    readonly optional?: boolean;\n}',
+  },
+  {
+    name: 'ArtifactKind',
+    declaration: 'export type ArtifactKind = \'file\' | \'json\' | \'csv\' | \'npy\' | \'image\' | \'python\';',
+  },
+  {
     name: 'AskUserQuestionAnswer',
     declaration: 'export interface AskUserQuestionAnswer {\n    answers: AskUserQuestionAnswerItem[];\n}',
   },
@@ -4753,7 +4773,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'CreateTeamTaskRequest',
-    declaration: 'export interface CreateTeamTaskRequest {\n    readonly subject: string;\n    readonly description: string;\n    readonly blockedBy?: readonly TeamTaskId[];\n    readonly writeScopes?: readonly string[];\n}',
+    declaration: 'export interface CreateTeamTaskRequest {\n    readonly subject: string;\n    readonly description: string;\n    readonly blockedBy?: readonly TeamTaskId[];\n    readonly edgeInstructions?: Readonly<Record<string, string>>;\n    readonly writeScopes?: readonly string[];\n    readonly outputs?: readonly ArtifactContract[];\n}',
   },
   {
     name: 'CredentialInfo',
@@ -5646,6 +5666,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'OptionalSessionSeq',
     declaration: 'export type OptionalSessionSeq = SessionSeq | null;',
+  },
+  {
+    name: 'OutstandingTeamTask',
+    declaration: 'export interface OutstandingTeamTask {\n    readonly id: TeamTaskId;\n    readonly subject: string;\n    readonly ownerName: string;\n    readonly live: boolean;\n}',
   },
   {
     name: 'PackageResult',
@@ -7072,6 +7096,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type TableValueOf<S extends DomainSpec, N extends keyof S[\'tables\']> = S[\'tables\'][N] extends DomainTableSpec<string, infer V> ? V : never;',
   },
   {
+    name: 'TaskArtifact',
+    declaration: 'export interface TaskArtifact {\n    readonly path: string;\n    readonly bytes: number;\n    readonly sha256: string;\n    readonly supersedes?: {\n        readonly task: TeamTaskId;\n        readonly sha256: string;\n    };\n    readonly previousVersion?: string;\n}',
+  },
+  {
     name: 'TeamId',
     declaration: 'export type TeamId = Branded<\'TeamId\'>;',
   },
@@ -7081,11 +7109,15 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TeamMemberView',
-    declaration: 'export interface TeamMemberView {\n    readonly id: SessionId;\n    readonly name: string;\n    readonly role: \'lead\' | \'teammate\';\n    readonly status: \'running\' | \'inactive\' | \'provisioning\' | \'failed\';\n    readonly description?: string;\n    readonly provider?: string;\n    readonly context?: \'fresh\' | \'fork\';\n    readonly model?: string;\n    readonly diagnostics: string[];\n}',
+    declaration: 'export interface TeamMemberView {\n    readonly id: SessionId;\n    readonly name: string;\n    readonly role: \'lead\' | \'teammate\';\n    readonly status: \'running\' | \'inactive\' | \'provisioning\' | \'failed\';\n    readonly description?: string;\n    readonly provider?: string;\n    readonly context?: \'fresh\' | \'fork\';\n    readonly model?: string;\n    readonly diagnostics: string[];\n    readonly lastStop?: TeamStopReason;\n}',
   },
   {
     name: 'TeamMessageId',
     declaration: 'export type TeamMessageId = Branded<\'TeamMessageId\'>;',
+  },
+  {
+    name: 'TeamStopReason',
+    declaration: 'export type TeamStopReason = string;',
   },
   {
     name: 'TeamTaskAction',
@@ -7096,12 +7128,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type TeamTaskId = Branded<\'TeamTaskId\'>;',
   },
   {
+    name: 'TeamTaskLostCause',
+    declaration: 'export type TeamTaskLostCause = \'owner-failed\' | \'run-ended\';',
+  },
+  {
     name: 'TeamTaskStatus',
-    declaration: 'export type TeamTaskStatus = \'pending\' | \'in_progress\' | \'completed\' | \'deleted\';',
+    declaration: 'export type TeamTaskStatus = \'pending\' | \'in_progress\' | \'completed\' | \'lost\' | \'deleted\';',
   },
   {
     name: 'TeamTaskView',
-    declaration: 'export interface TeamTaskView {\n    readonly id: TeamTaskId;\n    readonly revision: number;\n    readonly subject: string;\n    readonly description: string;\n    readonly status: TeamTaskStatus;\n    readonly blockedBy: TeamTaskId[];\n    readonly writeScopes: string[];\n    readonly ownerName?: string;\n    readonly ready: boolean;\n    readonly writeScopeWarnings: string[];\n}',
+    declaration: 'export interface TeamTaskView {\n    readonly id: TeamTaskId;\n    readonly revision: number;\n    readonly subject: string;\n    readonly description: string;\n    readonly status: TeamTaskStatus;\n    readonly blockedBy: TeamTaskId[];\n    readonly writeScopes: string[];\n    readonly ownerName?: string;\n    readonly lostCause?: TeamTaskLostCause;\n    readonly ownerStop?: TeamStopReason;\n    readonly edgeInstructions?: Record<string, string>;\n    readonly outputs: ArtifactContract[];\n    readonly artifacts?: TaskArtifact[];\n    readonly brief?: string;\n    readonly ready: boolean;\n    readonly writeScopeWarnings: string[];\n}',
   },
   {
     name: 'TeamView',
@@ -7477,7 +7513,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'UpdateTeamTaskRequest',
-    declaration: 'export interface UpdateTeamTaskRequest {\n    readonly taskId: TeamTaskId;\n    readonly expectedRevision: number;\n    readonly action: TeamTaskAction;\n    readonly subject?: string;\n    readonly description?: string;\n    readonly blockedBy?: readonly TeamTaskId[];\n    readonly writeScopes?: readonly string[];\n    readonly owner?: string;\n}',
+    declaration: 'export interface UpdateTeamTaskRequest {\n    readonly taskId: TeamTaskId;\n    readonly expectedRevision: number;\n    readonly action: TeamTaskAction;\n    readonly subject?: string;\n    readonly description?: string;\n    readonly blockedBy?: readonly TeamTaskId[];\n    readonly edgeInstructions?: Readonly<Record<string, string>>;\n    readonly writeScopes?: readonly string[];\n    readonly outputs?: readonly ArtifactContract[];\n    readonly owner?: string;\n}',
   },
   {
     name: 'UserMessage',

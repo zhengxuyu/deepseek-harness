@@ -8,9 +8,11 @@ import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import type {
   TeamId,
   TeamMemberSnapshot,
+  TeamMemberSnapshotV2,
   TeamMessageId,
   TeamMessageSnapshot,
   TeamTaskSnapshot,
+  TeamTaskSnapshotV2,
 } from './types.ts'
 import {
   TeamId as toTeamId,
@@ -60,7 +62,7 @@ const contentBlockSchema: z.ZodType<ContentBlock> = z.lazy(() => z.union([
   }),
 ])) as z.ZodType<ContentBlock>
 
-const teamMemberSnapshotSchema = z.object({
+const teamMemberFields = {
   id: sessionIdSchema,
   name: z.string(),
   description: z.string(),
@@ -68,9 +70,18 @@ const teamMemberSnapshotSchema = z.object({
   context: z.enum(['fresh', 'fork']),
   phase: z.enum(['provisioning', 'active', 'failed']),
   error: z.string().optional(),
+}
+
+const teamMemberSnapshotV2Schema = z.object(teamMemberFields).strict() as z.ZodType<TeamMemberSnapshotV2>
+
+// Stop reasons are merge-extensible across subagent backends, so the record
+// keeps any non-empty string.
+const teamMemberSnapshotSchema = z.object({
+  ...teamMemberFields,
+  lastStop: z.string().min(1).optional(),
 }).strict() as z.ZodType<TeamMemberSnapshot>
 
-const teamTaskSnapshotSchema = z.object({
+const teamTaskSnapshotV2Schema = z.object({
   id: teamTaskIdSchema,
   revision: positiveSafeInteger,
   subject: z.string(),
@@ -79,7 +90,50 @@ const teamTaskSnapshotSchema = z.object({
   ownerId: sessionIdSchema.optional(),
   blockedBy: z.array(teamTaskIdSchema),
   writeScopes: z.array(z.string()),
-}).strict() as z.ZodType<TeamTaskSnapshot>
+}).strict() as z.ZodType<TeamTaskSnapshotV2>
+
+const artifactContractSchema = z.object({
+  path: z.string().min(1),
+  kind: z.enum(['file', 'json', 'csv', 'npy', 'image', 'python']),
+  schema: z.record(z.string(), z.unknown()).optional(),
+  optional: z.boolean().optional(),
+}).strict()
+
+const taskArtifactSchema = z.object({
+  path: z.string().min(1),
+  bytes: nonNegativeSafeInteger,
+  sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+  supersedes: z.object({ task: teamTaskIdSchema, sha256: z.string().regex(/^[0-9a-f]{64}$/u) }).strict().optional(),
+  previousVersion: z.string().min(1).optional(),
+}).strict()
+
+const teamTaskSnapshotSchema = z.object({
+  id: teamTaskIdSchema,
+  revision: positiveSafeInteger,
+  subject: z.string(),
+  description: z.string(),
+  status: z.enum(['pending', 'in_progress', 'completed', 'lost', 'deleted']),
+  ownerId: sessionIdSchema.optional(),
+  lostCause: z.enum(['owner-failed', 'run-ended']).optional(),
+  ownerStop: z.string().min(1).optional(),
+  blockedBy: z.array(teamTaskIdSchema),
+  edgeInstructions: z.record(z.string(), z.string()).optional(),
+  writeScopes: z.array(z.string()),
+  outputs: z.array(artifactContractSchema).optional(),
+  artifacts: z.array(taskArtifactSchema).optional(),
+}).strict().refine(
+  task => (task.status === 'lost') === (task.lostCause !== undefined),
+  { message: 'lostCause must be present exactly while status is lost' },
+).refine(
+  task => task.ownerStop === undefined || task.lostCause === 'owner-failed',
+  { message: 'ownerStop requires the owner-failed cause' },
+).refine(
+  task => task.edgeInstructions === undefined || Object.keys(task.edgeInstructions).every(id => task.blockedBy.includes(toTeamTaskId(id))),
+  { message: 'edgeInstructions may name only blockers' },
+).refine(
+  task => task.artifacts === undefined || task.status === 'completed',
+  { message: 'artifacts are recorded only on a completed task' },
+) as z.ZodType<TeamTaskSnapshot>
 
 const teamMessageSnapshotSchema = z.object({
   id: teamMessageIdSchema,
@@ -94,17 +148,31 @@ const teamEventSelectorSchema = z.object({
   teamId: teamIdSchema,
 }).loose()
 
-const teamMemberEventSchema = z.object({
-  version: z.literal(2),
-  teamId: teamIdSchema,
-  member: teamMemberSnapshotSchema,
-}).strict() as z.ZodType<SessionEventMap['team/member']>
+const teamMemberEventSchema = z.union([
+  z.object({
+    version: z.literal(2),
+    teamId: teamIdSchema,
+    member: teamMemberSnapshotV2Schema,
+  }).strict(),
+  z.object({
+    version: z.literal(3),
+    teamId: teamIdSchema,
+    member: teamMemberSnapshotSchema,
+  }).strict(),
+]) as z.ZodType<SessionEventMap['team/member']>
 
-const teamTaskEventSchema = z.object({
-  version: z.literal(2),
-  teamId: teamIdSchema,
-  task: teamTaskSnapshotSchema,
-}).strict() as z.ZodType<SessionEventMap['team/task']>
+const teamTaskEventSchema = z.union([
+  z.object({
+    version: z.literal(2),
+    teamId: teamIdSchema,
+    task: teamTaskSnapshotV2Schema,
+  }).strict(),
+  z.object({
+    version: z.literal(3),
+    teamId: teamIdSchema,
+    task: teamTaskSnapshotSchema,
+  }).strict(),
+]) as z.ZodType<SessionEventMap['team/task']>
 
 const teamMessageQueuedEventSchema = z.object({
   version: z.literal(2),
@@ -220,7 +288,11 @@ function applyProjectionEvent(state: TeamProjectionState, event: SessionEvent): 
   try {
     const selector = parsePersisted(event.type, teamEventSelectorSchema, event.data)
     if (selector.teamId !== state.id) return
-    if (selector.version !== 2) {
+    // `team/task` gained version 3 with the `lost` status and `team/member`
+    // with `lastStop`; the mailbox events are still written at version 2.
+    const versioned = event.type === 'team/task' || event.type === 'team/member'
+    const supported = versioned ? selector.version === 2 || selector.version === 3 : selector.version === 2
+    if (!supported) {
       throw new Error(`unsupported Agent Teams event version ${String(selector.version)}`)
     }
     applyCurrentTeamEvent(state, parseCurrentTeamEvent(event))
@@ -246,7 +318,11 @@ function applyCurrentTeamEvent(state: TeamState, event: TeamSessionEvent): void 
         if (prior.name !== member.name || prior.provider !== member.provider || prior.context !== member.context) {
           throw new Error(`teammate "${member.id}" changed immutable identity fields`)
         }
-        if (prior.phase !== 'provisioning' || member.phase === 'provisioning') {
+        // Provisioning settles once; afterwards only an active member's
+        // `lastStop` may change, one record per ended turn.
+        const settles = prior.phase === 'provisioning' && member.phase !== 'provisioning'
+        const stops = prior.phase === 'active' && member.phase === 'active' && 'lastStop' in member
+        if (!settles && !stops) {
           throw new Error(`teammate "${member.name}" has an invalid ${prior.phase} -> ${member.phase} transition`)
         }
       }

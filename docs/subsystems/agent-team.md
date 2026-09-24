@@ -9,7 +9,7 @@ Types shared by the experimental implicit-root Team domain, model tools, and hos
 `TeamId` is the root `SessionId` under a distinct [brand](core.md#branded-ids). `TeamTaskId` is Team-local and monotonically allocated as `task-<n>`; `TeamMessageId` is globally random. A teammate's Session id remains its persistent identity, while `name` is an immutable model/UI label.
 
 ```ts type-equiv
-/** Whole durable value written on every teammate lifecycle change. */
+/** Whole durable value written on every teammate lifecycle change and turn end. */
 interface TeamMemberSnapshot {
   readonly id: SessionId
   readonly name: string
@@ -18,10 +18,12 @@ interface TeamMemberSnapshot {
   readonly context: 'fresh' | 'fork'
   readonly phase: TeamMemberPhase
   readonly error?: string
+  /** How the member's latest turn ended; present once an active member's first turn has ended. */
+  readonly lastStop?: TeamStopReason
 }
 ```
 
-Every member starts in `provisioning` and reaches exactly one terminal roster phase, `active` or `failed`. Roster `running`/`inactive` status is derived separately and never rewrites this record.
+Every member starts in `provisioning` and reaches exactly one terminal roster phase, `active` or `failed`. Roster `running`/`inactive` status is derived separately and never rewrites this record. After that, each ended turn of an active member appends one more record that changes only `lastStop`, the epoch's stop reason (`completed`, `aborted`, `error`, `max-tokens`, `refusal`), written at payload version 3; version 2 records remain readable.
 
 ## Durable mailbox
 
@@ -66,16 +68,26 @@ interface TeamTaskSnapshot {
   readonly description: string
   readonly status: TeamTaskStatus
   readonly ownerId?: SessionId
+  /** Present exactly while {@link status} is `lost`. */
+  readonly lostCause?: TeamTaskLostCause
+  /** How the owning run ended when it lost the task; present only with an `owner-failed` cause from a tracked run. */
+  readonly ownerStop?: TeamStopReason
   readonly blockedBy: TeamTaskId[]
+  /** What this task takes from each blocker's artifacts, keyed by blocker id; keys are a subset of {@link blockedBy}. */
+  readonly edgeInstructions?: Record<string, string>
   readonly writeScopes: string[]
+  /** Files the task must produce; absent means none declared. */
+  readonly outputs?: ArtifactContract[]
+  /** Outputs recorded at completion; present only while {@link status} is `completed` and outputs were declared. */
+  readonly artifacts?: TaskArtifact[]
 }
 ```
 
-`pending` is unstarted or released, `in_progress` carries an owner, `completed` satisfies blockers, and `deleted` is a retained tombstone. Views add owner name, readiness, and write-scope overlap warnings without changing the durable snapshot.
+`pending` is unstarted or released, `in_progress` carries an owner, `completed` satisfies blockers, `lost` is an in-progress task whose owner the harness gave up on (`lostCause` is `owner-failed` or `run-ended`; the owner stays recorded until `reopen`), and `deleted` is a retained tombstone. `in_progress` and `completed` tasks are frozen: their text, edges, and assignment do not change. A task lost because its tracked run ended without completing also records that run's stop reason as `ownerStop`. `outputs` is the task's definition of done: each `ArtifactContract` names a workspace-relative path and a kind (`file`, `json` with an optional schema, `csv`, `npy`, `image`, `python`), and `complete` is refused with `TEAM_TASK_OUTPUT_MISSING` until every non-optional output exists and passes its kind's check; the accepted outputs are then recorded as `artifacts` (path, bytes, sha256, and the earlier completed task an output at that path supersedes). Two live tasks cannot declare one output path. `edgeInstructions` says what the task takes from each blocker. Views add owner name, readiness, lost cause, owner stop, and write-scope overlap warnings without changing the durable snapshot; the `claim` and `reassign` results additionally carry the harness-composed `brief`.
 
 ## Replay
 
-`foldTeam()` replays one root Session into the roster, task board, and queued-minus-delivered mailbox that every Team operation reads. It selects records by `TeamId`, so events inherited by an ordinary fork retain the ancestor id and never enter the new root's state. Session event `seq` and `time` remain the ordering and timing record; Team snapshots do not duplicate them. Roster and task reads reach callers as views; pending mail stays internal to delivery and recovery. The package [README](../../packages/experimental/agent-team/README.md) owns operation, authorization, recovery, and limit behavior.
+`foldTeam()` replays one root Session into the roster, task board, and queued-minus-delivered mailbox that every Team operation reads. It selects records by `TeamId`, so events inherited by an ordinary fork retain the ancestor id and never enter the new root's state. Session event `seq` and `time` remain the ordering and timing record; Team snapshots do not duplicate them. Roster and task reads reach callers as views; pending mail stays internal to delivery and recovery. `team/task` payloads are written at version 3, which adds `lost` and `lostCause`; version 2 payloads remain readable. The package [README](../../packages/experimental/agent-team/README.md) owns operation, authorization, recovery, and limit behavior.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -154,6 +166,23 @@ listTasks(caller: Agent): TeamTaskView[]
 async updateTask(caller: Agent, request: UpdateTeamTaskRequest): Promise<TeamTaskView>
 
 /**
+ * List in-progress tasks on the caller's Team board with whether each owner is still running.
+ * @param caller - exact live Team member reading the board.
+ * @returns outstanding rows in creation order; empty once every claimed task settled.
+ */
+outstandingTasks(caller: Agent): OutstandingTeamTask[]
+
+/**
+ * Mark one in-progress task `lost` on behalf of the harness; the owner stays recorded.
+ * @param caller - exact live Team member whose board holds the task.
+ * @param id - task whose owner can no longer finish it.
+ * @param cause - why the harness gave up on the owner.
+ * @param ownerStop - how the owning run ended, when the cause is a run's stop reason.
+ * @returns the lost task view.
+ */
+async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause, ownerStop?: SubagentStopReason): Promise<TeamTaskView>
+
+/**
  * Wait for the next Team-domain or member-status change.
  * @param caller - exact live Team member waiting for activity.
  * @param timeoutMs - bounded wait duration from ten seconds through one hour.
@@ -185,7 +214,7 @@ tryMembership(agent: Agent): TeamMembership | undefined
 @Remote('view') remoteView(agent: Agent): TeamView
 ```
 
-Types: [Agent](core.md)
+Types: [Agent](core.md) · [SubagentStopReason](subagent.md)
 
 Source: [`packages/experimental/agent-team/src/index.ts`](../../packages/experimental/agent-team/src/index.ts)
 <!-- END GENERATED cordis-surface -->
