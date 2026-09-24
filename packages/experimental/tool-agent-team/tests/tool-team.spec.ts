@@ -179,6 +179,14 @@ describe('dsh-tool-team', () => {
     await vi.waitFor(() => { expect(ctx.agents.get(hanger)).toBeUndefined() }, { timeout: 5_000 })
   })
 
+  it('returns a live twin subject as an observation naming the existing task', async () => {
+    const { ctx, lead } = await setup([])
+    await execute(ctx, lead, 'team_task_create', { subject: 'Fit the model', description: 'd', outputs: [] })
+    const twin = await execute(ctx, lead, 'team_task_create', { subject: 'fit the model', description: 'd', outputs: [] })
+    expect(twin.isError).toBe(true)
+    expect(text(twin)).toContain('subject "fit the model" is already live task "task-1" (pending)')
+  })
+
   it('requires declared outputs, accepts blocker instructions, and hands the brief back on claim', async () => {
     const { ctx, lead } = await setup([])
     const missing = await execute(ctx, lead, 'team_task_create', { subject: 'no outputs', description: 'd' })

@@ -55,6 +55,11 @@ function live(task: TeamTaskSnapshot): boolean {
   return task.status === 'pending' || task.status === 'in_progress' || task.status === 'lost'
 }
 
+/** Subject identity for the duplicate-node check: case and interior whitespace do not distinguish two subjects. */
+function subjectKey(subject: string): string {
+  return subject.trim().replace(/\s+/gu, ' ').toLowerCase()
+}
+
 /** What the board needs from its host to check outputs at completion. */
 export interface TeamTaskBoardHost {
   /** The workspace filesystem, read at completion; absent refuses to complete a task with declared outputs. */
@@ -83,6 +88,7 @@ export class TeamTaskBoard {
    */
   async create(membership: TeamMembership, request: CreateTeamTaskRequest): Promise<TeamTaskView> {
     return this.record(membership.root, request, (state) => {
+      this.assertSubjectFree(state, request.subject)
       const blockedBy = this.dependencies(request.blockedBy ?? [], state)
       const outputs = this.outputs(request.outputs ?? [])
       return {
@@ -255,6 +261,7 @@ export class TeamTaskBoard {
             && request.outputs === undefined) {
             throw new TeamError('task edit requires subject, description, write_scopes, or outputs', 'TEAM_INVALID_ARGUMENT')
           }
+          if (request.subject !== undefined) this.assertSubjectFree(state, request.subject, current.id)
           const { outputs: _outputs, ...withoutOutputs } = current
           const outputs = request.outputs === undefined ? current.outputs : this.outputs(request.outputs)
           next = {
@@ -399,6 +406,22 @@ export class TeamTaskBoard {
       await this.journal.appendAndFlush(root, 'team/task', { version: 3, teamId: TeamId(root.id), task })
       return this.taskView(root, state, task)
     })
+  }
+
+  /**
+   * Refuse a subject a live task already carries: the board holds one node per piece of work,
+   * so the caller links to, reopens, or edits that task instead of adding a twin.
+   */
+  private assertSubjectFree(state: TeamState, subject: string, self?: TeamTaskId): void {
+    const key = subjectKey(subject)
+    const other = state.tasks.find(candidate => candidate.id !== self && live(candidate) && subjectKey(candidate.subject) === key)
+    if (other !== undefined) {
+      const remedy = other.status === 'lost' ? 'reopen it' : 'depend on it or edit it'
+      throw new TeamError(
+        `subject ${JSON.stringify(subject.trim())} is already live task "${other.id}" (${other.status}); ${remedy} instead of creating a twin`,
+        'TEAM_TASK_DUPLICATE_SUBJECT',
+      )
+    }
   }
 
   /** Refuse an output path another task may still produce: two live nodes cannot claim one file. */
