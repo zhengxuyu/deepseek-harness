@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-24-one-node-per-subject.md
+2026-09-24-one-node-per-subject.md: df9738184751704a3a9979d207b2971435db801c
+2026-09-24-one-node-per-subject.zh.md: 1eec21f56411b3d5fdfb65fae3419d42e16d78fe
