@@ -2159,7 +2159,7 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
           },
           "schema": {
             "type": "object",
-            "description": "JSON Schema a json output must satisfy.",
+            "description": "JSON Schema a json output must satisfy, using only type, properties, required, additionalProperties, items, enum, const, and oneOf; other keywords such as minItems or pattern are refused.",
             "additionalProperties": true
           },
           "optional": {
@@ -2375,7 +2375,7 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
           },
           "schema": {
             "type": "object",
-            "description": "JSON Schema a json output must satisfy.",
+            "description": "JSON Schema a json output must satisfy, using only type, properties, required, additionalProperties, items, enum, const, and oneOf; other keywords such as minItems or pattern are refused.",
             "additionalProperties": true
           },
           "optional": {

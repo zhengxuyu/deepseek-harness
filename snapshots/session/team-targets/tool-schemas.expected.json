@@ -401,7 +401,7 @@
                 },
                 "schema": {
                   "type": "object",
-                  "description": "JSON Schema a json output must satisfy.",
+                  "description": "JSON Schema a json output must satisfy, using only type, properties, required, additionalProperties, items, enum, const, and oneOf; other keywords such as minItems or pattern are refused.",
                   "additionalProperties": true
                 },
                 "optional": {
@@ -597,7 +597,7 @@
                 },
                 "schema": {
                   "type": "object",
-                  "description": "JSON Schema a json output must satisfy.",
+                  "description": "JSON Schema a json output must satisfy, using only type, properties, required, additionalProperties, items, enum, const, and oneOf; other keywords such as minItems or pattern are refused.",
                   "additionalProperties": true
                 },
                 "optional": {

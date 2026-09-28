@@ -86,7 +86,11 @@ const OUTPUT_CONTRACT_SCHEMA = {
       enum: ['file', 'json', 'csv', 'npy', 'image', 'python'],
       description: 'file: exists and non-empty; json: parses and matches schema when given; csv: has a header and rows; npy and image: format magic bytes; python: an entry file that imports no workspace module, so it runs alone.',
     },
-    schema: { type: 'object', additionalProperties: true, description: 'JSON Schema a json output must satisfy.' },
+    schema: {
+      type: 'object',
+      additionalProperties: true,
+      description: 'JSON Schema a json output must satisfy, using only type, properties, required, additionalProperties, items, enum, const, and oneOf; other keywords such as minItems or pattern are refused.',
+    },
     optional: { type: 'boolean', description: 'Whether completion may proceed without this file.' },
   },
 } as const
