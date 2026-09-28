@@ -364,7 +364,7 @@
     },
     {
       "name": "team_task_create",
-      "description": "Create one unowned pending task on the shared Team task board. outputs is the definition of done: complete is refused until every non-optional output exists and passes its check.",
+      "description": "Create one unowned pending task on the shared Team task board. outputs is the definition of done: complete is refused until every non-optional output exists and passes its check. A subject a live task already carries is refused; depend on that task instead. The result carries the frontier after the edit.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -401,7 +401,7 @@
                 },
                 "schema": {
                   "type": "object",
-                  "description": "JSON Schema a json output must satisfy.",
+                  "description": "JSON Schema a json output must satisfy, using only type, properties, required, additionalProperties, items, enum, const, and oneOf; other keywords such as minItems or pattern are refused.",
                   "additionalProperties": true
                 },
                 "optional": {
@@ -511,8 +511,29 @@
       }
     },
     {
+      "name": "team_task_note",
+      "description": "Send a note to a shared task rather than to a member: recorded on the task, mailed to its current owner, and included in the brief of whoever claims it. A note naming another live task's declared output path holds that task from completing until the Lead acknowledges. The result carries the frontier.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "Shared task id the note is about."
+          },
+          "text": {
+            "type": "string",
+            "description": "Self-contained note for whoever works the task."
+          }
+        },
+        "required": [
+          "task_id",
+          "text"
+        ]
+      }
+    },
+    {
       "name": "team_task_update",
-      "description": "Compare-and-set a shared task action using the latest revision from team_task_get or team_task_list.",
+      "description": "Compare-and-set a shared task action using the latest revision from team_task_get or team_task_list. The result carries the frontier after the edit.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -526,7 +547,7 @@
           },
           "action": {
             "type": "string",
-            "description": "Task transition to apply.",
+            "description": "Task transition to apply; acknowledge clears one hold (Lead only).",
             "enum": [
               "claim",
               "release",
@@ -535,8 +556,13 @@
               "complete",
               "reopen",
               "reassign",
-              "delete"
+              "delete",
+              "acknowledge"
             ]
+          },
+          "note": {
+            "type": "string",
+            "description": "The hold to clear for acknowledge: a note id from the task's holds."
           },
           "subject": {
             "type": "string",
@@ -571,7 +597,7 @@
                 },
                 "schema": {
                   "type": "object",
-                  "description": "JSON Schema a json output must satisfy.",
+                  "description": "JSON Schema a json output must satisfy, using only type, properties, required, additionalProperties, items, enum, const, and oneOf; other keywords such as minItems or pattern are refused.",
                   "additionalProperties": true
                 },
                 "optional": {

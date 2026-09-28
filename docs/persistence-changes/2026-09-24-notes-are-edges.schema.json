@@ -1,0 +1,516 @@
+{
+  "formatVersion": 2,
+  "roots": [
+    {
+      "key": "event:team/task",
+      "kind": "event",
+      "event": "team/task",
+      "surface": false,
+      "digest": "d326c8ee74f16d57610cb3141f1df26048d42ec8b4be5e8a9ed95cbaf4b090bf",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 43,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 44,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              2,
+              39
+            ]
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "task",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "teamId",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 38,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "artifacts",
+                "type": 4,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "edgeInstructions",
+                "type": 10,
+                "optional": true
+              },
+              {
+                "name": "holds",
+                "type": 11,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "lostCause",
+                "type": 13,
+                "optional": true
+              },
+              {
+                "name": "notes",
+                "type": 16,
+                "optional": true
+              },
+              {
+                "name": "outputs",
+                "type": 18,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 7,
+                "optional": true
+              },
+              {
+                "name": "ownerStop",
+                "type": 7,
+                "optional": true
+              },
+              {
+                "name": "revision",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 32,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 9,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 5
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "bytes",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "path",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "previousVersion",
+                "type": 7,
+                "optional": true
+              },
+              {
+                "name": "sha256",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "supersedes",
+                "type": 8,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "sha256",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "task",
+                "type": 7,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 7
+          },
+          {
+            "kind": "object",
+            "properties": [],
+            "indices": [
+              {
+                "key": 7,
+                "value": 7
+              }
+            ]
+          },
+          {
+            "kind": "array",
+            "element": 12
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "from",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "note",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "task",
+                "type": 7,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              14,
+              15
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "run-ended"
+          },
+          {
+            "kind": "literal",
+            "value": "owner-failed"
+          },
+          {
+            "kind": "array",
+            "element": 17
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "from",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "id",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "text",
+                "type": 7,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 19
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 20,
+                "optional": false
+              },
+              {
+                "name": "optional",
+                "type": 27,
+                "optional": true
+              },
+              {
+                "name": "path",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "schema",
+                "type": 28,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              21,
+              22,
+              23,
+              24,
+              25,
+              26
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "csv"
+          },
+          {
+            "kind": "literal",
+            "value": "file"
+          },
+          {
+            "kind": "literal",
+            "value": "image"
+          },
+          {
+            "kind": "literal",
+            "value": "json"
+          },
+          {
+            "kind": "literal",
+            "value": "npy"
+          },
+          {
+            "kind": "literal",
+            "value": "python"
+          },
+          {
+            "kind": "primitive",
+            "type": "boolean"
+          },
+          {
+            "kind": "object",
+            "properties": [],
+            "indices": [
+              {
+                "key": 7,
+                "value": 29
+              }
+            ]
+          },
+          {
+            "kind": "union",
+            "types": [
+              6,
+              7,
+              27,
+              28,
+              30,
+              31
+            ]
+          },
+          {
+            "kind": "primitive",
+            "type": "null"
+          },
+          {
+            "kind": "array",
+            "element": 29
+          },
+          {
+            "kind": "union",
+            "types": [
+              33,
+              34,
+              35,
+              36,
+              37
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "deleted"
+          },
+          {
+            "kind": "literal",
+            "value": "in_progress"
+          },
+          {
+            "kind": "literal",
+            "value": "lost"
+          },
+          {
+            "kind": "literal",
+            "value": "completed"
+          },
+          {
+            "kind": "literal",
+            "value": "pending"
+          },
+          {
+            "kind": "literal",
+            "value": 3
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "task",
+                "type": 40,
+                "optional": false
+              },
+              {
+                "name": "teamId",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 42,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "blockedBy",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "id",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 7,
+                "optional": true
+              },
+              {
+                "name": "revision",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 41,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 9,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              33,
+              34,
+              36,
+              37
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": 2
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "literal",
+            "value": "team/task"
+          }
+        ]
+      }
+    }
+  ],
+  "types": []
+}

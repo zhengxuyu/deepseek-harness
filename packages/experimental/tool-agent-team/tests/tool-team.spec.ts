@@ -40,6 +40,7 @@ const TOOL_NAMES = [
   'team_task_list',
   'team_task_get',
   'team_task_update',
+  'team_task_note',
 ].sort()
 
 const roots: string[] = []
@@ -177,6 +178,71 @@ describe('dsh-tool-team', () => {
     expect(stopped.changes.members.map(member => member.target)).toEqual(['hanger'])
     expect(stopped.changes.members[0]?.status).toBe('inactive')
     await vi.waitFor(() => { expect(ctx.agents.get(hanger)).toBeUndefined() }, { timeout: 5_000 })
+  })
+
+  it('hands the frontier back on every task edit and every wait', async () => {
+    const { ctx, lead } = await setup(['hang', 'hang'])
+    interface FrontierReply { ready: Array<{ id: string }>; around?: { task: string }; members: Array<{ target: string }> }
+    const createdResult = await execute(ctx, lead, 'team_task_create', { subject: 'Fit', description: 'd', outputs: [] })
+    const created = JSON.parse(text(createdResult)) as { id: string; revision: number; frontier: FrontierReply }
+    expect(created.frontier).toMatchObject({ ready: [{ id: 'task-1', subject: 'Fit', status: 'pending', outputs: 0 }], blocked: 0, completed: 0 })
+    expect(created.frontier.around).toEqual({ task: 'task-1', upstream: [], downstream: [] })
+    expect(created.frontier.members).toEqual([{ target: 'lead', status: 'inactive' }])
+    const claimed = JSON.parse(text(await execute(ctx, lead, 'team_task_update', {
+      task_id: created.id, expected_revision: created.revision, action: 'claim',
+    }))) as { frontier: { ready: unknown[]; running: Array<{ id: string; ownerName: string }> } }
+    expect(claimed.frontier.ready).toEqual([])
+    expect(claimed.frontier.running)
+      .toEqual([{ id: 'task-1', subject: 'Fit', status: 'in_progress', ownerName: 'lead', outputs: 0 }])
+
+    const noPeer = JSON.parse(text(await execute(ctx, lead, 'wait_agent', { timeout_ms: 10_000 }))) as { noProgress: unknown; frontier: { running: unknown[] } }
+    expect(noPeer.noProgress).toBeDefined()
+    expect(noPeer.frontier.running).toHaveLength(1)
+    const hanger = spawnedChildId(ctx, lead, await execute(ctx, lead, 'spawn_teammate', { name: 'hanger', description: 'd', prompt: 'hang' }))
+    await waitRunning(ctx, hanger)
+    const wait = execute(ctx, lead, 'wait_agent', { timeout_ms: 10_000 })
+    setTimeout(() => { void execute(ctx, lead, 'team_task_create', { outputs: [], subject: 'wake', description: 'wake' }) }, 0)
+    const woken = JSON.parse(text(await wait)) as { timedOut: boolean; frontier: FrontierReply }
+    expect(woken.timedOut).toBe(false)
+    expect(woken.frontier.ready.map(row => row.id)).toEqual(['task-2'])
+    expect(woken.frontier.members.map(member => member.target)).toEqual(['lead', 'hanger'])
+    await execute(ctx, lead, 'interrupt_agent', { target: 'hanger' })
+    await vi.waitFor(() => { expect(ctx.agents.get(hanger)).toBeUndefined() }, { timeout: 5_000 })
+  })
+
+  it('sends a note to a task, holds the task whose output it names, and clears the hold on acknowledge', async () => {
+    const { ctx, lead } = await setup([])
+    const producer = JSON.parse(text(await execute(ctx, lead, 'team_task_create', {
+      subject: 'Produce', description: 'd', outputs: [{ path: 'out/model.json', kind: 'json' }],
+    }))) as { id: string; revision: number }
+    const consumer = JSON.parse(text(await execute(ctx, lead, 'team_task_create', { subject: 'Consume', description: 'd', outputs: [] }))) as { id: string }
+    const noted = JSON.parse(text(await execute(ctx, lead, 'team_task_note', {
+      task_id: consumer.id, text: 'out/model.json needs the bias term',
+    }))) as { noteId: string; held: string[]; notes: unknown[]; frontier: { ready: Array<{ id: string; notes?: number; holds?: number }> } }
+    expect(noted.noteId).toBe('task-2-note-1')
+    expect(noted.held).toEqual([producer.id])
+    expect(noted.notes).toEqual([{ id: 'task-2-note-1', from: 'lead', text: 'out/model.json needs the bias term' }])
+    expect(noted.frontier.ready).toEqual([
+      { id: 'task-1', subject: 'Produce', status: 'pending', outputs: 1, holds: 1 },
+      { id: 'task-2', subject: 'Consume', status: 'pending', outputs: 0, notes: 1 },
+    ])
+    const held = JSON.parse(text(await execute(ctx, lead, 'team_task_get', { task_id: producer.id }))) as { revision: number; holds: unknown[] }
+    expect(held.holds).toEqual([{ note: 'task-2-note-1', task: consumer.id, from: 'lead' }])
+    const acknowledged = JSON.parse(text(await execute(ctx, lead, 'team_task_update', {
+      task_id: producer.id, expected_revision: held.revision, action: 'acknowledge', note: 'task-2-note-1',
+    }))) as { holds?: unknown[]; frontier: { ready: Array<{ holds?: number }> } }
+    expect(acknowledged.holds).toBeUndefined()
+    expect(acknowledged.frontier.ready[0]?.holds).toBeUndefined()
+    const missing = await execute(ctx, lead, 'team_task_note', { task_id: 'task-9', text: 'x' })
+    expect(missing.isError).toBe(true)
+  })
+
+  it('returns a live twin subject as an observation naming the existing task', async () => {
+    const { ctx, lead } = await setup([])
+    await execute(ctx, lead, 'team_task_create', { subject: 'Fit the model', description: 'd', outputs: [] })
+    const twin = await execute(ctx, lead, 'team_task_create', { subject: 'fit the model', description: 'd', outputs: [] })
+    expect(twin.isError).toBe(true)
+    expect(text(twin)).toContain('subject "fit the model" is already live task "task-1" (pending)')
   })
 
   it('requires declared outputs, accepts blocker instructions, and hands the brief back on claim', async () => {
@@ -543,6 +609,14 @@ describe('dsh-tool-team', () => {
     expect(noProgress.isError).toBe(false)
     expect(JSON.parse(text(noProgress))).toEqual({
       timedOut: false,
+      frontier: {
+        ready: [],
+        running: [],
+        lost: [],
+        blocked: 0,
+        completed: 0,
+        members: [{ target: 'lead', status: 'inactive' }, { target: 'inactive-worker', status: 'inactive', lastStop: 'completed' }],
+      },
       changes: { members: [], tasks: [] },
       noProgress: {
         reason: 'no-active-peer',

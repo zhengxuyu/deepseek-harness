@@ -163,6 +163,32 @@ export interface TeamTaskSnapshot {
   readonly outputs?: ArtifactContract[]
   /** Outputs recorded at completion; present only while {@link status} is `completed` and outputs were declared. */
   readonly artifacts?: TaskArtifact[]
+  /** Notes sent to this task, in arrival order; absent means none. */
+  readonly notes?: TaskNote[]
+  /**
+   * Notes on other tasks that name one of this task's outputs and that the Lead has not acknowledged;
+   * `complete` is refused while any remain.
+   */
+  readonly holds?: TaskHold[]
+}
+
+/** One note linked to a task: a message whose recipient is the task rather than a member. */
+export interface TaskNote {
+  /** `<task>-note-<n>`, unique on the board. */
+  readonly id: string
+  /** Sending member's name. */
+  readonly from: string
+  readonly text: string
+}
+
+/** One unacknowledged note elsewhere on the board that names an output of the held task. */
+export interface TaskHold {
+  /** The note's id. */
+  readonly note: string
+  /** The task the note was sent to. */
+  readonly task: TeamTaskId
+  /** Sending member's name. */
+  readonly from: string
 }
 
 /**
@@ -198,6 +224,8 @@ export interface TeamTaskView {
   readonly artifacts?: TaskArtifact[]
   /** The harness-composed brief for the owner, present on the result of `claim` and of `reassign` to a member. */
   readonly brief?: string
+  readonly notes?: TaskNote[]
+  readonly holds?: TaskHold[]
   readonly ready: boolean
   readonly writeScopeWarnings: string[]
 }
@@ -309,6 +337,7 @@ export interface CreateTeamTaskRequest {
 
 /** Supported task mutation actions. */
 export type TeamTaskAction =
+  | 'acknowledge'
   | 'claim'
   | 'release'
   | 'edit'
@@ -330,6 +359,22 @@ export interface UpdateTeamTaskRequest {
   readonly writeScopes?: readonly string[]
   readonly outputs?: readonly ArtifactContract[]
   readonly owner?: string
+  /** The hold to clear for `acknowledge`: a note id from the task's `holds`. */
+  readonly note?: string
+}
+
+/** Input for sending a note to a task. */
+export interface NoteTeamTaskRequest {
+  readonly taskId: TeamTaskId
+  readonly text: string
+  /** Cancels the mail to the task's owner, never the recorded note. */
+  readonly signal: AbortSignal
+}
+
+/** Result of a recorded note: the task's next revision, the note's id, and the tasks the note now holds. */
+export interface NoteTeamTaskResult extends TeamTaskView {
+  readonly noteId: string
+  readonly held: TeamTaskId[]
 }
 
 /** Result of waiting for Team activity. */

@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-24-notes-are-edges.md
+2026-09-24-notes-are-edges.md: 03b90c70c7da0afb218c928545616b3c0e1f1523
+2026-09-24-notes-are-edges.zh.md: 279b8de2585b1c612c7b842aa915b58248c1d7af

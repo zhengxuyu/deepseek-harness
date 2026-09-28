@@ -2148,6 +2148,149 @@ describe('Tracked subagent runs', () => {
   })
 })
 
+describe('Preconditions', () => {
+  it('refuses a subject a live task already carries, at create and at edit, until that task leaves the live set', async () => {
+    const { ctx, lead } = await setup([])
+    const first = await ctx.agentTeams.createTask(lead, { subject: 'Fit the model', description: 'd' })
+    await expect(ctx.agentTeams.createTask(lead, { subject: '  fit   THE model ', description: 'd' }))
+      .rejects.toMatchObject({
+        code: 'TEAM_TASK_DUPLICATE_SUBJECT',
+        message: 'subject "fit   THE model" is already live task "task-1" (pending); depend on it or edit it instead of creating a twin',
+      })
+    const second = await ctx.agentTeams.createTask(lead, { subject: 'Plot the fit', description: 'd' })
+    await expect(ctx.agentTeams.updateTask(lead, {
+      taskId: second.id, expectedRevision: second.revision, action: 'edit', subject: 'fit the model',
+    })).rejects.toMatchObject({ code: 'TEAM_TASK_DUPLICATE_SUBJECT' })
+    const renamed = await ctx.agentTeams.updateTask(lead, {
+      taskId: second.id, expectedRevision: second.revision, action: 'edit', subject: 'Plot the fit', description: 'refined',
+    })
+    expect(renamed.subject).toBe('Plot the fit')
+
+    const claimed = await ctx.agentTeams.updateTask(lead, { taskId: first.id, expectedRevision: first.revision, action: 'claim' })
+    await ctx.agentTeams.updateTask(lead, { taskId: first.id, expectedRevision: claimed.revision, action: 'complete' })
+    const again = await ctx.agentTeams.createTask(lead, { subject: 'Fit the model', description: 'a second pass' })
+    expect(again.id).toBe('task-3')
+    await expect(ctx.agentTeams.createTask(lead, { subject: 'fit the model', description: 'd' }))
+      .rejects.toMatchObject({ code: 'TEAM_TASK_DUPLICATE_SUBJECT' })
+    await ctx.agentTeams.updateTask(lead, { taskId: again.id, expectedRevision: again.revision, action: 'delete' })
+    await expect(ctx.agentTeams.createTask(lead, { subject: 'fit the model', description: 'd' })).resolves.toMatchObject({ id: 'task-4' })
+  })
+
+  it('points a lost twin at reopen', async () => {
+    const { ctx, lead } = await setup([])
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'Verify', description: 'd' })
+    const claimed = await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action: 'claim' })
+    await ctx.agentTeams.markLost(lead, claimed.id, 'run-ended')
+    await expect(ctx.agentTeams.createTask(lead, { subject: 'verify', description: 'd' })).rejects.toMatchObject({
+      code: 'TEAM_TASK_DUPLICATE_SUBJECT',
+      message: 'subject "verify" is already live task "task-1" (lost); reopen it instead of creating a twin',
+    })
+  })
+})
+
+describe('Notes are edges', () => {
+  it('records a note on a live task, mails the owner, folds it into the brief, and refuses notes to settled tasks', async () => {
+    // The mailed note resumes the inactive owner, which answers with the second scripted reply.
+    const { ctx, lead } = await setup([textResponse('mate done'), textResponse('noted')])
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'Fit', description: 'd' })
+    const noted = await ctx.agentTeams.noteTask(lead, { taskId: task.id, text: '  use the second seed  ', signal: SIGNAL })
+    expect(noted).toMatchObject({ id: task.id, revision: 2, noteId: 'task-1-note-1', held: [], notes: [{ id: 'task-1-note-1', from: 'lead', text: 'use the second seed' }] })
+    const claimed = await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: noted.revision, action: 'claim' })
+    expect(claimed.brief).toContain('Notes sent to this task:\n- task-1-note-1 from lead: use the second seed')
+
+    const mate = await spawn(ctx, lead, 'mate')
+    await vi.waitFor(() => { expect(ctx.agentTeams.listMembers(lead)[1]).toMatchObject({ status: 'inactive', lastStop: 'completed' }) })
+    const other = await ctx.agentTeams.createTask(lead, { subject: 'Plot', description: 'd' })
+    const assigned = await ctx.agentTeams.updateTask(lead, { taskId: other.id, expectedRevision: other.revision, action: 'reassign', owner: 'mate' })
+    const second = await ctx.agentTeams.noteTask(lead, { taskId: other.id, text: 'plot in log scale', signal: SIGNAL })
+    expect(second.noteId).toBe('task-2-note-1')
+    await vi.waitFor(() => {
+      const queued = lead.session.snapshotEvents().flatMap(event => (event.type === 'team/message/queued' ? [event.data.message] : []))
+      expect(queued.some(message => message.targetId === mate.member.id
+        && message.content.some(block => block.type === 'text' && block.text === 'Note task-2-note-1 on task-2:\n\nplot in log scale'))).toBe(true)
+    }, { timeout: 5_000 })
+    expect(assigned.ownerName).toBe('mate')
+    await vi.waitFor(() => {
+      expect(ctx.agentTeams.listMembers(lead)[1]).toMatchObject({ status: 'inactive' })
+      expect(durable(lead).pendingMessages).toHaveLength(0)
+    }, { timeout: 10_000 })
+
+    await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: claimed.revision, action: 'complete' })
+    await expect(ctx.agentTeams.noteTask(lead, { taskId: task.id, text: 'too late', signal: SIGNAL }))
+      .rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
+    await expect(ctx.agentTeams.noteTask(lead, { taskId: TeamTaskId('task-9'), text: 'x', signal: SIGNAL }))
+      .rejects.toMatchObject({ code: 'TEAM_TASK_NOT_FOUND' })
+    await expect(ctx.agentTeams.noteTask(lead, { taskId: other.id, text: '   ', signal: SIGNAL }))
+      .rejects.toMatchObject({ code: 'TEAM_INVALID_ARGUMENT' })
+  }, 20_000)
+
+  it('holds a task whose declared output a note names until the Lead acknowledges', async () => {
+    const { ctx, lead } = await setup([])
+    const producer = await ctx.agentTeams.createTask(lead, {
+      subject: 'Produce', description: 'd', outputs: [{ path: 'out/model.json', kind: 'json' }],
+    })
+    const consumer = await ctx.agentTeams.createTask(lead, { subject: 'Consume', description: 'd' })
+    const claimed = await ctx.agentTeams.updateTask(lead, { taskId: producer.id, expectedRevision: producer.revision, action: 'claim' })
+    const noted = await ctx.agentTeams.noteTask(lead, {
+      taskId: consumer.id, text: 'out/model.json is missing the bias term', signal: SIGNAL,
+    })
+    expect(noted.held).toEqual([producer.id])
+    const held = ctx.agentTeams.getTask(lead, producer.id)
+    expect(held).toMatchObject({ revision: claimed.revision + 1, holds: [{ note: 'task-2-note-1', task: consumer.id, from: 'lead' }] })
+    await expect(ctx.agentTeams.updateTask(lead, { taskId: producer.id, expectedRevision: held.revision, action: 'complete' }))
+      .rejects.toMatchObject({
+        code: 'TEAM_TASK_HELD',
+        message: 'team task "task-1" is held until the Lead acknowledges: task-2-note-1 on task-2 from lead',
+      })
+    await expect(ctx.agentTeams.updateTask(lead, { taskId: producer.id, expectedRevision: held.revision, action: 'acknowledge', note: 'nope' }))
+      .rejects.toMatchObject({ code: 'TEAM_INVALID_ARGUMENT' })
+    const acknowledged = await ctx.agentTeams.updateTask(lead, {
+      taskId: producer.id, expectedRevision: held.revision, action: 'acknowledge', note: 'task-2-note-1',
+    })
+    expect(acknowledged.holds).toBeUndefined()
+    // Past the hold, complete reaches the output check; this setup mounts no filesystem service.
+    await expect(ctx.agentTeams.updateTask(lead, { taskId: producer.id, expectedRevision: acknowledged.revision, action: 'complete' }))
+      .rejects.toMatchObject({ code: 'TEAM_OUTPUTS_UNCHECKABLE' })
+  })
+
+  it('warns when the note mail cannot be sent and refuses an acknowledgement that names no hold', async () => {
+    const { ctx, lead } = await setup([textResponse('mate initial')])
+    const mate = await spawn(ctx, lead, 'mate')
+    await vi.waitFor(() => { expect(ctx.agentTeams.listMembers(lead)[1]).toMatchObject({ status: 'inactive' }) })
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'Fit', description: 'd' })
+    const assigned = await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action: 'reassign', owner: 'mate' })
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    vi.spyOn(teamInternals(ctx).mailbox, 'send').mockRejectedValueOnce(new Error('mailbox closed'))
+    const noted = await ctx.agentTeams.noteTask(lead, { taskId: task.id, text: 'a note', signal: SIGNAL })
+    await vi.waitFor(() => { expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not mail note task-1-note-1')) })
+    await expect(ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: noted.revision, action: 'acknowledge' }))
+      .rejects.toMatchObject({ code: 'TEAM_INVALID_ARGUMENT', message: 'team task "task-1" is not held by note ""' })
+    expect(assigned.ownerName).toBe('mate')
+    await vi.waitFor(() => { expect(durable(lead).pendingMessages).toHaveLength(0) }, { timeout: 10_000 })
+    await waitNoAgent(ctx, mate.member.id)
+  }, 20_000)
+
+  it('lets only the Lead acknowledge and keeps other holds when one is cleared', async () => {
+    const { ctx, lead } = await setup(['hang'])
+    const producer = await ctx.agentTeams.createTask(lead, {
+      subject: 'Produce', description: 'd', outputs: [{ path: 'a.csv', kind: 'csv' }, { path: 'b.csv', kind: 'csv' }],
+    })
+    const consumer = await ctx.agentTeams.createTask(lead, { subject: 'Consume', description: 'd' })
+    await ctx.agentTeams.noteTask(lead, { taskId: consumer.id, text: 'a.csv looks truncated', signal: SIGNAL })
+    await ctx.agentTeams.noteTask(lead, { taskId: consumer.id, text: 'b.csv too', signal: SIGNAL })
+    const held = ctx.agentTeams.getTask(lead, producer.id)
+    expect(held.holds?.map(hold => hold.note)).toEqual(['task-2-note-1', 'task-2-note-2'])
+    const mate = await spawn(ctx, lead, 'mate')
+    const mateAgent = await waitRunning(ctx, mate.member.id)
+    await expect(ctx.agentTeams.updateTask(mateAgent, { taskId: producer.id, expectedRevision: held.revision, action: 'acknowledge', note: 'task-2-note-1' }))
+      .rejects.toMatchObject({ code: 'TEAM_LEAD_REQUIRED' })
+    const once = await ctx.agentTeams.updateTask(lead, { taskId: producer.id, expectedRevision: held.revision, action: 'acknowledge', note: 'task-2-note-1' })
+    expect(once.holds?.map(hold => hold.note)).toEqual(['task-2-note-2'])
+    ctx.agentTeams.interrupt(lead, 'mate')
+    await waitNoAgent(ctx, mate.member.id)
+  }, 20_000)
+})
+
 describe('Artifact contracts', () => {
   function workspace(): string {
     const dir = mkdtempSync(join(tmpdir(), 'dsh-team-workspace-'))

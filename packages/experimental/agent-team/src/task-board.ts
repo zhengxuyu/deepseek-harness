@@ -16,6 +16,8 @@ import { assertTaskGraphCandidate, TeamTaskGraphError } from './task-graph.ts'
 import type { TeamTaskGraphViolation } from './task-graph.ts'
 import { TeamId, TeamTaskId } from './types.ts'
 import type {
+  NoteTeamTaskRequest,
+  NoteTeamTaskResult,
   ArtifactContract,
   CreateTeamTaskRequest,
   OutstandingTeamTask,
@@ -55,6 +57,18 @@ function live(task: TeamTaskSnapshot): boolean {
   return task.status === 'pending' || task.status === 'in_progress' || task.status === 'lost'
 }
 
+/** The task recorded under `id`, or the not-found refusal. */
+function taskOn(state: TeamState, id: TeamTaskId): TeamTaskSnapshot {
+  const task = state.tasks.find(candidate => candidate.id === id)
+  if (task === undefined) throw new TeamError(`team task "${id}" not found`, 'TEAM_TASK_NOT_FOUND')
+  return task
+}
+
+/** Subject identity for the duplicate-node check: case and interior whitespace do not distinguish two subjects. */
+function subjectKey(subject: string): string {
+  return subject.trim().replace(/\s+/gu, ' ').toLowerCase()
+}
+
 /** What the board needs from its host to check outputs at completion. */
 export interface TeamTaskBoardHost {
   /** The workspace filesystem, read at completion; absent refuses to complete a task with declared outputs. */
@@ -83,6 +97,7 @@ export class TeamTaskBoard {
    */
   async create(membership: TeamMembership, request: CreateTeamTaskRequest): Promise<TeamTaskView> {
     return this.record(membership.root, request, (state) => {
+      this.assertSubjectFree(state, request.subject)
       const blockedBy = this.dependencies(request.blockedBy ?? [], state)
       const outputs = this.outputs(request.outputs ?? [])
       return {
@@ -218,8 +233,7 @@ export class TeamTaskBoard {
     const root = membership.root
     return this.journal.transact(root.id, async () => {
       const state = this.journal.state(root)
-      const current = state.tasks.find(task => task.id === request.taskId)
-      if (current === undefined) throw new TeamError(`team task "${request.taskId}" not found`, 'TEAM_TASK_NOT_FOUND')
+      const current = taskOn(state, request.taskId)
       if (current.revision !== request.expectedRevision) {
         throw new TeamError(
           `stale team task "${current.id}" revision ${request.expectedRevision}; current revision is ${current.revision}`,
@@ -255,6 +269,7 @@ export class TeamTaskBoard {
             && request.outputs === undefined) {
             throw new TeamError('task edit requires subject, description, write_scopes, or outputs', 'TEAM_INVALID_ARGUMENT')
           }
+          if (request.subject !== undefined) this.assertSubjectFree(state, request.subject, current.id)
           const { outputs: _outputs, ...withoutOutputs } = current
           const outputs = request.outputs === undefined ? current.outputs : this.outputs(request.outputs)
           next = {
@@ -277,9 +292,28 @@ export class TeamTaskBoard {
           next = { ...withoutEdges, blockedBy, ...this.edgeInstructions(request.edgeInstructions, blockedBy) }
           break
         }
+        case 'acknowledge': {
+          if (!lead) throw new TeamError('only the Team Lead can acknowledge a hold', 'TEAM_LEAD_REQUIRED')
+          const holds = current.holds ?? []
+          const hold = holds.find(candidate => candidate.note === request.note)
+          if (hold === undefined) {
+            throw new TeamError(`team task "${current.id}" is not held by note ${JSON.stringify(request.note ?? '')}`, 'TEAM_INVALID_ARGUMENT')
+          }
+          const remaining = holds.filter(candidate => candidate !== hold)
+          const { holds: _holds, ...withoutHolds } = current
+          next = remaining.length === 0 ? withoutHolds : { ...withoutHolds, holds: remaining }
+          break
+        }
         case 'complete': {
           authorizeOwner()
           if (current.status !== 'in_progress') throw new TeamError('only an in-progress task can complete', 'TEAM_TASK_INVALID_TRANSITION')
+          if (current.holds !== undefined && current.holds.length > 0) {
+            const held = current.holds.map(hold => `${hold.note} on ${hold.task} from ${hold.from}`).join(', ')
+            throw new TeamError(
+              `team task "${current.id}" is held until the Lead acknowledges: ${held}`,
+              'TEAM_TASK_HELD',
+            )
+          }
           const artifacts = await this.settle(root, state, current)
           next = { ...current, status: 'completed', ...artifacts.length === 0 ? {} : { artifacts } }
           break
@@ -368,14 +402,42 @@ export class TeamTaskBoard {
   ): Promise<TeamTaskView> {
     return this.journal.transact(root.id, async () => {
       const state = this.journal.state(root)
-      const current = state.tasks.find(task => task.id === id)
-      if (current === undefined) throw new TeamError(`team task "${id}" not found`, 'TEAM_TASK_NOT_FOUND')
+      const current = taskOn(state, id)
       if (current.status !== 'in_progress') {
         throw new TeamError(`team task "${id}" is ${current.status}, not in progress`, 'TEAM_TASK_INVALID_TRANSITION')
       }
       const task: TeamTaskSnapshot = { ...next(current), revision: current.revision + 1 }
       await this.journal.appendAndFlush(root, 'team/task', { version: 3, teamId: TeamId(root.id), task })
       return this.taskView(root, state, task)
+    })
+  }
+
+  /**
+   * Record one note on a task and hold every other live task whose declared output the note names.
+   * @param membership - the sending member.
+   * @param request - target task and note text.
+   * @returns the task's next revision with the note's id and the held task ids.
+   */
+  async note(membership: TeamMembership, request: NoteTeamTaskRequest): Promise<NoteTeamTaskResult> {
+    const root = membership.root
+    return this.journal.transact(root.id, async () => {
+      const state = this.journal.state(root)
+      const current = taskOn(state, request.taskId)
+      if (!live(current)) throw new TeamError(`team task "${current.id}" is ${current.status}; a note needs a live task`, 'TEAM_TASK_INVALID_TRANSITION')
+      const text = requiredText(request.text, 'note', 16_384)
+      const note = { id: `${current.id}-note-${(current.notes ?? []).length + 1}`, from: membership.name, text }
+      const task: TeamTaskSnapshot = { ...current, revision: current.revision + 1, notes: [...current.notes ?? [], note] }
+      await this.journal.appendAndFlush(root, 'team/task', { version: 3, teamId: TeamId(root.id), task })
+      const held: TeamTaskId[] = []
+      for (const other of state.tasks) {
+        if (other.id === current.id || !live(other)) continue
+        if (!(other.outputs ?? []).some(contract => text.includes(contract.path))) continue
+        const hold = { note: note.id, task: current.id, from: membership.name }
+        const heldTask: TeamTaskSnapshot = { ...other, revision: other.revision + 1, holds: [...other.holds ?? [], hold] }
+        await this.journal.appendAndFlush(root, 'team/task', { version: 3, teamId: TeamId(root.id), task: heldTask })
+        held.push(other.id)
+      }
+      return { ...this.taskView(root, this.journal.state(root), task), noteId: note.id, held }
     })
   }
 
@@ -399,6 +461,22 @@ export class TeamTaskBoard {
       await this.journal.appendAndFlush(root, 'team/task', { version: 3, teamId: TeamId(root.id), task })
       return this.taskView(root, state, task)
     })
+  }
+
+  /**
+   * Refuse a subject a live task already carries: the board holds one node per piece of work,
+   * so the caller links to, reopens, or edits that task instead of adding a twin.
+   */
+  private assertSubjectFree(state: TeamState, subject: string, self?: TeamTaskId): void {
+    const key = subjectKey(subject)
+    const other = state.tasks.find(candidate => candidate.id !== self && live(candidate) && subjectKey(candidate.subject) === key)
+    if (other !== undefined) {
+      const remedy = other.status === 'lost' ? 'reopen it' : 'depend on it or edit it'
+      throw new TeamError(
+        `subject ${JSON.stringify(subject.trim())} is already live task "${other.id}" (${other.status}); ${remedy} instead of creating a twin`,
+        'TEAM_TASK_DUPLICATE_SUBJECT',
+      )
+    }
   }
 
   /** Refuse an output path another task may still produce: two live nodes cannot claim one file. */
@@ -561,6 +639,8 @@ export class TeamTaskBoard {
       ...task.edgeInstructions === undefined ? {} : { edgeInstructions: structuredClone(task.edgeInstructions) },
       outputs: structuredClone(task.outputs ?? []),
       ...task.artifacts === undefined ? {} : { artifacts: structuredClone(task.artifacts) },
+      ...task.notes === undefined ? {} : { notes: structuredClone(task.notes) },
+      ...task.holds === undefined ? {} : { holds: structuredClone(task.holds) },
       ready: task.status === 'pending' && this.taskReady(state, task),
       writeScopeWarnings: [...warnings],
     }

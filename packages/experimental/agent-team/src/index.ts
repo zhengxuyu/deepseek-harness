@@ -34,6 +34,8 @@ import type {
   TeamView,
   TeamWaitResult,
   UpdateTeamTaskRequest,
+  NoteTeamTaskRequest,
+  NoteTeamTaskResult,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -249,6 +251,30 @@ export class TeamService extends TypertRemoteService {
       })
     }
     return view
+  }
+
+  /**
+   * Send a note to a task: recorded on the task, mailed to its current owner, and folded into the brief of whoever claims it later.
+   * A note that names another live task's declared output holds that task from completing until the Lead acknowledges the hold.
+   * @param caller - exact live Team member sending the note.
+   * @param request - target task, text, and cancellation for the owner mail.
+   * @returns the task's next revision with the note id and the held task ids.
+   */
+  async noteTask(caller: Agent, request: NoteTeamTaskRequest): Promise<NoteTeamTaskResult> {
+    const membership = this.roster.membership(caller)
+    const result = await this.tasks.note(membership, request)
+    // The owner learns of the note by mail from its author; the note itself is
+    // already durable, so the send is not awaited.
+    if (result.ownerName !== undefined && result.ownerName !== membership.name) {
+      void this.mailbox.send(caller, {
+        target: result.ownerName,
+        content: [{ type: 'text', text: `Note ${result.noteId} on ${result.id}:\n\n${request.text.trim()}` }],
+        signal: request.signal,
+      }).catch((error: unknown) => {
+        this.ctx.logger.warn(`Agent Teams could not mail note ${result.noteId} to "${result.ownerName}": ${errorMessage(error)}`)
+      })
+    }
+    return result
   }
 
   /**
