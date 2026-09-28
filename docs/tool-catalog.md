@@ -2153,7 +2153,7 @@ Create one unowned pending task on the shared Team task board. outputs is the de
           },
           "schema": {
             "type": "object",
-            "description": "JSON Schema a json output must satisfy.",
+            "description": "JSON Schema a json output must satisfy, using only type, properties, required, additionalProperties, items, enum, const, and oneOf; other keywords such as minItems or pattern are refused.",
             "additionalProperties": true
           },
           "optional": {
@@ -2369,7 +2369,7 @@ Compare-and-set a shared task action using the latest revision from team_task_ge
           },
           "schema": {
             "type": "object",
-            "description": "JSON Schema a json output must satisfy.",
+            "description": "JSON Schema a json output must satisfy, using only type, properties, required, additionalProperties, items, enum, const, and oneOf; other keywords such as minItems or pattern are refused.",
             "additionalProperties": true
           },
           "optional": {
