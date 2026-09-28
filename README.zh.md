@@ -59,7 +59,7 @@ dsh 提供两种让 agent 把工作交给其他 agent 的方式。`tool-subagent
 | 文件隔离 | 无 | 无 —— 写范围只对重叠发出警告，不是锁 |
 | ASI-Bench b1 上的观察（本 fork 截至 2026-08-27，`--profile headless`） | 60 个实例中 12 个在 subagent 仍在运行时退出，未交付任何产物 | 目前 52 个中 0 个；完成实例的中位耗时 3255s，单 agent 基线约 1950s |
 
-最后一行是 `--profile headless` 下的实际差别：headless 在 root agent 回合结束时结束运行。派发了后台 subagent 然后让出的 root 已经结束了回合，于是运行退出，子 agent 的工作丢失；而 Lead 会在 `wait_agent` 中阻塞。两种方式都没有类型化产物、由 harness 判定的"完成"、或对丢失工作的记录状态；这些记录在 [zhengxuyu/mllm-benchs](https://github.com/zhengxuyu/mllm-benchs/blob/main/DEFECTS.md)。
+最后一行是 `--profile headless` 下的实际差别：除非挂载了结算 provider，headless 在 root agent 回合结束时结束运行。派发了后台 subagent 然后让出的 root 已经结束了回合，于是没有它时运行退出，子 agent 的工作丢失；而 Lead 会在 `wait_agent` 中阻塞。headless 运行器接受可选的 `ctx.headlessSettlement` 服务；[`agent-team-settlement`](packages/experimental/agent-team-settlement/README.zh.md) 在 Team 任务板之上提供它，`agent-team` 可以把普通的 `subagent` 运行记录到该任务板上（`trackSubagentRuns`），运行不得不放弃的工作被记录为 `lost` 而不是丢弃。两种方式都没有类型化产物或由 harness 判定的"完成"；这些记录在 [zhengxuyu/mllm-benchs](https://github.com/zhengxuyu/mllm-benchs/blob/main/DEFECTS.md)。
 
 ## 社区与支持
 

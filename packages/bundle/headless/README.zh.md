@@ -77,7 +77,7 @@ runner 是核心 API 载体之上的直接驱动器：它确定 Agent 标识—�
 
 ### 运行流程
 
-runner 等待整个应用结算（`ctx.get('loader')?.await()`），确保已组合的工具与适配器不会半挂载，读取共享的 [`agentDefaultModel`](../../core/agent-default-model/README.zh.md) 选择，从配置或 stdin 解析任务，然后确定 Agent 标识：默认是全新的 `session-<uuid>`，或是 `--session-id` 指名的持久化 Session——通过 [`sessionQuery`](../../session-query/session-query/README.zh.md) 沿用，日志不存在时拒绝。它把任务作为普通用户消息提交。不带 `--json` 时，它把该 Agent 的非空推理增量流式写入 stderr；带 `--json` 时改为投影本次运行。它等待完全停稳，然后对会话执行 flush，并把所属区间（从 `firstSeq` 起）折叠为最后一条非空 `assistant/message` 文本与最终 `turn/end` 原因。最后，它把最终文本写入 stdout（或 `final` 事件）并请求退出。
+runner 等待整个应用结算（`ctx.get('loader')?.await()`），确保已组合的工具与适配器不会半挂载，读取共享的 [`agentDefaultModel`](../../core/agent-default-model/README.zh.md) 选择，从配置或 stdin 解析任务，然后确定 Agent 标识：默认是全新的 `session-<uuid>`，或是 `--session-id` 指名的持久化 Session——通过 [`sessionQuery`](../../session-query/session-query/README.zh.md) 沿用，日志不存在时拒绝。它把任务作为普通用户消息提交。不带 `--json` 时，它把该 Agent 的非空推理增量流式写入 stderr；带 `--json` 时改为投影本次运行。它等待完全停稳；当组合提供了可选的 `ctx.headlessSettlement` 服务（本包导出的 `HeadlessSettlement`）时，接着调用 `settle(root)` 并等待它，于是跟踪根 Agent 委派工作的 provider 可以在这里等待这些工作、允许结算中的子 Agent 再次唤醒根 Agent，并报告它最终放弃的行。然后它对会话执行 flush，并把所属区间（从 `firstSeq` 起）折叠为最后一条非空 `assistant/message` 文本与最终 `turn/end` 原因。最后，它把最终文本写入 stdout（或 `final` 事件）并请求退出。
 
 ### 基于 base 的 patch 内容
 
@@ -85,7 +85,7 @@ patch 叠加在 `dsh-base` 之上：继承投影缓存与共享 PTC 运行时，
 
 ### 退出映射
 
-最终 `turn/end` 完成时退出码为 0；任何其他结果——aborted、error，或所属区间内没有轮次——退出码为 1。结束原因为 `error` 时还会向 stderr 写入 `dsh: <code>: <message>`。直接驱动器失败（例如 Agent 创建失败或不可用的 `--session-id`）向 stderr 写入 `dsh: <message>` 并退出 1，且在 `--json` 模式下额外发出一个 `error` 事件。
+最终 `turn/end` 完成且没有未结算项时退出码为 0；任何其他结果——aborted、error、所属区间内没有轮次，或结算报告含有行——退出码为 1。结束原因为 `error` 时还会向 stderr 写入 `dsh: <code>: <message>`，结束原因为 `max-tokens`（最终消息被输出上限截断）时写入 `dsh: turn ended: max-tokens`，每个未结算的行写为 `dsh: unsettled: <row>`。直接驱动器失败（例如 Agent 创建失败或不可用的 `--session-id`）向 stderr 写入 `dsh: <message>` 并退出 1，且在 `--json` 模式下额外发出一个 `error` 事件。
 
 ### 源码地图
 
@@ -138,6 +138,7 @@ runner 不向请求前缀添加任何内容；它只是驱动组合出的配置�
 这些限制告诉你 headless 何时不适用、它需要 `dsh` 启动器提供什么。它们是当前包约束，不是通用的 CLI（命令行界面）对比或任务积压。
 
 - **每次运行一个任务**——任务得到回答后进程即退出；没有交互式后续，因此多步工作请拆成多次运行。
+- **委派的工作只能通过 provider 结算**——runner 不知道根 Agent 启动了哪些子 Agent；没有 `ctx.headlessSettlement`（例如 [`dsh-experimental-agent-team-settlement`](../../experimental/agent-team-settlement/README.zh.md)）时，根 Agent 在子 Agent 仍在运行时结束回合，就会带着未收集的结果退出。
 - **通过 `dsh` 启动器运行**——以其他方式启动 headless profile 会在启动时失败，因为只有启动器能请求进程退出。
 - **首个 token 前没有心跳**——默认模式下，提供方发出第一个非空推理增量前，stderr 保持静默；延迟首个 token 的提供方不会更早给出进度信号。
 - **推理进入 stderr 日志**——默认模式下，重定向与监督进程可能保留显著更多且可能敏感的模型输出；需要时应把 stderr 路由到受控位置。

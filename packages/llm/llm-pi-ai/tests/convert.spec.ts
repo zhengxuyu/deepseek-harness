@@ -928,6 +928,20 @@ describe('mapStopReason / mapUsage', () => {
       .toMatchObject({ kind: 'error', failure: { code: 'TRANSPORT' } })
   })
 
+  it.each([
+    // pi-ai's rendering of OpenRouter's bare `error` finish_reason.
+    'Provider finish_reason: error',
+    'Upstream error from Relace: The model stopped before completing the response.',
+  ])('maps an upstream provider failure %j to a retryable server error', (errorMessage) => {
+    expect(mapStopReason(assistant({ stopReason: 'error', errorMessage })))
+      .toMatchObject({ kind: 'error', failure: { code: 'SERVER' } })
+  })
+
+  it('keeps other provider finish reasons non-retryable', () => {
+    expect(mapStopReason(assistant({ stopReason: 'error', errorMessage: 'Provider finish_reason: content_filter' })))
+      .toMatchObject({ kind: 'error', failure: { code: 'PI_AI_ERROR' } })
+  })
+
   it('uses pi-ai provider-specific overflow classification without losing rate-limit exclusions', () => {
     expect(mapStopReason(assistant({
       stopReason: 'error',

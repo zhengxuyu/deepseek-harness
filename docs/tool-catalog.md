@@ -40,7 +40,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-subagent` | `list_subagent_models`, `subagent` | `ctx.tools`, `ctx.subagents`, `ctx.systemPrompt`, `ctx.llm for model discovery and selected-route validation` | `tool/call`, `tool/result`, `child session events through the chosen provider` | `subagent`, `subagent_fork` | The registered delegation name is the load-time `toolName` config (default `subagent`); the default schema above has model selection off, while the discovery schema is shown as the fixed companion available in an enabled Session. Web presets sample the Plugins preference for each new top-level Session and preserve that decision for its child Sessions; `subagent_fork` remains fixed-route. Each instance independently controls whether it reads model-selection settings and its background behavior through `modelSelectionSettings`, `backgroundMode`, and `enableRunInBackground`. |
 | `@deepseek-ai/dsh-tool-subagent-control` | `interrupt_agent`, `list_agents`, `send_message` | `ctx.tools`, `ctx.subagents`, `ctx.agents and ctx.sessionProjections (list_agents only)` | `tool/call`, `tool/result`, `child session events through ctx.subagents` | - | The globally named control tools over continuable background subagents: provider-bound `tool-subagent` instances register distinct delegation tools, while this package registers `send_message` and `interrupt_agent` once, plus `list_agents` from its separately loaded `/list-agents` plugin (whose catalog rows use the sessionProjections and live Agent registries). |
 | `@deepseek-ai/dsh-tool-jobs` | `job_kill`, `job_list`, `job_output` | `ctx.tools`, `ctx.jobs`, `ctx.systemPrompt` | `tool/call`, `tool/result`, `user/message via agent.inject() for background completion notices` | - | The kind-agnostic background-job controller: background bash commands, PTY sends, and subagents are read, listed, and killed through the same three tools. Loading the plugin attaches the controller that arms producers' `ctx.jobs.start()`. |
-| `@deepseek-ai/dsh-experimental-tool-agent-team` | `interrupt_agent`, `list_agents`, `send_message`, `spawn_teammate`, `team_task_create`, `team_task_get`, `team_task_list`, `team_task_update`, `wait_agent` | `ctx.tools`, `ctx.systemPrompt`, `ctx.agentTeams`, `an exact live Team member Agent` | `tool/call`, `team/member`, `team/message/queued`, `team/message/delivered`, `team/task`, `tool/result` | - | All nine tools are scoped to implicit Team Leads and durable teammates. The shipped dsh-base bundle keeps the package disabled; the documented Agent Teams profile patch enables it while disabling the legacy continuable-child control names. |
+| `@deepseek-ai/dsh-experimental-tool-agent-team` | `interrupt_agent`, `list_agents`, `send_message`, `spawn_teammate`, `team_task_create`, `team_task_get`, `team_task_list`, `team_task_note`, `team_task_update`, `wait_agent` | `ctx.tools`, `ctx.systemPrompt`, `ctx.agentTeams`, `an exact live Team member Agent` | `tool/call`, `team/member`, `team/message/queued`, `team/message/delivered`, `team/task`, `tool/result` | - | All nine tools are scoped to implicit Team Leads and durable teammates. The shipped dsh-base bundle keeps the package disabled; the documented Agent Teams profile patch enables it while disabling the legacy continuable-child control names. |
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`, `owning Agent session` | `tool/call`, `todo/write`, `tool/result` | - | todo_write is session-owned state; UIs render the latest todo/write event as a checklist. `allowParallelInProgress` is required with no default, so the catalog states its choice: `true`, whose description invites several `in_progress` items. A deployment choosing `false` receives the same tool with a description asking for exactly one active task. |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`, `ctx.workflowEngine`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents the script children)` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-workspace-dependencies` | `load_workspace_dependencies` | `ctx.tools` | `tool/call`, `tool/result` | - | - |
@@ -2036,7 +2036,7 @@ Source: [`packages/experimental/tool-agent-team/src/index.ts`](../packages/exper
 
 ### `list_agents`
 
-List the Lead and every durable teammate with an addressable target and current availability. inactive means no turn is executing, not a task result. provisioning and failed describe member creation.
+List the Lead and every durable teammate with an addressable target, current availability, and lastStop, how its latest turn ended. inactive means no turn is executing, not a task result. provisioning and failed describe member creation.
 
 ```json
 {
@@ -2114,7 +2114,7 @@ Source: [`packages/experimental/tool-agent-team/src/index.ts`](../packages/exper
 
 ### `team_task_create`
 
-Create one unowned pending task on the shared Team task board.
+Create one unowned pending task on the shared Team task board. outputs is the definition of done: complete is refused until every non-optional output exists and passes its check. A subject a live task already carries is refused; depend on that task instead. The result carries the frontier after the edit.
 
 ```json
 {
@@ -2128,11 +2128,72 @@ Create one unowned pending task on the shared Team task board.
       "type": "string",
       "description": "Complete task details and acceptance criteria."
     },
+    "outputs": {
+      "type": "array",
+      "description": "Files this task must produce; empty for a task with no file deliverable.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Workspace-relative file path."
+          },
+          "kind": {
+            "type": "string",
+            "description": "file: exists and non-empty; json: parses and matches schema when given; csv: has a header and rows; npy and image: format magic bytes; python: an entry file that imports no workspace module, so it runs alone.",
+            "enum": [
+              "file",
+              "json",
+              "csv",
+              "npy",
+              "image",
+              "python"
+            ]
+          },
+          "schema": {
+            "type": "object",
+            "description": "JSON Schema a json output must satisfy, using only type, properties, required, additionalProperties, items, enum, const, and oneOf; other keywords such as minItems or pattern are refused.",
+            "additionalProperties": true
+          },
+          "optional": {
+            "type": "boolean",
+            "description": "Whether completion may proceed without this file."
+          }
+        },
+        "required": [
+          "path",
+          "kind"
+        ]
+      }
+    },
     "blocked_by": {
       "type": "array",
-      "description": "Task ids that must complete first.",
+      "description": "Tasks that must complete first, each optionally with what this task takes from it.",
       "items": {
-        "type": "string"
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "task": {
+                "type": "string",
+                "description": "Blocking task id."
+              },
+              "instruction": {
+                "type": "string",
+                "description": "What this task takes from the blocker's artifacts."
+              }
+            },
+            "required": [
+              "task",
+              "instruction"
+            ]
+          }
+        ]
       }
     },
     "write_scopes": {
@@ -2145,7 +2206,8 @@ Create one unowned pending task on the shared Team task board.
   },
   "required": [
     "subject",
-    "description"
+    "description",
+    "outputs"
   ]
 }
 ```
@@ -2187,7 +2249,8 @@ List shared tasks, including readiness, owner, revision, blockers, and write-sco
       "enum": [
         "pending",
         "in_progress",
-        "completed"
+        "completed",
+        "lost"
       ]
     },
     "owner": {
@@ -2212,9 +2275,35 @@ List shared tasks, including readiness, owner, revision, blockers, and write-sco
 
 Source: [`packages/experimental/tool-agent-team/src/index.ts`](../packages/experimental/tool-agent-team/src/index.ts)
 
+### `team_task_note`
+
+Send a note to a shared task rather than to a member: recorded on the task, mailed to its current owner, and included in the brief of whoever claims it. A note naming another live task's declared output path holds that task from completing until the Lead acknowledges. The result carries the frontier.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "Shared task id the note is about."
+    },
+    "text": {
+      "type": "string",
+      "description": "Self-contained note for whoever works the task."
+    }
+  },
+  "required": [
+    "task_id",
+    "text"
+  ]
+}
+```
+
+Source: [`packages/experimental/tool-agent-team/src/index.ts`](../packages/experimental/tool-agent-team/src/index.ts)
+
 ### `team_task_update`
 
-Compare-and-set a shared task action using the latest revision from team_task_get or team_task_list.
+Compare-and-set a shared task action using the latest revision from team_task_get or team_task_list. The result carries the frontier after the edit.
 
 ```json
 {
@@ -2230,7 +2319,7 @@ Compare-and-set a shared task action using the latest revision from team_task_ge
     },
     "action": {
       "type": "string",
-      "description": "Task transition to apply.",
+      "description": "Task transition to apply; acknowledge clears one hold (Lead only).",
       "enum": [
         "claim",
         "release",
@@ -2239,8 +2328,13 @@ Compare-and-set a shared task action using the latest revision from team_task_ge
         "complete",
         "reopen",
         "reassign",
-        "delete"
+        "delete",
+        "acknowledge"
       ]
+    },
+    "note": {
+      "type": "string",
+      "description": "The hold to clear for acknowledge: a note id from the task's holds."
     },
     "subject": {
       "type": "string",
@@ -2250,11 +2344,72 @@ Compare-and-set a shared task action using the latest revision from team_task_ge
       "type": "string",
       "description": "Replacement details for edit."
     },
+    "outputs": {
+      "type": "array",
+      "description": "Replacement output contracts for edit.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Workspace-relative file path."
+          },
+          "kind": {
+            "type": "string",
+            "description": "file: exists and non-empty; json: parses and matches schema when given; csv: has a header and rows; npy and image: format magic bytes; python: an entry file that imports no workspace module, so it runs alone.",
+            "enum": [
+              "file",
+              "json",
+              "csv",
+              "npy",
+              "image",
+              "python"
+            ]
+          },
+          "schema": {
+            "type": "object",
+            "description": "JSON Schema a json output must satisfy, using only type, properties, required, additionalProperties, items, enum, const, and oneOf; other keywords such as minItems or pattern are refused.",
+            "additionalProperties": true
+          },
+          "optional": {
+            "type": "boolean",
+            "description": "Whether completion may proceed without this file."
+          }
+        },
+        "required": [
+          "path",
+          "kind"
+        ]
+      }
+    },
     "blocked_by": {
       "type": "array",
-      "description": "Complete blocker list for set_dependencies.",
+      "description": "Complete blocker list for set_dependencies, each optionally with an instruction.",
       "items": {
-        "type": "string"
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "task": {
+                "type": "string",
+                "description": "Blocking task id."
+              },
+              "instruction": {
+                "type": "string",
+                "description": "What this task takes from the blocker's artifacts."
+              }
+            },
+            "required": [
+              "task",
+              "instruction"
+            ]
+          }
+        ]
       }
     },
     "write_scopes": {
@@ -2281,7 +2436,7 @@ Source: [`packages/experimental/tool-agent-team/src/index.ts`](../packages/exper
 
 ### `wait_agent`
 
-Wait for the next teammate status, mailbox, or shared-task change after this call starts. This never wakes inactive members and returns noProgress immediately when no other member is running or provisioning. Re-list after wakeup or timeout instead of polling.
+Wait for the next teammate status, mailbox, or shared-task change after this call starts, and return the members and tasks that changed. This never wakes inactive members and returns noProgress immediately when no other member is running or provisioning.
 
 ```json
 {

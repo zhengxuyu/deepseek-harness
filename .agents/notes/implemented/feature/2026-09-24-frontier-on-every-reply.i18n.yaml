@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-24-frontier-on-every-reply.md
+2026-09-24-frontier-on-every-reply.md: aca8d186c34f033cae8a8c9e6a4d438a9e01c6d5
+2026-09-24-frontier-on-every-reply.zh.md: 48e3e586e3fc0bd3c45752c838526f83c9bb9530
