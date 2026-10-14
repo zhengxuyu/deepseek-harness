@@ -650,6 +650,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   SendTeamMessageResult: 'agent-team.md',
   SpawnTeammateRequest: 'agent-team.md',
   SpawnTeammateResult: 'agent-team.md',
+  TeamAssignment: 'agent-team.md',
   TeamId: 'agent-team.md',
   TeamMemberView: 'agent-team.md',
   TeamMembership: 'agent-team.md',

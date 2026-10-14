@@ -957,6 +957,15 @@ describe('dsh-tool-team', () => {
     expect(renderPrompt(childAssembly)).not.toContain('besides the Team tools')
   })
 
+  it('tells every member the assignment rule agent-team enforces, and nothing when it is unset', async () => {
+    const unset = await setup(['hang'])
+    expect(renderPrompt(await assembly(unset.ctx, unset.lead))).not.toContain('Shared tasks are')
+    for (const [mode, rule] of [['push', 'Shared tasks are assigned (push)'], ['pull', 'Shared tasks are claimed (pull)']] as const) {
+      const { ctx, lead } = await setup(['hang'], false, { assignment: mode })
+      expect(renderPrompt(await assembly(ctx, lead))).toContain(rule)
+    }
+  })
+
   it('uses configured fresh and fork provider names', async () => {
     const { ctx, lead, fiber } = await setup([textResponse('custom')])
     await fiber.dispose()

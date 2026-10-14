@@ -760,7 +760,24 @@ export interface Config {
    * means outputs are hashed but not retained.
    */
   readonly artifactRoot?: string
+  /**
+   * Who decides which member works a shared task. Absent leaves both ways open:
+   * the Lead may `reassign` a task to a member and any member may `claim` one.
+   * `push`: only the Lead assigns, with `reassign` and an owner; `claim` is
+   * refused. `pull`: members `claim` ready tasks themselves and `reassign` with
+   * an owner is refused (unassigning is not). Under pull the Lead can spawn a
+   * teammate only while more ready tasks wait unclaimed than teammates are free
+   * to claim them, and the spawn prompt says the work comes from the board;
+   * inactive teammates are mailed about ready, unclaimed tasks (each task once
+   * per teammate while it stays ready at one revision, at most as many
+   * teammates as there are such tasks); and those tasks count as outstanding
+   * for headless settlement, so a run does not end between the offer and the claim.
+   */
+  readonly assignment?: TeamAssignment
 }
+
+/** Who decides which member works a shared task; see {@link Config.assignment}. */
+export type TeamAssignment = 'push' | 'pull'
 ```
 
 来源： [`packages/experimental/agent-team/src/types.ts:274`](../packages/experimental/agent-team/src/types.ts)

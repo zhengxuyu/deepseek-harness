@@ -22,6 +22,7 @@ import type {
   CreateTeamTaskRequest,
   OutstandingTeamTask,
   TaskArtifact,
+  TeamAssignment,
   TeamTaskLostCause,
   TeamTaskSnapshot,
   TeamTaskView,
@@ -59,6 +60,11 @@ function live(task: TeamTaskSnapshot): boolean {
   return task.status === 'pending' || task.status === 'in_progress' || task.status === 'lost'
 }
 
+/** Whether a reassign names an owner; an omitted or blank owner unassigns the task. */
+function hasOwner(owner: string | undefined): owner is string {
+  return owner !== undefined && owner.trim().length > 0
+}
+
 /** The Team root's working directory, which workspace-relative paths resolve against. */
 function workspaceDir(root: Agent): string | undefined {
   return root.session.header.cwd
@@ -88,6 +94,15 @@ export interface TeamTaskBoardHost {
   readonly fs: () => FileSystem | undefined
   /** Where completed outputs are retained, or undefined for hashing only. */
   readonly artifactRoot: string | undefined
+  /** Who decides which member works a task: `push` refuses `claim`, `pull` refuses `reassign` to an owner. */
+  readonly assignment: TeamAssignment | undefined
+}
+
+/** A pending task with every blocker completed and no owner. */
+export interface ReadyTask {
+  readonly id: TeamTaskId
+  readonly subject: string
+  readonly revision: number
 }
 
 /** Owns Team task limits, authorization, transitions, and derived views. */
@@ -214,6 +229,31 @@ export class TeamTaskBoard {
   }
 
   /**
+   * List pending tasks with every blocker completed and no owner, in creation order.
+   * @param root - exact live Team Lead whose board is read.
+   * @returns id, subject, and revision of each such task.
+   */
+  readyUnclaimed(root: Agent): ReadyTask[] {
+    const state = this.journal.state(root)
+    return state.tasks
+      .filter(task => task.status === 'pending' && task.ownerId === undefined && this.taskReady(state, task))
+      .map(task => ({ id: task.id, subject: task.subject, revision: task.revision }))
+  }
+
+  /**
+   * The owners of every in-progress task on one board.
+   * @param root - exact live Team Lead whose board is read.
+   * @returns the owning member or run Session ids.
+   */
+  inProgressOwners(root: Agent): Set<SessionId> {
+    const owners = new Set<SessionId>()
+    for (const task of this.journal.state(root).tasks) {
+      if (task.status === 'in_progress' && task.ownerId !== undefined) owners.add(task.ownerId)
+    }
+    return owners
+  }
+
+  /**
    * Return one task, including a deleted tombstone.
    * @param membership - exact caller membership resolved by the Team roster.
    * @param id - Team-local task identity.
@@ -271,6 +311,9 @@ export class TeamTaskBoard {
       let next: TeamTaskSnapshot
       switch (request.action) {
         case 'claim':
+          if (this.host.assignment === 'push') {
+            throw new TeamError('assignment is push: the Lead assigns shared tasks to members; nobody claims', 'TEAM_ASSIGNMENT_PUSH')
+          }
           if (current.ownerId !== undefined && current.ownerId !== caller.id) {
             throw new TeamError(
               `team task "${current.id}" is owned by "${this.ownerName(root, state, current.ownerId)}" (status ${current.status})`,
@@ -370,7 +413,7 @@ export class TeamTaskBoard {
           break
         case 'reassign': {
           if (!lead) throw new TeamError('only the Team Lead can reassign tasks', 'TEAM_LEAD_REQUIRED')
-          if (request.owner === undefined || request.owner.trim().length === 0) {
+          if (!hasOwner(request.owner)) {
             if (current.status !== 'pending' && current.status !== 'in_progress') {
               throw new TeamError(
                 'only a pending or in-progress task can be unassigned',
@@ -379,6 +422,12 @@ export class TeamTaskBoard {
             }
             next = this.withoutOwner({ ...current, status: 'pending' })
             break
+          }
+          if (this.host.assignment === 'pull') {
+            throw new TeamError(
+              'assignment is pull: members claim ready tasks themselves; the Lead may unassign a task but names no owner',
+              'TEAM_ASSIGNMENT_PULL',
+            )
           }
           if (current.status !== 'pending') {
             throw new TeamError(

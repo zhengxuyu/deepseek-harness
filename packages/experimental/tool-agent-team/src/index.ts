@@ -62,6 +62,12 @@ function leadScope(allowed: readonly string[]): string {
   return `As the Team Lead you plan and delegate: you have ${tools}. Give implementation, file changes, test runs, and the final review to teammates, and wait for the teammates whose work the answer needs.`
 }
 
+/** The assignment rule every member sees when agent-team's `assignment` is set. */
+const ASSIGNMENT_POLICY = {
+  push: `Shared tasks are assigned (push): the Lead assigns every shared task to a named member with team_task_update action reassign and an owner. Nobody claims under push, so in the shared-task workflow the Lead's reassign takes the place of claim: a member works the tasks it is assigned, whose briefs arrive by mail, and completes them.`,
+  pull: `Shared tasks are claimed (pull): the Lead creates shared tasks and never names an owner, and members claim ready tasks themselves with team_task_update action claim. All work goes on the board as tasks before a teammate is spawned: a spawn_teammate prompt says who the teammate is and what it is good at, never which task to do, and spawning is refused while the teammates without a task could claim every ready one. A member that completes a task claims another ready one from the frontier before ending its turn; an inactive member is mailed when ready tasks are left unclaimed.`,
+} as const
+
 const ACTIVE_WAIT_STATUSES: ReadonlySet<TeamMemberView['status']> = new Set(['running', 'provisioning'])
 const NO_ACTIVE_PEER_MESSAGE = 'No other Team member is running or provisioning. wait_agent cannot make progress or wake inactive teammates. Re-list with list_agents and team_task_list, then use send_message to wake each required inactive teammate before waiting again.'
 
@@ -401,6 +407,14 @@ function install(agent: Agent, ctx: Context, config: ResolvedConfig): () => void
       order: scoped.systemPrompt.getSectionOrder('TEAM_POLICY'),
       text: POLICY,
     }))
+    const assignment = ctx.agentTeams.assignmentMode()
+    if (assignment !== undefined) {
+      register(scoped.systemPrompt.section({
+        name: 'team:assignment',
+        order: scoped.systemPrompt.getSectionOrder('TEAM_POLICY'),
+        text: ASSIGNMENT_POLICY[assignment],
+      }))
+    }
     if (config.leadTools !== undefined && ctx.agentTeams.tryMembership(agent)?.role === 'lead') {
       // Only a global tool can be restricted; the Lead keeps whatever was registered in its own scope.
       const global = new Set(ctx.tools.schemas().map(tool => tool.name))

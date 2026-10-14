@@ -30999,7 +30999,7 @@
       },
       "names": [],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:404"
+        "packages/experimental/agent-team/src/types.ts:421"
       ]
     },
     {
@@ -82068,7 +82068,7 @@
       },
       "names": [],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:400"
+        "packages/experimental/agent-team/src/types.ts:417"
       ]
     },
     {
@@ -82820,7 +82820,7 @@
       },
       "names": [],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:399"
+        "packages/experimental/agent-team/src/types.ts:416"
       ]
     },
     {
@@ -84874,7 +84874,7 @@
       },
       "names": [],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:392"
+        "packages/experimental/agent-team/src/types.ts:409"
       ]
     },
     {
@@ -102503,7 +102503,7 @@
       },
       "names": [],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:402"
+        "packages/experimental/agent-team/src/types.ts:419"
       ]
     },
     {
@@ -103607,7 +103607,7 @@
       },
       "names": [],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:393"
+        "packages/experimental/agent-team/src/types.ts:410"
       ]
     },
     {

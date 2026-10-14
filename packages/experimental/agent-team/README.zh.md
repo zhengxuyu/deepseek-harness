@@ -55,6 +55,7 @@ kind: "package-reference"
 | `disposalTimeoutMs` | `5,000` | 关闭清理允许的时间 |
 | `trackSubagentRuns` | `false` | 把 Lead 之下的普通 `subagent` 运行记录为任务板上有 owner 的任务，并在每次运行结束时结算 |
 | `artifactRoot` | 无 | harness 本地的绝对目录，每个已完成的输出以 `<team>/<task>/<path>` 保留在其下；缺省时只做哈希不保留 |
+| `assignment` | 无 | 由谁决定共享任务交给哪个成员：`push`（只由 Lead 指派）或 `pull`（成员自己认领）；缺省时两种方式都开放。见 [分配方式](#assignment) |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-experimental-agent-team)是每个受支持字段及其 JSDoc 的穷尽式真源。
 
@@ -83,6 +84,11 @@ roster 显示每个成员的职责（`lead` 或 `teammate`）与当前状态：`
 harness 放弃了其 owner 的任务是 `lost`，owner 仍然记着；重新打开它才能再次 claim。任务一旦进行中或已完成，其文本与依赖不再改变，运行中的任务也不能转交给另一个成员。
 
 任务声明它将产出的文件。在每个文件都在磁盘上且符合声明之前，完成会被拒绝，所以任务只有在产物存在时才算完成；两个任务不能同时承诺同一个文件。blocker 可以带一条说明，写明依赖它的任务从它取什么；开始一个任务的人会收到由记录的任务、其输入和输出组合而成的简报。
+
+<a id="assignment"></a>
+### 分配方式
+
+默认情况下，Lead 可以把任务指派给成员，任何成员也可以自己认领。`assignment` 只保留其中一种。`push` 下只有 Lead 指派，认领会被拒绝。`pull` 下成员自己认领 ready 任务，Lead 不能指定 owner（仍可取消指派）；只有当没人认领的 ready 任务多于空闲、可以认领它们的 teammate 时，Lead 才能派出新的 teammate，派出时的提示会说明活从任务板上领。空闲的 teammate 会收到邮件，告知没人认领的 ready 任务；同一任务在同一 revision 保持 ready 期间，每个 teammate 只收到一次；这些任务也算一次性（headless）运行未结算的工作。
 
 ### 等待与中断
 
@@ -145,7 +151,7 @@ Lead 可以停止 teammate 的当前轮次，而不会删除其排队的消息�
 
 图中已执行的部分是冻结的。`edit`、`set_dependencies` 与 `delete` 只接受 `pending` 或 `lost` 任务；`reassign` 给成员只接受 ready 的 `pending` 任务；不带 owner 的 `reassign`（Lead 侧的释放）接受 `pending` 或 `in_progress`。其余情况一律回答 `TEAM_TASK_INVALID_TRANSITION`，因此运行中的任务保持其 owner 开始时的文本与边，已完成的任务保持其结果所对应的记录。
 
-harness 记录和结算工作时不经过成员动作。`beginTask(caller, request)` 把调用成员已经开始的工作记录为它名下的 `in_progress` 任务，对任何成员都适用，并带上请求声明的产出；`markCompleted(caller, id)` 在执行与 `complete` 相同的产出检查后完成一个 `in_progress` 任务。结算插件用这两个方法处理 headless 运行启动时的任务，该任务由 Lead 持有。`lost` 是 harness 的状态，绝不是成员动作：`markLost(caller, id, cause)` 把一个 `in_progress` 任务移入该状态并保留其 owner 记录；provisioning 失败的成员会丢失它在 provisioning 期间认领的一切（`owner-failed`）。lost 任务不能被 claim 或 complete；`reopen` 把它变回无 owner 的 `pending`，在此之前可以先用 `edit` 或 `set_dependencies` 修订它。它的依赖方保持阻塞，它的写范围不再产生警告。`outstandingTasks(caller)` 列出调用方任务板上的 `in_progress` 任务以及每个 owner 当前是否在运行（进程外 provider 承载的被跟踪运行在结束前都视为运行中），这正是一次性宿主在退出前等待的东西。
+harness 记录和结算工作时不经过成员动作。`beginTask(caller, request)` 把调用成员已经开始的工作记录为它名下的 `in_progress` 任务，对任何成员都适用，并带上请求声明的产出；`markCompleted(caller, id)` 在执行与 `complete` 相同的产出检查后完成一个 `in_progress` 任务。结算插件用这两个方法处理 headless 运行启动时的任务，该任务由 Lead 持有。`lost` 是 harness 的状态，绝不是成员动作：`markLost(caller, id, cause)` 把一个 `in_progress` 任务移入该状态并保留其 owner 记录；provisioning 失败的成员会丢失它在 provisioning 期间认领的一切（`owner-failed`）。lost 任务不能被 claim 或 complete；`reopen` 把它变回无 owner 的 `pending`，在此之前可以先用 `edit` 或 `set_dependencies` 修订它。它的依赖方保持阻塞，它的写范围不再产生警告。`outstandingTasks(caller)` 列出调用方任务板上的 `in_progress` 任务以及每个 owner 当前是否在运行（进程外 provider 承载的被跟踪运行在结束前都视为运行中），这正是一次性宿主在退出前等待的东西；在 pull 分配方式下，它还会列出每个没人认领的 ready 任务（没有 `ownerName`），只要有 teammate 在运行就视为仍在推进。
 
 `outputs` 是任务的完成定义。每个 `ArtifactContract` 指定一个 workspace 相对路径（像写范围一样规范化，任务内唯一）和一种 kind：`file` 必须存在且非空；`json` 必须可解析，带 `schema` 时还须符合 `dsh-tools` 强制的 JSON Schema 子集；`csv` 需要表头和至少一行数据；`npy` 与 `image` 必须以其格式的魔数开头；`python` 必须是一个入口文件，其 import 不指向 workspace 中定义的模块，因此能单独运行。`complete` 通过 `ctx.fs` 相对 Lead 的工作目录检查每个非可选契约，以 `TEAM_TASK_OUTPUT_MISSING` 逐个指出不合格的输出；声明了输出的任务没有文件系统服务时无法完成（`TEAM_OUTPUTS_UNCHECKABLE`）。通过的输出记为 `artifacts`，带字节数与 sha256；若某路径上更早的已完成任务产出过不同内容，则记该任务为 `supersedes`；配置了 `artifactRoot` 时，每个已完成的输出以 `<artifactRoot>/<team>/<task>/<path>` 保留，被取代版本的保留副本记为 `previousVersion`。活跃任务（`pending`、`in_progress`、`lost`）不能声明另一个活跃任务已声明的路径（`TEAM_TASK_OUTPUT_CONFLICT`）；已完成任务的路径可以再次声明。`reopen` 清除记录的 artifacts。
 

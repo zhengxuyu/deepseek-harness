@@ -101,12 +101,14 @@ interface FollowedRun {
 
 /** One reported row for a task the run gave up on. */
 function row(task: OutstandingTeamTask, why: string): string {
-  return `${task.id} "${task.subject}" owned by ${task.ownerName}: ${why}`
+  const owner = task.ownerName === undefined ? 'claimed by nobody' : `owned by ${task.ownerName}`
+  return `${task.id} "${task.subject}" ${owner}: ${why}`
 }
 
 /**
- * Mark every outstanding task lost and describe each. A task that settled
- * between the listing and the mark is not lost and not reported. A task whose
+ * Mark every outstanding task lost and describe each. A task nobody claimed has
+ * no owner to lose it and is reported as it stands. A task that settled between
+ * the listing and the mark is not lost and not reported. A task whose
  * mark failed for any other reason is reported with that failure, so the run
  * still exits non-zero for work it neither collected nor recorded as lost.
  */
@@ -118,6 +120,10 @@ async function abandon(
 ): Promise<HeadlessSettlementReport> {
   const unsettled: string[] = []
   for (const task of outstanding) {
+    if (task.ownerName === undefined) {
+      unsettled.push(row(task, why))
+      continue
+    }
     try {
       await teams.markLost(root, task.id, 'run-ended')
     } catch (error) {
@@ -243,7 +249,7 @@ async function settle(
     const wait = Math.min(MAX_WAIT_MS, Math.max(MIN_WAIT_MS, live ? left : Math.min(left, config.stallMs)))
     const { timedOut } = await teams.waitForChange(root, wait, signal)
     if (timedOut && !live) {
-      return await abandon(teams, root, outstanding, `its owner was not running and nothing changed for ${config.stallMs} ms`)
+      return await abandon(teams, root, outstanding, `nothing was running and nothing changed for ${config.stallMs} ms`)
     }
   }
 }

@@ -2616,3 +2616,105 @@ describe('Task refusals that name the state and the remedy', () => {
     })).rejects.toMatchObject({ code: 'TEAM_INVALID_WRITE_SCOPE' })
   })
 })
+
+describe('Assignment modes', () => {
+  /** Text of every team mail one member's session received. */
+  async function mailTo(ctx: Context, id: SessionId): Promise<string[]> {
+    return (await storedEvents(ctx, id))
+      .filter((event): event is SessionEvent<'user/message'> => event.type === 'user/message' && event.data.source.kind === 'team-message')
+      .map(event => event.data.content.map(block => block.type === 'text' ? block.text : '').join(''))
+  }
+
+  /** Let a queued pull dispatch run: it is a macrotask scheduled by the change before this one. */
+  async function afterDispatch(): Promise<void> {
+    await new Promise(resolve => setTimeout(resolve, 0))
+  }
+
+  /** Every pull offer one member's session received. */
+  async function offersTo(ctx: Context, id: SessionId): Promise<string[]> {
+    return (await mailTo(ctx, id)).filter(text => text.includes('Ready on the shared board'))
+  }
+
+  it('leaves both claim and reassign open when assignment is unset', async () => {
+    const { ctx, lead } = await setup([textResponse('mate initial'), textResponse('assigned')])
+    expect(ctx.agentTeams.assignmentMode()).toBeUndefined()
+    const started = await spawn(ctx, lead, 'mate')
+    await vi.waitFor(() => { expect(ctx.agentTeams.listMembers(lead)[1]?.lastStop).toBe('completed') })
+    const first = await ctx.agentTeams.createTask(lead, { subject: 'one', description: 'one' })
+    await ctx.agentTeams.updateTask(lead, { taskId: first.id, expectedRevision: first.revision, action: 'claim' })
+    const second = await ctx.agentTeams.createTask(lead, { subject: 'two', description: 'two' })
+    const assigned = await ctx.agentTeams.updateTask(lead, { taskId: second.id, expectedRevision: second.revision, action: 'reassign', owner: 'mate' })
+    expect(assigned.ownerName).toBe('mate')
+    // Without pull, outstanding work is in-progress work only, and spawn prompts are left as written.
+    expect(ctx.agentTeams.outstandingTasks(lead).map(task => task.ownerName)).toEqual(['lead', 'mate'])
+    expect((await mailTo(ctx, started.member.id)).join('\n')).not.toContain('Assignment is pull')
+  })
+
+  it('push refuses claim and assigns through reassign', async () => {
+    const { ctx, lead } = await setup([textResponse('mate initial'), textResponse('assigned')], { assignment: 'push' })
+    expect(ctx.agentTeams.assignmentMode()).toBe('push')
+    const started = await spawn(ctx, lead, 'mate')
+    await vi.waitFor(() => { expect(ctx.agentTeams.listMembers(lead)[1]?.lastStop).toBe('completed') })
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
+    await expect(ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action: 'claim' }))
+      .rejects.toMatchObject({ code: 'TEAM_ASSIGNMENT_PUSH' })
+    const assigned = await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action: 'reassign', owner: 'mate' })
+    expect(assigned).toMatchObject({ status: 'in_progress', ownerName: 'mate' })
+    // push never offers ready work by mail
+    await ctx.agentTeams.createTask(lead, { subject: 'other', description: 'other' })
+    await afterDispatch()
+    expect(await offersTo(ctx, started.member.id)).toEqual([])
+  })
+
+  it('pull answers a teammate that spawns with the Lead-only refusal, not the board rule', async () => {
+    const { ctx, lead } = await setup(['hang'], { assignment: 'pull' })
+    await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
+    const started = await spawn(ctx, lead, 'mate')
+    const mate = await waitRunning(ctx, started.member.id)
+    await expect(spawn(ctx, mate, 'spare')).rejects.toMatchObject({ code: 'TEAM_LEAD_REQUIRED' })
+    ctx.agentTeams.interrupt(lead, 'mate')
+    await waitNoAgent(ctx, started.member.id)
+  })
+
+  it('pull refuses reassign to an owner, spawns only for unclaimed work, and offers each ready revision once', async () => {
+    const { ctx, lead } = await setup(
+      [textResponse('mate initial'), textResponse('saw the first offer'), textResponse('saw the second offer')],
+      { assignment: 'pull' },
+    )
+    // Work goes on the board before anyone is spawned.
+    await expect(spawn(ctx, lead, 'mate')).rejects.toMatchObject({ code: 'TEAM_ASSIGNMENT_PULL_NO_WORK' })
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
+    const started = await spawn(ctx, lead, 'mate')
+    expect((await storedEvents(ctx, started.member.id))
+      .filter((event): event is SessionEvent<'user/message'> => event.type === 'user/message')
+      .map(event => event.data.content.map(block => block.type === 'text' ? block.text : '').join(''))
+      .some(text => text.startsWith('mate initial') && text.includes('your work comes from the shared board'))).toBe(true)
+    // One ready task and one teammate free to claim it: no second teammate.
+    await expect(spawn(ctx, lead, 'spare')).rejects.toMatchObject({ code: 'TEAM_ASSIGNMENT_PULL_NO_WORK' })
+
+    await expect(ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action: 'reassign', owner: 'mate' }))
+      .rejects.toMatchObject({ code: 'TEAM_ASSIGNMENT_PULL' })
+    const [unclaimed] = ctx.agentTeams.outstandingTasks(lead)
+    expect(unclaimed).toMatchObject({ id: task.id, subject: 'work' })
+    expect(unclaimed).not.toHaveProperty('ownerName')
+
+    await vi.waitFor(async () => { expect(await offersTo(ctx, started.member.id)).toHaveLength(1) }, { timeout: 5_000 })
+    expect((await offersTo(ctx, started.member.id))[0]).toContain(`${task.id} "work" (revision ${task.revision})`)
+    await vi.waitFor(() => { expect(ctx.agentTeams.listMembers(lead)[1]?.status).toBe('inactive') })
+
+    // A change that leaves the same task ready at the same revision offers nothing new.
+    await ctx.agentTeams.createTask(lead, { subject: 'later', description: 'later', blockedBy: [task.id] })
+    await afterDispatch()
+    expect(await offersTo(ctx, started.member.id)).toHaveLength(1)
+
+    // Released back to the board, the task is ready at a new revision and offered again; its blocked dependent is not.
+    const claimed = await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action: 'claim' })
+    const released = await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: claimed.revision, action: 'reassign' })
+    expect(released).toMatchObject({ status: 'pending' })
+    expect(released).not.toHaveProperty('ownerName')
+    await vi.waitFor(async () => { expect(await offersTo(ctx, started.member.id)).toHaveLength(2) }, { timeout: 5_000 })
+    const second = (await offersTo(ctx, started.member.id))[1]
+    expect(second).toContain(`${task.id} "work" (revision ${released.revision})`)
+    expect(second).not.toContain('"later"')
+  })
+})
