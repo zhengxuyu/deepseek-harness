@@ -1882,7 +1882,10 @@ describe('Lost tasks and the frozen executed graph', () => {
     })).rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
     await expect(ctx.agentTeams.updateTask(worker, {
       taskId: task.id, expectedRevision: lost.revision, action: 'claim',
-    })).rejects.toMatchObject({ code: 'TEAM_TASK_BLOCKED' })
+    })).rejects.toMatchObject({
+      code: 'TEAM_TASK_INVALID_TRANSITION',
+      message: `team task "${task.id}" is lost (revision ${lost.revision}); reopen it before claiming`,
+    })
     await expect(ctx.agentTeams.updateTask(lead, {
       taskId: task.id, expectedRevision: lost.revision, action: 'reassign', owner: 'worker',
     })).rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
@@ -2567,5 +2570,49 @@ describe('Artifact contracts', () => {
     const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
     await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action: 'reassign', owner: 'mate' })
     await vi.waitFor(() => { expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not mail the brief')) })
+  })
+})
+
+describe('Task refusals that name the state and the remedy', () => {
+  it('answers a repeated claim or complete with the task, and names the state and remedy otherwise', async () => {
+    const { ctx, lead } = await setup([])
+    const blocker = await ctx.agentTeams.createTask(lead, { subject: 'blocker', description: 'blocker' })
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work', blockedBy: [blocker.id] })
+    await expect(ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action: 'claim' }))
+      .rejects.toMatchObject({ code: 'TEAM_TASK_BLOCKED', message: `team task "${task.id}" is blocked by "${blocker.id}" (pending)` })
+    await expect(ctx.agentTeams.updateTask(lead, { taskId: blocker.id, expectedRevision: blocker.revision, action: 'complete' }))
+      .rejects.toMatchObject({
+        code: 'TEAM_TASK_INVALID_TRANSITION',
+        message: `only an in-progress task can complete; team task "${blocker.id}" is pending (revision ${blocker.revision}): claim or reassign it first`,
+      })
+
+    const claimed = await ctx.agentTeams.updateTask(lead, { taskId: blocker.id, expectedRevision: blocker.revision, action: 'claim' })
+    const again = await ctx.agentTeams.updateTask(lead, { taskId: blocker.id, expectedRevision: claimed.revision, action: 'claim' })
+    expect(again).toMatchObject({ id: blocker.id, revision: claimed.revision, status: 'in_progress' })
+    expect(again.brief).toBeDefined()
+
+    const done = await ctx.agentTeams.updateTask(lead, { taskId: blocker.id, expectedRevision: claimed.revision, action: 'complete' })
+    const repeat = await ctx.agentTeams.updateTask(lead, { taskId: blocker.id, expectedRevision: done.revision, action: 'complete' })
+    expect(repeat).toMatchObject({ id: blocker.id, revision: done.revision, status: 'completed' })
+    expect(ctx.agentTeams.getTask(lead, blocker.id).revision).toBe(done.revision)
+    await expect(ctx.agentTeams.updateTask(lead, { taskId: blocker.id, expectedRevision: done.revision, action: 'claim' }))
+      .rejects.toMatchObject({
+        code: 'TEAM_TASK_INVALID_TRANSITION',
+        message: `team task "${blocker.id}" is completed (revision ${done.revision}); reopen it before claiming`,
+      })
+  })
+
+  it('accepts an absolute path inside the Lead workspace as the same workspace-relative path', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-team-workspace-'))
+    roots.push(dir)
+    const { ctx, lead } = await setup([], {}, dir)
+    const task = await ctx.agentTeams.createTask(lead, {
+      subject: 'absolute', description: 'absolute', outputs: [{ path: join(dir, 'out/a.txt'), kind: 'file' }], writeScopes: [`${dir}/out/`],
+    })
+    expect(task.outputs?.[0]).toMatchObject({ path: 'out/a.txt', kind: 'file' })
+    expect(task.writeScopes).toEqual(['out'])
+    await expect(ctx.agentTeams.createTask(lead, {
+      subject: 'outside', description: 'outside', outputs: [{ path: '/elsewhere/a.txt', kind: 'file' }],
+    })).rejects.toMatchObject({ code: 'TEAM_INVALID_WRITE_SCOPE' })
   })
 })

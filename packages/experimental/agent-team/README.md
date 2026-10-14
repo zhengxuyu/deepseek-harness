@@ -76,7 +76,7 @@ Every message uses Steer: a running target receives it at the nearest step bound
 
 Any member can add a task with a title, details, optional dependencies on other tasks, and optional hints about which files it will touch. A task is claimable only when everything it depends on is complete.
 
-Tasks have an owner: a member claims a task to start work, completes it when done, releases it back, or reopens it; the Lead can assign a task to any member. Every change is compare-and-set: an update based on an outdated copy is rejected, so two members cannot silently overwrite each other's work.
+Tasks have an owner: a member claims a task to start work, completes it when done, releases it back, or reopens it; the Lead can assign a task to any member. Every change is compare-and-set: an update based on an outdated copy is rejected, so two members cannot silently overwrite each other's work. Claiming a task the caller already works on, or completing a task that is already completed, with its current revision returns the task unchanged instead of failing; every other refusal names the task's current status and revision and what to do instead.
 
 File hints produce warnings when two in-progress tasks plan to touch overlapping paths — they never block anything. Deleted tasks remain in history but disappear from the active list.
 
@@ -141,7 +141,7 @@ Lead delivery calls `Agent.steer()` directly. Teammate delivery uses the continu
 
 ### Shared task board
 
-Tasks are complete versioned snapshots; every mutation carries `expectedRevision`, and a stale caller receives `TEAM_TASK_STALE_REVISION` instead of overwriting a newer value. Numeric `task-<n>` ids require a safe-integer suffix, and id-space exhaustion reports `TEAM_TASK_LIMIT` instead of reusing the final id. Deleted tasks remain tombstones for replay and id stability but do not consume `maxTasks` or appear in `listTasks()`. `writeScopes` are normalized workspace-relative prefixes; views warn on overlap with in-progress tasks but never block claim or authorize writes.
+Tasks are complete versioned snapshots; every mutation carries `expectedRevision`, and a stale caller receives `TEAM_TASK_STALE_REVISION` instead of overwriting a newer value. Numeric `task-<n>` ids require a safe-integer suffix, and id-space exhaustion reports `TEAM_TASK_LIMIT` instead of reusing the final id. Deleted tasks remain tombstones for replay and id stability but do not consume `maxTasks` or appear in `listTasks()`. `writeScopes` are normalized workspace-relative prefixes (an absolute path inside the Lead's working directory is taken as the same relative path); views warn on overlap with in-progress tasks but never block claim or authorize writes.
 
 The executed part of the graph is frozen. `edit`, `set_dependencies`, and `delete` are accepted only on `pending` or `lost` tasks; `reassign` to a member only on a ready `pending` task; `reassign` with no owner (a Lead-side release) on `pending` or `in_progress`. Everything else answers `TEAM_TASK_INVALID_TRANSITION`, so a running task keeps the text and edges its owner started from and a completed task keeps the record its result was produced for.
 
