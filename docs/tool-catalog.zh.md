@@ -2309,7 +2309,7 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 
 ### `team_task_update`
 
-使用 team_task_get 或 team_task_list 返回的最新 revision，对共享任务操作执行 compare-and-set。 结果携带编辑后的 frontier。
+使用 team_task_get 或 team_task_list 返回的最新 revision，对共享任务操作执行 compare-and-set。 claim、complete、release、reopen、reassign 及其他状态转移都是这里 action 的取值，而不是单独的工具。 结果携带编辑后的 frontier。
 
 ```json
 {

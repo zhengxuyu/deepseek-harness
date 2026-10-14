@@ -694,6 +694,15 @@ describe('dsh-tool-team', () => {
     })
     expect(stale.isError).toBe(true)
     expect(text(stale)).toContain('stale team task')
+    expect(text(stale)).not.toContain('team_task_update actions')
+    // An invalid-transition refusal says the transitions it names are team_task_update actions, not tools of their own.
+    const frozen = await execute(ctx, lead, 'team_task_update', {
+      task_id: task.id,
+      expected_revision: task.revision + 1,
+      action: 'delete',
+    })
+    expect(frozen.isError).toBe(true)
+    expect(text(frozen)).toContain('are team_task_update actions, not tools of their own')
 
     const wait = execute(ctx, lead, 'wait_agent', { timeout_ms: 10_000 })
     const completedCall = new Promise<Awaited<ReturnType<typeof execute>>>((resolve, reject) => {
