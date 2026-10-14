@@ -926,6 +926,37 @@ describe('dsh-tool-team', () => {
     expect(toolTeam.inject).toEqual(['agents', 'agentTeams', 'tools', 'systemPrompt'])
   })
 
+  it('offers the Lead only the configured tools while teammates keep every tool', async () => {
+    const { ctx, lead, fiber } = await setup(['hang'])
+    await fiber.dispose()
+    for (const name of ['bash', 'read']) {
+      ctx.tools.register(defineContentToolFixture({
+        name,
+        description: `${name} fixture`,
+        parameters: {},
+        async execute() { return [{ type: 'text', text: name }] },
+      }))
+    }
+    // An unknown name and the PTC transport are ignored rather than refused.
+    await ctx.plugin(toolTeam, { leadTools: ['read', 'not-installed', 'run_code'] })
+    const leadAssembly = await assembly(ctx, lead)
+    const leadNames = leadAssembly.tools.map(schema => schema.name)
+    expect(leadNames).toContain('read')
+    expect(leadNames).not.toContain('bash')
+    expect(leadNames.filter(name => TOOL_NAMES.includes(name)).sort()).toEqual(TOOL_NAMES)
+    expect(renderPrompt(leadAssembly)).toContain('you have only read besides the Team tools')
+    expect((await execute(ctx, lead, 'bash', {})).isError).toBe(true)
+
+    const spawned = await execute(ctx, lead, 'spawn_teammate', {
+      name: 'worker', description: 'does the work', prompt: 'stay available',
+    })
+    expect(spawned.isError, text(spawned)).toBe(false)
+    const child = await waitRunning(ctx, spawnedChildId(ctx, lead, spawned))
+    const childAssembly = await assembly(ctx, child)
+    expect(childAssembly.tools.map(schema => schema.name)).toEqual(expect.arrayContaining(['bash', 'read']))
+    expect(renderPrompt(childAssembly)).not.toContain('besides the Team tools')
+  })
+
   it('uses configured fresh and fork provider names', async () => {
     const { ctx, lead, fiber } = await setup([textResponse('custom')])
     await fiber.dispose()

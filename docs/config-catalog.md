@@ -1133,6 +1133,13 @@ export interface Config {
   readonly frontierHops?: number
   /** Rows kept per frontier list (ready, running, lost, upstream, downstream); a cut list sets `truncated`. */
   readonly frontierRows?: number
+  /**
+   * When set, the Team Lead is offered only these global tools besides the Team tools, so it
+   * plans and delegates while teammates do the work; teammates keep every tool. Names that are
+   * not global tools when the Lead's scope is installed (unregistered yet, scope-local, or the
+   * PTC transport) are ignored, so plugin load order matters. Unset offers every tool to everyone.
+   */
+  readonly leadTools?: string[]
 }
 ```
 

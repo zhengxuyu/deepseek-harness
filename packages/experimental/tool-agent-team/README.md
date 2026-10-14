@@ -52,6 +52,8 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 `frontierHops` and `frontierRows` bound the frontier that `team_task_create`, `team_task_update`, and `wait_agent` return beside their usual value: `ready`, `running`, and `lost` task rows (id, subject, status, owner, declared outputs, recorded artifacts), the counts of blocked and completed tasks, `around` with the edited task's upstream and downstream neighbours out to `frontierHops` dependency hops (omitted for a wait or when hops is 0), and every member's status and `lastStop`. Each list keeps at most `frontierRows` rows and a cut list sets `truncated`. The Lead reads the board from the reply instead of re-listing or remembering it.
 
+`leadTools`, unset by default, narrows the Team Lead to the listed global tools plus the Team tools, so the Lead plans, inspects, and delegates while teammates run commands and change files; teammates keep every tool, and the Lead's prompt gains one paragraph saying so. For example `leadTools: [read, glob, grep, todo_write]` leaves the Lead able to read but not to run `bash`, `edit`, or `write`. Names that are not global tools when the Lead's scope is set up (not yet registered, registered only in one agent's scope, or the PTC `run_code` transport) are ignored, so mount the tool plugins before this one; the Lead's paragraph lists the tools it actually has.
+
 Try it by asking the Lead model: "create a teammate named reviewer to check the diff, then send reviewer the change summary". The model calls the creation tool and then the messaging tool.
 
 ### What the model can do
