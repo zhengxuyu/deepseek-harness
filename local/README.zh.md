@@ -34,3 +34,22 @@ id 定向 patch 会整体替换该行的 `config` 而非深度合并，因此覆
 ### 护栏
 
 脚本会拒绝位于默认会话根目录之下的 `DSH_TRACE_ROOT`（即上述编码冲突），拒绝不带任务字符串的 `batch`，并且不向 `dump` 转发任何 app 参数——`--dump-config` 本身就拒绝这类调用。在采集会话之前先运行 `dump trace`：dump 会为每一行标注提供它的文件，因此无需启动即可看到覆盖层在 `session-persistence-jsonl` 上生效。
+
+## `dsh-container/`
+
+一个装好 `dsh` 及其依赖的容器镜像，以及在其中运行一个 headless 任务的脚本。这四个文件在 mllm-benchs 的 `PaperBench/project/paperbench/paperbench/solvers/dsh/` 下也有一份，PaperBench 的 solver 会把 `run_dsh.sh` 和 `harness_automation.py` 上传进每篇论文的容器；两份须保持一致。
+
+| 文件 | 作用 |
+|---|---|
+| `Dockerfile` | 在 `BASE_IMAGE`（默认 `openclaw-task:latest`）上安装 Node（底座没有 ^22.19 或 >=24 时）、pnpm 和固定 commit 的 `dsh`。清空底座的 entrypoint，并应用启动器的补丁。 |
+| `harness_automation.py` | 容器内：`run`（打补丁、写 dsh home、在时间上限内运行 `dsh --profile headless`、写 `/home/logs/dsh-run.json`）、`check`（检查镜像和设置，不运行）、`patch`。 |
+| `run_dsh.sh` | 容器内：加载 `DSH_ENV_FILE`（默认 `/home/agent/dsh.env`）或环境变量，然后启动 `harness_automation.py`。 |
+| `launch.sh` | 宿主机：用该镜像启动容器（带内存上限，key 只按变量名传入），运行一个任务，把 `logs/`、`submission/` 和 `launch.json` 写到输出目录。 |
+
+```sh
+docker build --platform=linux/amd64 -t openclaw-task-dsh:latest --build-arg DSH_GIT_REF=<sha> local/dsh-container/
+export OPENROUTER_API_KEY=...
+local/dsh-container/launch.sh out/run1 --task task.txt --time-limit 2      # --check, --detach, --mem-limit, --model: see its header
+```
+
+任务按 PaperBench 的目录约定运行：任务说明在 `/home/agent/full_instructions.txt`，可选的论文在 `/home/paper`，工作在 git 仓库 `/home/submission` 中进行，记录写到 `/home/logs`。`harness_automation.py` 的 `PATCHES` 列出为 benchmark 对 dsh 构建所做的每一处文本改动及其对应的缺陷；每次运行都会把它们的状态记录到 `logs/dsh-patches.txt`。
