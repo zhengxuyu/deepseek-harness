@@ -34,3 +34,22 @@ An id-targeted patch replaces the row's whole `config` rather than deep-merging,
 ### Guards
 
 The script refuses a `DSH_TRACE_ROOT` under the default session root (the encoding conflict above), refuses `batch` without a job string, and forwards no app arguments to `dump`, which `--dump-config` rejects. Run `dump trace` before a collecting session: the dump annotates each row with the file that supplied it, so the overlay winning on `session-persistence-jsonl` is visible without booting.
+
+## `dsh-container/`
+
+A container image with `dsh` and its dependencies, and the scripts that run one headless task in it. The same four files are in mllm-benchs at `PaperBench/project/paperbench/paperbench/solvers/dsh/`, where PaperBench's solver uploads `run_dsh.sh` and `harness_automation.py` into each paper's container; keep the two copies identical.
+
+| File | Role |
+|---|---|
+| `Dockerfile` | Installs Node (when the base lacks ^22.19 or >=24), pnpm, and `dsh` at a pinned commit on `BASE_IMAGE`, default `openclaw-task:latest`. Clears the base's entrypoint and applies the launcher's patches. |
+| `harness_automation.py` | In the container: `run` (patch, write the dsh home, run `dsh --profile headless` under the time limit, write `/home/logs/dsh-run.json`), `check` (validate the image and settings, run nothing), `patch`. |
+| `run_dsh.sh` | In the container: loads `DSH_ENV_FILE` (default `/home/agent/dsh.env`) or the environment, then starts `harness_automation.py`. |
+| `launch.sh` | On the host: starts a container from the image with a memory cap and the key passed by name, runs one task, and writes `logs/`, `submission/` and `launch.json` to an output directory. |
+
+```sh
+docker build --platform=linux/amd64 -t openclaw-task-dsh:latest --build-arg DSH_GIT_REF=<sha> local/dsh-container/
+export OPENROUTER_API_KEY=...
+local/dsh-container/launch.sh out/run1 --task task.txt --time-limit 2      # --check, --detach, --mem-limit, --model: see its header
+```
+
+The task runs in PaperBench's layout: the task text at `/home/agent/full_instructions.txt`, an optional paper at `/home/paper`, the work in the git repository `/home/submission`, the records in `/home/logs`. `harness_automation.py`'s `PATCHES` lists each textual change made to the dsh build for benchmarking, with the defect it answers; every run records their state in `logs/dsh-patches.txt`.
