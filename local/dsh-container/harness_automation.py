@@ -13,8 +13,19 @@ loads dsh.env and hands over to `harness_automation.py run`, which:
 3. writes that home's cordis.patch.yml: the model and its route, and Agent
    Teams when the delegation asks for it;
 4. runs `dsh --profile headless` with one message that says where the task is,
-   under `timeout --signal=INT` at the time limit;
-5. writes /home/logs/dsh-run.json, which is what the solver polls for.
+   under `timeout --signal=INT` at what is left of the time limit;
+5. when dsh exits with neither completion nor timeout, resumes the Lead's
+   session (`--session-id`) after a pause, until the time limit, unless the
+   error is one a retry cannot fix (`PERMANENT_CODES`);
+6. writes /home/logs/dsh-run.json, which is what the solver polls for.
+
+Two layers keep an inference-service failure from ending the run. The provider
+route retries a failed model request for about 4.5 hours (`RETRY_POLICY`,
+unless the route spec sets its own `retryPolicy`); that covers outages without
+losing the teammates' work in progress. If dsh still exits, step 5 restarts it
+on the same Lead session: the Lead keeps its conversation and the repository,
+and is told that its teammates stopped. The time spent waiting counts against
+the time limit.
 
 Every file the run used is copied to /home/logs: full_instructions.txt,
 job.txt, cordis.patch.yml, dsh-revision and dsh-patches.txt.
@@ -57,6 +68,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -79,6 +91,31 @@ DELEGATIONS = ("none", "team-mode", "agent-team")
 # solver also enforces the limit from outside, with a margin, in case the
 # launcher itself is stuck.
 KILL_AFTER_SECS = 120
+
+# The provider route's retry policy when the route spec sets none. dsh's
+# default retries five times within about half a minute and does not retry
+# PI_AI_ERROR, the code an upstream failure relayed by OpenRouter gets
+# ("Upstream error from InferenceNet: ..."); a 13-minute outage on 2026-10-23
+# ended 14 runs that way. This one retries the transient codes 60 times,
+# backing off from 2 s to 5 min: about 4.5 hours.
+RETRY_POLICY = {
+    "mode": "normal",
+    "maxRetries": 60,
+    "retryableCodes": ["EMPTY_RESPONSE", "RATE_LIMIT", "SERVER", "TIMEOUT", "TRANSPORT", "PI_AI_ERROR"],
+    "backoff": {"initialDelayMs": 2000, "maxDelayMs": 300000},
+}
+# After an exit that is neither completion nor timeout, the pause before the
+# next attempt (the last value repeats) and the most attempts in one run. No
+# attempt starts with less than MIN_ATTEMPT_SECS of the time limit left.
+RESTART_DELAYS_SECS = (30, 60, 120, 300, 600)
+MAX_ATTEMPTS = 50
+MIN_ATTEMPT_SECS = 300
+# dsh error codes (the `dsh: CODE: message` line it prints last on stderr) that
+# a restart cannot fix: the key, the account, the configuration, or a request
+# the provider rejects as such.
+PERMANENT_CODES = frozenset({
+    "AUTH", "QUOTA", "MISSING_CREDENTIAL", "INVALID_CONFIG", "INVALID_REQUEST", "CONTEXT_WINDOW_EXCEEDED",
+})
 
 
 @dataclass(frozen=True)
@@ -222,6 +259,7 @@ def yaml_lines(value: object, indent: int) -> list[str]:
 
 def model_rows(cfg: Config) -> str:
     route: dict = {"apiKeyEnv": cfg.api_key_env, **(cfg.route_spec or {})}
+    route.setdefault("retryPolicy", RETRY_POLICY)
     if cfg.model_spec:
         route["models"] = [{"id": cfg.model, **cfg.model_spec}]
     return (
@@ -341,6 +379,45 @@ def submission_commits() -> int:
     return int(res.stdout.strip()) if res.returncode == 0 and res.stdout.strip().isdigit() else 0
 
 
+def lead_session_id() -> str | None:
+    """The newest session with delegationDepth 0 under LOGS_DIR/dsh-sessions: the Lead's."""
+    best: tuple[int, str] | None = None
+    for path in (LOGS_DIR / "dsh-sessions").rglob("session.v4.jsonl*"):
+        reader = ["zstd", "-dcq", str(path)] if path.suffix in (".zstd", ".zst") else ["cat", str(path)]
+        with subprocess.Popen(reader, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as proc:
+            first = proc.stdout.readline() if proc.stdout else b""
+            proc.kill()
+        try:
+            header = json.loads(first)
+        except json.JSONDecodeError:
+            continue
+        if header.get("type") == "session" and header.get("delegationDepth") == 0 and header.get("id"):
+            key = (int(header.get("createdAt") or 0), header["id"])
+            best = max(best, key) if best else key
+    return best[1] if best else None
+
+
+def resume_text(remaining_secs: int) -> str:
+    """The message a resumed Lead session gets."""
+    return (
+        "The harness process was restarted after an interruption (an inference-service failure or a "
+        "crash). Your conversation is intact, but every teammate you had has stopped, and work they "
+        "had not written to disk is lost; files and commits in /home/submission remain. Check the "
+        "repository and your task list, start teammates again for unfinished work if that helps, and "
+        f"continue the original task. About {remaining_secs // 60} minutes of the time limit remain; "
+        "keep committing your work."
+    )
+
+
+def last_error_code(stderr_path: Path, offset: int) -> str | None:
+    """The CODE in the last `dsh: CODE: ...` line dsh wrote to stderr after `offset`."""
+    with open(stderr_path, "rb") as f:
+        f.seek(offset)
+        text = f.read().decode("utf-8", errors="replace")
+    codes = re.findall(r"^dsh: ([A-Z][A-Z_]+):", text, flags=re.MULTILINE)
+    return codes[-1] if codes else None
+
+
 def run() -> int:
     try:
         cfg = load_config()
@@ -359,15 +436,53 @@ def run() -> int:
     job = job_text(cfg.delegation)
     (LOGS_DIR / "job.txt").write_text(job + "\n", encoding="utf-8")
 
+    stdout_path, stderr_path = LOGS_DIR / "dsh-stdout.log", LOGS_DIR / "dsh-stderr.log"
+    stdout_path.write_bytes(b"")
+    stderr_path.write_bytes(b"")
     start = time.time()
-    with open(LOGS_DIR / "dsh-stdout.log", "wb") as out, open(LOGS_DIR / "dsh-stderr.log", "wb") as err:
-        code = subprocess.run(
-            ["timeout", "--signal=INT", f"--kill-after={KILL_AFTER_SECS}", str(cfg.time_limit),
-             "dsh", "--profile", "headless", job],
-            cwd="/home", stdout=out, stderr=err, env=dsh_env(),
-        ).returncode
+    deadline = start + cfg.time_limit
+    attempts: list[dict] = []
+    status, code = "failed", 1
+    while True:
+        remaining = int(deadline - time.time())
+        session = lead_session_id() if attempts else None
+        args = ["--session-id", session, resume_text(remaining)] if session else [job]
+        offset = stderr_path.stat().st_size
+        with open(stdout_path, "ab") as out, open(stderr_path, "ab") as err:
+            note = f"\n=== harness_automation: attempt {len(attempts) + 1}, " + (
+                f"resuming {session}" if session else "new session") + f", {remaining}s left ===\n"
+            out.write(note.encode()); err.write(note.encode()); out.flush(); err.flush()
+            attempt_start = time.time()
+            code = subprocess.run(
+                ["timeout", "--signal=INT", f"--kill-after={KILL_AFTER_SECS}", str(remaining),
+                 "dsh", "--profile", "headless", *args],
+                cwd="/home", stdout=out, stderr=err, env=dsh_env(),
+            ).returncode
+        # 124 is timeout's own; 137 is its KILL after the grace period, but also
+        # what any SIGKILL of dsh (the kernel's OOM killer) leaves. Only the
+        # clock tells the time limit from a crash.
+        timed_out = code in (124, 137) and time.time() - attempt_start >= remaining - 5
+        error = None if code == 0 or timed_out else last_error_code(stderr_path, offset)
+        attempts.append({"exit_code": code, "elapsed_seconds": int(time.time() - attempt_start),
+                         "resumed_session": session, "error": error})
+        print(f"harness_automation: attempt {len(attempts)} exit={code} error={error}")
+        if code == 0:
+            status = "completed"
+            break
+        if timed_out:
+            status = "timeout"
+            break
+        if error in PERMANENT_CODES or len(attempts) >= MAX_ATTEMPTS:
+            status = "failed"
+            break
+        pause = RESTART_DELAYS_SECS[min(len(attempts), len(RESTART_DELAYS_SECS)) - 1]
+        if deadline - time.time() - pause < MIN_ATTEMPT_SECS:
+            # The time limit runs out before another attempt could do useful work.
+            status = "timeout"
+            break
+        time.sleep(pause)
+
     elapsed = int(time.time() - start)
-    status = "timeout" if code in (124, 137) else "completed" if code == 0 else "failed"
     record = {
         "status": status,
         "exit_code": code,
@@ -377,10 +492,12 @@ def run() -> int:
         "commits": submission_commits(),
         "model": cfg.model,
         "delegation": cfg.delegation,
+        "restarts": len(attempts) - 1,
+        "attempts": attempts,
     }
     write_run_json(record)
     print(
-        f"dsh finished: status={status} exit={code} elapsed={elapsed}s "
+        f"dsh finished: status={status} exit={code} elapsed={elapsed}s restarts={len(attempts) - 1} "
         f"reproduce_sh={str(record['reproduce_sh']).lower()} commits={record['commits']}"
     )
     return 0
