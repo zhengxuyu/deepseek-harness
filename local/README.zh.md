@@ -52,4 +52,6 @@ export OPENROUTER_API_KEY=...
 local/dsh-container/launch.sh out/run1 --task task.txt --time-limit 2      # --check, --detach, --mem-limit, --model: see its header
 ```
 
+从准备底座到看结果的完整步骤见 [`dsh-container/RECIPE.zh.md`](dsh-container/RECIPE.zh.md)。
+
 任务按 PaperBench 的目录约定运行：任务说明在 `/home/agent/full_instructions.txt`，可选的论文在 `/home/paper`，工作在 git 仓库 `/home/submission` 中进行，记录写到 `/home/logs`。`harness_automation.py` 的 `PATCHES` 列出为 benchmark 对 dsh 构建所做的每一处文本改动及其对应的缺陷；每次运行都会把它们的状态记录到 `logs/dsh-patches.txt`。
