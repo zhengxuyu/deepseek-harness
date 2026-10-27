@@ -109,6 +109,24 @@ docker exec dsh-run1 pkill -INT -f "dsh --profile"   # dsh 会先保存会话再
 docker rm dsh-run1                                    # 只有 --detach 的容器需要手动删
 ```
 
+## 跑 bench20-harbor 数据集里的 task
+
+`bench20.py` 从 [`Paper-Data/bench20-harbor`](https://huggingface.co/datasets/Paper-Data/bench20-harbor) 取 task，用上面的镜像和 `launch.sh` 跑 dsh。它只下载 task 的 `instruction.md`、`task.toml` 和 `environment/materials/`，下载后按 `MANIFEST.json` 逐个校验 SHA-256；`tests/` 里的隐藏目标论文和 rubric 一律不下载。
+
+```sh
+local/dsh-container/bench20.py list                                   # 9 个 task 及其时限、内存、CPU
+local/dsh-container/bench20.py run rtp-kc-001 --image $IMG            # 模型默认 deepseek/deepseek-v4.1-flash
+local/dsh-container/bench20.py run all --image $IMG --model z-ai/glm-5.3 -- --model-spec glm.json
+```
+
+- 时限和内存默认取 task.toml 的规定（9h–76h，8–64GB），可以用 `--time-limit`、`--mem-limit` 覆盖。
+- 默认后台运行（`launch.sh --detach`）；只跑一个 task 时可以加 `--foreground`。
+- 每个 task 一个输出目录，默认在 `~/data/bench20-runs/<task>-<模型>-<时间>/`，里面除了 launch.sh 的记录，还有 `task.md`（实际给 agent 的任务文本）和 `bench20.json`（数据集 commit、task 和设置）。
+- 任务文本里的路径改成了这个镜像的约定：`/workspace/materials` → `/home/paper`（材料，只读挂载），`/workspace/submission` → `/home/submission`。
+- 和 Harbor 的跑法不同：
+  - task 规定的 numpy、scipy 等依赖不会预先安装，底座里没有的，agent 要自己装。用 openclaw-task 的测试替身镜像跑时，numpy 就没有。
+  - 镜像能上网，而 task 原本不允许上网。任务文本里“没有一般的互联网访问”那句保留原样。
+
 ## 常见报错
 
 | 报错 | 处理 |
