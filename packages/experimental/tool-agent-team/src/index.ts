@@ -3,9 +3,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { TeamTaskId } from '@deepseek-ai/dsh-experimental-agent-team'
+import { TeamError, TeamTaskId } from '@deepseek-ai/dsh-experimental-agent-team'
 import type { TeamMemberView, TeamTaskView } from '@deepseek-ai/dsh-experimental-agent-team'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { defineTool, RUN_CODE_NAME } from '@deepseek-ai/dsh-tools'
 import type { InferValue, ValueSchemaSpec } from '@deepseek-ai/dsh-tools'
 import { FRONTIER_SCHEMA, frontier } from './frontier.ts'
 import type { FrontierBounds } from './frontier.ts'
@@ -25,7 +25,17 @@ export interface Config {
   readonly frontierHops?: number
   /** Rows kept per frontier list (ready, running, lost, upstream, downstream); a cut list sets `truncated`. */
   readonly frontierRows?: number
+  /**
+   * When set, the Team Lead is offered only these global tools besides the Team tools, so it
+   * plans and delegates while teammates do the work; teammates keep every tool. Names that are
+   * not global tools when the Lead's scope is installed (unregistered yet, scope-local, or the
+   * PTC transport) are ignored, so plugin load order matters. Unset offers every tool to everyone.
+   */
+  readonly leadTools?: string[]
 }
+
+/** Config with every default applied; `leadTools` stays optional because unset means no restriction. */
+type ResolvedConfig = Required<Omit<Config, 'leadTools'>> & Pick<Config, 'leadTools'>
 
 /** Loader schema for the opt-in Team tool plugin. */
 export const Config: z<Config> = z.object({
@@ -33,6 +43,8 @@ export const Config: z<Config> = z.object({
   forkProvider: z.string().default('fork'),
   frontierHops: z.natural().default(1),
   frontierRows: z.natural().min(1).default(20),
+  // Preserve omission: an explicit empty list offers the Lead no global tool at all.
+  leadTools: z.array(z.string()).default(undefined as unknown as string[]),
 })
 
 /** Model-facing collaboration guidance shared by Lead and teammates. */
@@ -42,7 +54,19 @@ The Team Lead and all teammates share the same working directory and filesystem.
 
 Prefer read/edit/write for file changes. If a file operation returns FS_STALE_VERSION, read the current file, rebase your intended change onto the new content, and retry. Bash, formatters, code generators, and scripts are not fully protected by the filesystem version guard; coordinate them explicitly and have the Lead review the final diff and run tests.
 
-Use the target returned by spawn_teammate or list_agents for send_message and interrupt_agent, or as owner when assigning or filtering shared tasks. send_message steers a running target at its nearest step boundary and starts or resumes an inactive target. inactive means no turn is executing; it does not describe task completion, success, failure, or waiting for other agents. provisioning means member creation is in progress; failed means member creation failed. lastStop is how a member's latest turn ended: completed, aborted, error, max-tokens (cut off at the output limit), or refusal; an inactive member whose lastStop is not completed did not finish that turn's work. A delivered peer item starts with its stable message id and sender name. A successful send is already durable even when its result says queued; do not resend it. Shared-task workflow is list, get, claim with the current revision, perform the work, then complete. Every task declares outputs, the files it must produce; complete is refused until every non-optional output exists on disk and passes its kind's check, so a task is done only when its artifacts are. Two live tasks cannot declare the same output path, and a subject a live task already carries is refused: depend on that task, edit it, or reopen it if it is lost, instead of creating a twin. A blocker entry may carry an instruction saying what the task takes from that blocker's artifacts. claim returns a brief composed from the recorded task, its inputs, and its outputs; a reassigned member receives the same brief by mail. Task readiness never starts an owner. A lost task's owner can no longer finish it: reopen it, then claim or reassign it. In-progress and completed tasks cannot be edited, rewired, or deleted. Before wait_agent, use list_agents and make sure another required member is running or provisioning; use send_message first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Its result lists the members and tasks that changed while it waited. team_task_note sends a note to a task instead of a member: it is recorded on the task, mailed to the task's current owner, and shown in the brief of whoever claims the task later; a note that names another live task's declared output path holds that task from completing until the Lead acknowledges the hold with team_task_update action acknowledge. Every task edit and every wait_agent result also carries frontier: the ready, running, and lost tasks, how many are blocked or completed, the edited task's upstream and downstream neighbours, and each member's status; read it instead of re-listing or remembering the board. The Lead must wait for required teammates before giving the final answer.`
+Use the target returned by spawn_teammate or list_agents for send_message and interrupt_agent, or as owner when assigning or filtering shared tasks. send_message steers a running target at its nearest step boundary and starts or resumes an inactive target. inactive means no turn is executing; it does not describe task completion, success, failure, or waiting for other agents. provisioning means member creation is in progress; failed means member creation failed. lastStop is how a member's latest turn ended: completed, aborted, error, max-tokens (cut off at the output limit), or refusal; an inactive member whose lastStop is not completed did not finish that turn's work. A delivered peer item starts with its stable message id and sender name. A successful send is already durable even when its result says queued; do not resend it. Shared-task workflow is list, get, team_task_update with action claim and the current revision, perform the work, then team_task_update with action complete; claim, complete, release, reopen, reassign, and the other task transitions are actions of team_task_update, not tools of their own. Every task declares outputs, the files it must produce; complete is refused until every non-optional output exists on disk and passes its kind's check, so a task is done only when its artifacts are. Two live tasks cannot declare the same output path, and a subject a live task already carries is refused: depend on that task, edit it, or reopen it if it is lost, instead of creating a twin. A blocker entry may carry an instruction saying what the task takes from that blocker's artifacts. claim returns a brief composed from the recorded task, its inputs, and its outputs; a reassigned member receives the same brief by mail. Task readiness never starts an owner. A lost task's owner can no longer finish it: reopen it, then claim or reassign it. In-progress and completed tasks cannot be edited, rewired, or deleted. Before wait_agent, use list_agents and make sure another required member is running or provisioning; use send_message first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Its result lists the members and tasks that changed while it waited. team_task_note sends a note to a task instead of a member: it is recorded on the task, mailed to the task's current owner, and shown in the brief of whoever claims the task later; a note that names another live task's declared output path holds that task from completing until the Lead acknowledges the hold with team_task_update action acknowledge. Every task edit and every wait_agent result also carries frontier: the ready, running, and lost tasks, how many are blocked or completed, the edited task's upstream and downstream neighbours, and each member's status; read it instead of re-listing or remembering the board. The Lead must wait for required teammates before giving the final answer.`
+
+/** Lead-only guidance when {@link Config.leadTools} narrows the Lead to `allowed` besides the Team tools. */
+function leadScope(allowed: readonly string[]): string {
+  const tools = allowed.length === 0 ? 'no tools besides the Team tools' : `only ${allowed.join(', ')} besides the Team tools`
+  return `As the Team Lead you plan and delegate: you have ${tools}. Give implementation, file changes, test runs, and the final review to teammates, and wait for the teammates whose work the answer needs.`
+}
+
+/** The assignment rule every member sees when agent-team's `assignment` is set. */
+const ASSIGNMENT_POLICY = {
+  push: `Shared tasks are assigned (push): the Lead assigns every shared task to a named member with team_task_update action reassign and an owner. Nobody claims under push, so in the shared-task workflow the Lead's reassign takes the place of claim: a member works the tasks it is assigned, whose briefs arrive by mail, and completes them.`,
+  pull: `Shared tasks are claimed (pull): the Lead creates shared tasks and never names an owner, and members claim ready tasks themselves with team_task_update action claim. All work goes on the board as tasks before a teammate is spawned: a spawn_teammate prompt says who the teammate is and what it is good at, never which task to do, and spawning is refused while the teammates without a task could claim every ready one. A member that completes a task claims another ready one from the frontier before ending its turn; an inactive member is mailed when ready tasks are left unclaimed.`,
+} as const
 
 const ACTIVE_WAIT_STATUSES: ReadonlySet<TeamMemberView['status']> = new Set(['running', 'provisioning'])
 const NO_ACTIVE_PEER_MESSAGE = 'No other Team member is running or provisioning. wait_agent cannot make progress or wake inactive teammates. Re-list with list_agents and team_task_list, then use send_message to wake each required inactive teammate before waiting again.'
@@ -364,7 +388,7 @@ function callingAgent(agent: Agent | undefined, toolName: string): Agent {
 }
 
 /** Register the complete Team tool set in one exact Agent scope. */
-function install(agent: Agent, ctx: Context, config: Required<Config>): () => void {
+function install(agent: Agent, ctx: Context, config: ResolvedConfig): () => void {
   const withFrontier = (caller: Agent, task: TeamTaskView): TeamTaskView & { frontier: ReturnType<typeof frontier> } => ({
     ...task,
     frontier: frontier(
@@ -383,6 +407,28 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
       order: scoped.systemPrompt.getSectionOrder('TEAM_POLICY'),
       text: POLICY,
     }))
+    const assignment = ctx.agentTeams.assignmentMode()
+    if (assignment !== undefined) {
+      register(scoped.systemPrompt.section({
+        name: 'team:assignment',
+        order: scoped.systemPrompt.getSectionOrder('TEAM_POLICY'),
+        text: ASSIGNMENT_POLICY[assignment],
+      }))
+    }
+    if (config.leadTools !== undefined && ctx.agentTeams.tryMembership(agent)?.role === 'lead') {
+      // Only a global tool can be restricted; the Lead keeps whatever was registered in its own scope.
+      const global = new Set(ctx.tools.schemas().map(tool => tool.name))
+      const visible = new Set(ctx.tools.schemas(agent).map(tool => tool.name))
+      const allowed = [...new Set(config.leadTools)]
+        .filter(name => name !== RUN_CODE_NAME && global.has(name) && visible.has(name))
+      register(scoped.tools.restrict({ allow: allowed }))
+      // Sits beside the Team policy, which it narrows for the Lead.
+      register(scoped.systemPrompt.section({
+        name: 'team:lead-scope',
+        order: scoped.systemPrompt.getSectionOrder('TEAM_POLICY'),
+        text: leadScope(allowed),
+      }))
+    }
 
     register(scoped.tools.register(defineTool({
       name: 'spawn_teammate',
@@ -579,7 +625,7 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
 
     register(scoped.tools.register(defineTool({
       name: 'team_task_update',
-      description: 'Compare-and-set a shared task action using the latest revision from team_task_get or team_task_list. The result carries the frontier after the edit.',
+      description: 'Compare-and-set a shared task action using the latest revision from team_task_get or team_task_list. claim, complete, release, reopen, reassign, and the other transitions are values of action here, not separate tools. The result carries the frontier after the edit.',
       parameters: {
         task_id: { type: 'string', required: true, description: 'Shared task id.' },
         expected_revision: { type: 'integer', required: true, description: 'Current task revision used as the CAS precondition.' },
@@ -612,6 +658,8 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
           ...args.write_scopes === undefined ? {} : { writeScopes: args.write_scopes },
           ...args.owner === undefined ? {} : { owner: args.owner },
           ...args.note === undefined ? {} : { note: args.note },
+        }).catch((error: unknown) => {
+          throw transitionHint(error)
         })
         return withFrontier(caller, task)
       },
@@ -640,13 +688,26 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
   }
 }
 
+/** Appended to an invalid-transition refusal, whose remedy names other transitions. */
+const TRANSITION_HINT = 'claim, complete, release, reopen, and reassign are team_task_update actions, not tools of their own'
+
+/**
+ * Say which tool carries the transitions an invalid-transition refusal names:
+ * models read "claim it first" as a `team_task_claim` tool that does not exist.
+ */
+function transitionHint(error: unknown): unknown {
+  if (!(error instanceof TeamError) || error.code !== 'TEAM_TASK_INVALID_TRANSITION') return error
+  return new TeamError(`${error.message} (${TRANSITION_HINT})`, error.code, { cause: error })
+}
+
 /** Install Team tools in every live or subsequently published Team member scope. */
 export function apply(ctx: Context, config: Config = {}): void {
-  const resolved: Required<Config> = {
+  const resolved: ResolvedConfig = {
     freshProvider: config.freshProvider ?? 'spawn',
     forkProvider: config.forkProvider ?? 'fork',
     frontierHops: config.frontierHops ?? 1,
     frontierRows: config.frontierRows ?? 20,
+    ...config.leadTools === undefined ? {} : { leadTools: config.leadTools },
   }
   const installed = new Map<Agent, () => void>()
   const maybeInstall = (agent: Agent): void => {

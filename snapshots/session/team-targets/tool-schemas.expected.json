@@ -533,7 +533,7 @@
     },
     {
       "name": "team_task_update",
-      "description": "Compare-and-set a shared task action using the latest revision from team_task_get or team_task_list. The result carries the frontier after the edit.",
+      "description": "Compare-and-set a shared task action using the latest revision from team_task_get or team_task_list. claim, complete, release, reopen, reassign, and the other transitions are values of action here, not separate tools. The result carries the frontier after the edit.",
       "parameters": {
         "type": "object",
         "properties": {

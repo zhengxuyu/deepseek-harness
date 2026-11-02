@@ -61,7 +61,7 @@ kind: "package-reference"
 <details>
 <summary>实现内部 — 点击展开</summary>
 
-`settle(root)` 循环执行：等待根 Agent idle，通过 `TeamService.outstandingTasks` 列出任务板上未结算的任务，没有时返回。否则等待下一次 Team 变化：有 owner 在运行时等到剩余的 deadline，没有时等 `stallMs`。停滞超时或 deadline 到期时，对每个剩余任务调用 `TeamService.markLost(root, id, 'run-ended')`，并为每个标记的任务返回一行；期间被其 owner 完成的任务既不会被标记也不会被报告。运行器把每一行打印为 `dsh: unsettled: <row>` 并以非零退出。lost 任务保留其 owner 记录；之后恢复的 Lead 通过 `reopen` 恢复它们。插件 dispose 会中止进行中的等待。
+`settle(root)` 循环执行：等待根 Agent idle，通过 `TeamService.outstandingTasks` 列出任务板上未结算的任务，没有时返回。否则等待下一次 Team 变化：有 owner 在运行时等到剩余的 deadline，没有时等 `stallMs`。停滞超时或 deadline 到期时，对每个剩余任务调用 `TeamService.markLost(root, id, 'run-ended')`，并为每个标记的任务返回一行；期间被其 owner 完成的任务既不会被标记也不会被报告。在 Team 的 pull 分配方式下，没人认领的 ready 任务也算未结算，只要有 teammate 在运行就视为仍在推进；运行放弃它时，报告为 `claimed by nobody`，任务保持 `pending`，因为它没有可以丢失它的 owner。运行器把每一行打印为 `dsh: unsettled: <row>` 并以非零退出。lost 任务保留其 owner 记录；之后恢复的 Lead 通过 `reopen` 恢复它们。插件 dispose 会中止进行中的等待。
 
 | 文件 | 角色 |
 |---|---|

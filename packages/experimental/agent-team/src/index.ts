@@ -15,6 +15,7 @@ import { errorMessage, TeamError } from './error.ts'
 import { TeamJournal } from './journal.ts'
 import { TeamRuntimeLifecycle } from './lifecycle.ts'
 import { TeamMailbox } from './mailbox.ts'
+import { TeamPullDispatcher } from './pull.ts'
 import { teamProjectionDefinition } from './projection.ts'
 import { TeamRoster } from './roster.ts'
 import type { TeamMembership } from './roster.ts'
@@ -33,6 +34,7 @@ import type {
   TeamTaskView,
   TeamView,
   TeamWaitResult,
+  TeamAssignment,
   UpdateTeamTaskRequest,
   NoteTeamTaskRequest,
   NoteTeamTaskResult,
@@ -54,6 +56,12 @@ const DEFAULT_MAX_TASKS = 256
 const DEFAULT_MAX_PENDING_MESSAGES = 64
 const DEFAULT_MAX_MESSAGE_BYTES = 65_536
 const DEFAULT_DISPOSAL_TIMEOUT_MS = 5_000
+
+/** Appended to every teammate's spawn prompt under pull assignment. */
+const PULL_SPAWN_NOTE = '\n\nAssignment is pull: your work comes from the shared board, not from this prompt. Claim a ready task there; when you complete it, claim another ready task before ending your turn.'
+
+/** Config with every default applied; `artifactRoot` and `assignment` stay optional because absence means off. */
+type ResolvedConfig = Required<Omit<Config, 'artifactRoot' | 'assignment'>> & Pick<Config, 'artifactRoot' | 'assignment'>
 
 /** One delegated run below a Lead, keyed by its lifecycle run id: a member's turn or a tracked plain run. */
 interface TrackedRun {
@@ -84,10 +92,13 @@ export class TeamService extends TypertRemoteService {
     disposalTimeoutMs: z.number().step(1).min(1).default(DEFAULT_DISPOSAL_TIMEOUT_MS),
     trackSubagentRuns: z.boolean().default(false),
     artifactRoot: z.string(),
+    assignment: z.union(['push', 'pull']),
   })
 
   /** Validated deployment limits used by every Team operation. */
-  private readonly config: Required<Omit<Config, 'artifactRoot'>> & Pick<Config, 'artifactRoot'>
+  private readonly config: ResolvedConfig
+  /** Offers ready work to idle teammates; present only under pull assignment. */
+  private readonly pull: TeamPullDispatcher | undefined
   /** Member turns and, with `trackSubagentRuns`, plain delegated runs still in flight. */
   private readonly runs = new Map<SubagentRunId, TrackedRun>()
 
@@ -114,11 +125,15 @@ export class TeamService extends TypertRemoteService {
       ),
       trackSubagentRuns: config.trackSubagentRuns ?? false,
       ...config.artifactRoot === undefined ? {} : { artifactRoot: config.artifactRoot },
+      ...config.assignment === undefined ? {} : { assignment: config.assignment },
     }
 
     this.activity = new TeamActivity()
     this.lifecycle = new TeamRuntimeLifecycle(this.config.disposalTimeoutMs)
-    this.journal = new TeamJournal(ctx, (root) => { this.activity.notify(TeamId(root.id)) })
+    this.journal = new TeamJournal(ctx, (root) => {
+      this.activity.notify(TeamId(root.id))
+      this.pull?.schedule(root)
+    })
     this.roster = new TeamRoster(ctx, this.journal, this.lifecycle, this.config.maxMembers)
     this.mailbox = new TeamMailbox(
       ctx,
@@ -131,7 +146,17 @@ export class TeamService extends TypertRemoteService {
     this.tasks = new TeamTaskBoard(this.journal, this.config.maxTasks, {
       fs: () => ctx.get('fs'),
       artifactRoot: this.config.artifactRoot,
+      assignment: this.config.assignment,
     })
+    this.pull = this.config.assignment === 'pull'
+      ? new TeamPullDispatcher({
+        roster: this.roster,
+        tasks: this.tasks,
+        mailbox: this.mailbox,
+        signal: this.lifecycle.signal,
+        warn: (message) => { ctx.logger.warn(message) },
+      })
+      : undefined
 
     ctx.on('session/event', (session, event) => {
       this.mailbox.observeSessionEvent(session, event)
@@ -140,7 +165,9 @@ export class TeamService extends TypertRemoteService {
     ctx.on('agent/created', ({ agent }) => { this.scheduleRecovery(agent) })
     ctx.on('agent/status', ({ agent }) => {
       const membership = this.roster.tryMembership(agent)
-      if (membership !== undefined) this.activity.notify(membership.id)
+      if (membership === undefined) return
+      this.activity.notify(membership.id)
+      this.pull?.schedule(membership.root)
     })
     const observeRunStart = (parent: Agent, info: SubagentRunInfo): void => { this.observeRunStart(parent, info) }
     // The delegating parent travels as the scoped dispatch carrier, not in the payload.
@@ -180,13 +207,44 @@ export class TeamService extends TypertRemoteService {
   }
 
   /**
-   * Create one named, continuable direct child of the Team Lead.
+   * Who decides which member works a shared task in this deployment.
+   * @returns `push`, `pull`, or undefined when both the Lead's assignment and members' claims are open.
+   */
+  assignmentMode(): TeamAssignment | undefined {
+    return this.config.assignment
+  }
+
+  /**
+   * Create one named, continuable direct child of the Team Lead. Under pull
+   * assignment the Lead may spawn only while more ready tasks wait unclaimed than
+   * teammates are free to claim them, and the prompt gains a note that the
+   * teammate's work comes from the board.
    * @param caller - exact live Lead Agent.
    * @param request - immutable name, description, prompt, context mode, provider, and cancellation.
    * @returns the active roster row.
    */
   async spawnTeammate(caller: Agent, request: SpawnTeammateRequest): Promise<SpawnTeammateResult> {
-    return await this.roster.spawn(caller, request)
+    const membership = this.roster.membership(caller)
+    if (this.config.assignment !== 'pull' || membership.role !== 'lead') return await this.roster.spawn(caller, request)
+    // Under pull the board is where work is handed out: a teammate is spawned to
+    // claim ready work no idle member can take, and its prompt says where it is.
+    const ready = this.tasks.readyUnclaimed(membership.root).length
+    const spare = this.spareTeammates(membership)
+    if (ready <= spare) {
+      throw new TeamError(
+        `assignment is pull: ${ready} ready task${ready === 1 ? '' : 's'} nobody has claimed and ${spare} teammate${spare === 1 ? '' : 's'} without a task; put the work on the board before spawning another teammate`,
+        'TEAM_ASSIGNMENT_PULL_NO_WORK',
+      )
+    }
+    return await this.roster.spawn(caller, { ...request, prompt: [...request.prompt, { type: 'text', text: PULL_SPAWN_NOTE }] })
+  }
+
+  /** Teammates that are not failed and own no in-progress task, so they can still claim ready work. */
+  private spareTeammates(membership: TeamMembership): number {
+    const busy = this.tasks.inProgressOwners(membership.root)
+    return this.roster.list(membership)
+      .filter(member => member.role === 'teammate' && member.status !== 'failed' && !busy.has(member.id))
+      .length
   }
 
   /**
@@ -278,9 +336,11 @@ export class TeamService extends TypertRemoteService {
   }
 
   /**
-   * List in-progress tasks on the caller's Team board with whether each owner is still running.
+   * List the work a one-shot host waits on before it exits: every in-progress task
+   * with whether its owner is still running, and under pull assignment also every
+   * ready task nobody has claimed (no `ownerName`), live while any teammate runs.
    * @param caller - exact live Team member reading the board.
-   * @returns outstanding rows in creation order; empty once every claimed task settled.
+   * @returns outstanding rows, in-progress tasks first, each group in creation order.
    */
   outstandingTasks(caller: Agent): OutstandingTeamTask[] {
     const { root } = this.roster.membership(caller)
@@ -288,8 +348,16 @@ export class TeamService extends TypertRemoteService {
     for (const run of this.runs.values()) {
       if (run.root === root && run.task !== undefined && !run.local) inFlight.add(run.childId)
     }
-    return this.tasks.outstanding(root, ownerId =>
+    const outstanding = this.tasks.outstanding(root, ownerId =>
       inFlight.has(ownerId) || this.ctx.agents.get(ownerId)?.status === 'running')
+    if (this.config.assignment !== 'pull') return outstanding
+    // A ready task nobody has claimed is still work the run owes: an idle teammate
+    // was or will be offered it, and the run must not end between the offer and
+    // the claim. It can progress while any teammate is running.
+    const members = this.roster.list(this.roster.membership(root))
+    const anyRunning = members.some(member => member.role === 'teammate' && (member.status === 'running' || member.status === 'provisioning'))
+    const unclaimed = this.tasks.readyUnclaimed(root).map(task => ({ id: task.id, subject: task.subject, live: anyRunning }))
+    return [...outstanding, ...unclaimed]
   }
 
   /**

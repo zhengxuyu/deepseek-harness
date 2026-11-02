@@ -14,6 +14,7 @@ import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SubagentService from '@deepseek-ai/dsh-subagent'
 import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import TeamService, { TeamError, TeamTaskId } from '@deepseek-ai/dsh-experimental-agent-team'
+import type { Config as TeamConfig } from '@deepseek-ai/dsh-experimental-agent-team'
 import { MockAdapter, textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import { TestSessionQuery } from '../../agent-team/tests/test-session-query.ts'
 import * as Settlement from '../src/index.ts'
@@ -30,6 +31,7 @@ afterEach(() => {
 async function setup(
   script: ConstructorParameters<typeof MockAdapter>[0],
   config: Partial<Settlement.Config> = {},
+  teamConfig: TeamConfig = {},
 ) {
   const ctx = new Context()
   await mountAgentLoopTestDependencies(ctx)
@@ -40,7 +42,7 @@ async function setup(
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(SubagentService)
   await ctx.plugin(SubagentSpawn, { providerName: 'spawn' })
-  await ctx.plugin(TeamService, { trackSubagentRuns: true })
+  await ctx.plugin(TeamService, { trackSubagentRuns: true, ...teamConfig })
   const fiber = await ctx.plugin(Settlement, { deadlineMs: 3_600_000, stallMs: 10_000, ...config })
   ctx.llm.registerAdapter(['mock'], new MockAdapter(script))
   const lead = await ctx.agentLoop.create(SessionId('lead'), { provider: 'mock', model: 'mock' })
@@ -122,9 +124,22 @@ describe('agent-team-settlement', () => {
       expect(ctx.agentTeams.getTask(lead, task.id).status).toBe('lost')
     })
     await expect(settled).resolves.toEqual({
-      unsettled: [`${task.id} "held by lead" owned by lead: its owner was not running and nothing changed for 10000 ms`],
+      unsettled: [`${task.id} "held by lead" owned by lead: nothing was running and nothing changed for 10000 ms`],
     })
     expect(ctx.agentTeams.getTask(lead, task.id)).toMatchObject({ lostCause: 'run-ended', ownerName: 'lead' })
+  })
+
+  it('reports a ready task nobody claimed under pull assignment without marking it lost', async () => {
+    const { ctx, lead, settle } = await setup([], {}, { assignment: 'pull' })
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'unclaimed', description: 'nobody took it' })
+    expect(ctx.agentTeams.outstandingTasks(lead)).toEqual([{ id: task.id, subject: 'unclaimed', live: false }])
+    vi.useFakeTimers()
+    const settled = settle(lead)
+    await vi.advanceTimersByTimeAsync(10_000)
+    await expect(settled).resolves.toEqual({
+      unsettled: [`${task.id} "unclaimed" claimed by nobody: nothing was running and nothing changed for 10000 ms`],
+    })
+    expect(ctx.agentTeams.getTask(lead, task.id).status).toBe('pending')
   })
 
   it('keeps waiting on a running owner until the deadline, then marks its task lost', async () => {

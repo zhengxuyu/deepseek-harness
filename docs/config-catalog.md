@@ -758,7 +758,24 @@ export interface Config {
    * means outputs are hashed but not retained.
    */
   readonly artifactRoot?: string
+  /**
+   * Who decides which member works a shared task. Absent leaves both ways open:
+   * the Lead may `reassign` a task to a member and any member may `claim` one.
+   * `push`: only the Lead assigns, with `reassign` and an owner; `claim` is
+   * refused. `pull`: members `claim` ready tasks themselves and `reassign` with
+   * an owner is refused (unassigning is not). Under pull the Lead can spawn a
+   * teammate only while more ready tasks wait unclaimed than teammates are free
+   * to claim them, and the spawn prompt says the work comes from the board;
+   * inactive teammates are mailed about ready, unclaimed tasks (each task once
+   * per teammate while it stays ready at one revision, at most as many
+   * teammates as there are such tasks); and those tasks count as outstanding
+   * for headless settlement, so a run does not end between the offer and the claim.
+   */
+  readonly assignment?: TeamAssignment
 }
+
+/** Who decides which member works a shared task; see {@link Config.assignment}. */
+export type TeamAssignment = 'push' | 'pull'
 ```
 
 Source: [`packages/experimental/agent-team/src/types.ts:274`](../packages/experimental/agent-team/src/types.ts)
@@ -1121,6 +1138,13 @@ export interface Config {
   readonly frontierHops?: number
   /** Rows kept per frontier list (ready, running, lost, upstream, downstream); a cut list sets `truncated`. */
   readonly frontierRows?: number
+  /**
+   * When set, the Team Lead is offered only these global tools besides the Team tools, so it
+   * plans and delegates while teammates do the work; teammates keep every tool. Names that are
+   * not global tools when the Lead's scope is installed (unregistered yet, scope-local, or the
+   * PTC transport) are ignored, so plugin load order matters. Unset offers every tool to everyone.
+   */
+  readonly leadTools?: string[]
 }
 ```
 

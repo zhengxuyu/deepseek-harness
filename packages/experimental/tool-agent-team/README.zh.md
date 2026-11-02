@@ -50,6 +50,8 @@ kind: "package-reference"
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-experimental-tool-agent-team)是每个受支持字段及其 JSDoc 的穷尽式真源。
 
+`leadTools` 默认不设置；设置后，Team Lead 只拿到列出的全局工具和 Team 工具，由 Lead 规划、查看和派活，运行命令与修改文件交给 teammate；teammate 保留全部工具，Lead 的提示里多一段说明。例如 `leadTools: [read, glob, grep, todo_write]` 让 Lead 能读文件，但不能用 `bash`、`edit`、`write`。安装 Lead 作用域时不是全局工具的名字（尚未注册、只注册在某个 agent 自己的作用域里，或 PTC 的 `run_code` 传输）会被忽略，所以工具插件要先于本插件挂载；Lead 的那段提示会列出它实际拥有的工具。
+
 试试这样要求 Lead 模型：「创建一个名为 reviewer 的 teammate 检查 diff，再把变更摘要发给 reviewer」。模型会调用创建工具，然后调用消息工具。
 
 ### 模型能做什么

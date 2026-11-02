@@ -694,6 +694,15 @@ describe('dsh-tool-team', () => {
     })
     expect(stale.isError).toBe(true)
     expect(text(stale)).toContain('stale team task')
+    expect(text(stale)).not.toContain('team_task_update actions')
+    // An invalid-transition refusal says the transitions it names are team_task_update actions, not tools of their own.
+    const frozen = await execute(ctx, lead, 'team_task_update', {
+      task_id: task.id,
+      expected_revision: task.revision + 1,
+      action: 'delete',
+    })
+    expect(frozen.isError).toBe(true)
+    expect(text(frozen)).toContain('are team_task_update actions, not tools of their own')
 
     const wait = execute(ctx, lead, 'wait_agent', { timeout_ms: 10_000 })
     const completedCall = new Promise<Awaited<ReturnType<typeof execute>>>((resolve, reject) => {
@@ -915,6 +924,46 @@ describe('dsh-tool-team', () => {
     expect('default' in toolTeam).toBe(false)
     expect(toolTeam.name).toBe('tool-agent-team')
     expect(toolTeam.inject).toEqual(['agents', 'agentTeams', 'tools', 'systemPrompt'])
+  })
+
+  it('offers the Lead only the configured tools while teammates keep every tool', async () => {
+    const { ctx, lead, fiber } = await setup(['hang'])
+    await fiber.dispose()
+    for (const name of ['bash', 'read']) {
+      ctx.tools.register(defineContentToolFixture({
+        name,
+        description: `${name} fixture`,
+        parameters: {},
+        async execute() { return [{ type: 'text', text: name }] },
+      }))
+    }
+    // An unknown name and the PTC transport are ignored rather than refused.
+    await ctx.plugin(toolTeam, { leadTools: ['read', 'not-installed', 'run_code'] })
+    const leadAssembly = await assembly(ctx, lead)
+    const leadNames = leadAssembly.tools.map(schema => schema.name)
+    expect(leadNames).toContain('read')
+    expect(leadNames).not.toContain('bash')
+    expect(leadNames.filter(name => TOOL_NAMES.includes(name)).sort()).toEqual(TOOL_NAMES)
+    expect(renderPrompt(leadAssembly)).toContain('you have only read besides the Team tools')
+    expect((await execute(ctx, lead, 'bash', {})).isError).toBe(true)
+
+    const spawned = await execute(ctx, lead, 'spawn_teammate', {
+      name: 'worker', description: 'does the work', prompt: 'stay available',
+    })
+    expect(spawned.isError, text(spawned)).toBe(false)
+    const child = await waitRunning(ctx, spawnedChildId(ctx, lead, spawned))
+    const childAssembly = await assembly(ctx, child)
+    expect(childAssembly.tools.map(schema => schema.name)).toEqual(expect.arrayContaining(['bash', 'read']))
+    expect(renderPrompt(childAssembly)).not.toContain('besides the Team tools')
+  })
+
+  it('tells every member the assignment rule agent-team enforces, and nothing when it is unset', async () => {
+    const unset = await setup(['hang'])
+    expect(renderPrompt(await assembly(unset.ctx, unset.lead))).not.toContain('Shared tasks are')
+    for (const [mode, rule] of [['push', 'Shared tasks are assigned (push)'], ['pull', 'Shared tasks are claimed (pull)']] as const) {
+      const { ctx, lead } = await setup(['hang'], false, { assignment: mode })
+      expect(renderPrompt(await assembly(ctx, lead))).toContain(rule)
+    }
   })
 
   it('uses configured fresh and fork provider names', async () => {

@@ -323,8 +323,14 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'Lead and teammate rows in creation order.',
       },
       {
+        signature: 'assignmentMode(): TeamAssignment | undefined',
+        description: 'Who decides which member works a shared task in this deployment.',
+        parameters: [],
+        returns: '`push`, `pull`, or undefined when both the Lead\'s assignment and members\' claims are open.',
+      },
+      {
         signature: 'async spawnTeammate(caller: Agent, request: SpawnTeammateRequest): Promise<SpawnTeammateResult>',
-        description: 'Create one named, continuable direct child of the Team Lead.',
+        description: 'Create one named, continuable direct child of the Team Lead. Under pull assignment the Lead may spawn only while more ready tasks wait unclaimed than teammates are free to claim them, and the prompt gains a note that the teammate\'s work comes from the board.',
         parameters: [{ name: 'caller', description: 'exact live Lead Agent.' }, { name: 'request', description: 'immutable name, description, prompt, context mode, provider, and cancellation.' }],
         returns: 'the active roster row.',
       },
@@ -366,9 +372,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'outstandingTasks(caller: Agent): OutstandingTeamTask[]',
-        description: 'List in-progress tasks on the caller\'s Team board with whether each owner is still running.',
+        description: 'List the work a one-shot host waits on before it exits: every in-progress task with whether its owner is still running, and under pull assignment also every ready task nobody has claimed (no `ownerName`), live while any teammate runs.',
         parameters: [{ name: 'caller', description: 'exact live Team member reading the board.' }],
-        returns: 'outstanding rows in creation order; empty once every claimed task settled.',
+        returns: 'outstanding rows, in-progress tasks first, each group in creation order.',
       },
       {
         signature: 'async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause, ownerStop?: SubagentStopReason): Promise<TeamTaskView>',
@@ -5683,7 +5689,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OutstandingTeamTask',
-    declaration: 'export interface OutstandingTeamTask {\n    readonly id: TeamTaskId;\n    readonly subject: string;\n    readonly ownerName: string;\n    readonly live: boolean;\n}',
+    declaration: 'export interface OutstandingTeamTask {\n    readonly id: TeamTaskId;\n    readonly subject: string;\n    readonly ownerName?: string;\n    readonly live: boolean;\n}',
   },
   {
     name: 'PackageResult',
@@ -7120,6 +7126,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'TaskNote',
     declaration: 'export interface TaskNote {\n    readonly id: string;\n    readonly from: string;\n    readonly text: string;\n}',
+  },
+  {
+    name: 'TeamAssignment',
+    declaration: 'export type TeamAssignment = \'push\' | \'pull\';',
   },
   {
     name: 'TeamId',

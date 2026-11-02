@@ -126,7 +126,16 @@ membership(agent: Agent): TeamMembership
 listMembers(agent: Agent): TeamMemberView[]
 
 /**
- * Create one named, continuable direct child of the Team Lead.
+ * Who decides which member works a shared task in this deployment.
+ * @returns `push`, `pull`, or undefined when both the Lead's assignment and members' claims are open.
+ */
+assignmentMode(): TeamAssignment | undefined
+
+/**
+ * Create one named, continuable direct child of the Team Lead. Under pull
+ * assignment the Lead may spawn only while more ready tasks wait unclaimed than
+ * teammates are free to claim them, and the prompt gains a note that the
+ * teammate's work comes from the board.
  * @param caller - exact live Lead Agent.
  * @param request - immutable name, description, prompt, context mode, provider, and cancellation.
  * @returns the active roster row.
@@ -182,9 +191,11 @@ async updateTask(caller: Agent, request: UpdateTeamTaskRequest): Promise<TeamTas
 async noteTask(caller: Agent, request: NoteTeamTaskRequest): Promise<NoteTeamTaskResult>
 
 /**
- * List in-progress tasks on the caller's Team board with whether each owner is still running.
+ * List the work a one-shot host waits on before it exits: every in-progress task
+ * with whether its owner is still running, and under pull assignment also every
+ * ready task nobody has claimed (no `ownerName`), live while any teammate runs.
  * @param caller - exact live Team member reading the board.
- * @returns outstanding rows in creation order; empty once every claimed task settled.
+ * @returns outstanding rows, in-progress tasks first, each group in creation order.
  */
 outstandingTasks(caller: Agent): OutstandingTeamTask[]
 

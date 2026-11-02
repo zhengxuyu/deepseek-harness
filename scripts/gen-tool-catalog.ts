@@ -602,6 +602,8 @@ const TOOL_PACKAGES: ToolPackage[] = [
       ctx.provide('agentTeams', {
         tryMembership: (candidate: Agent) => candidate === agent ? membership : undefined,
         membership: () => membership,
+        // The catalog documents the default deployment: no assignment rule.
+        assignmentMode: () => undefined,
       } as unknown as TeamService)
       await ctx.plugin(Object.assign(async (inner: Context) => {
         agent = {

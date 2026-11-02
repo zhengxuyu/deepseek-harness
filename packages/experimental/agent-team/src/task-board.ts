@@ -22,6 +22,7 @@ import type {
   CreateTeamTaskRequest,
   OutstandingTeamTask,
   TaskArtifact,
+  TeamAssignment,
   TeamTaskLostCause,
   TeamTaskSnapshot,
   TeamTaskView,
@@ -57,6 +58,22 @@ function live(task: TeamTaskSnapshot): boolean {
   return task.status === 'pending' || task.status === 'in_progress' || task.status === 'lost'
 }
 
+/** Whether a reassign names an owner; an omitted or blank owner unassigns the task. */
+function hasOwner(owner: string | undefined): owner is string {
+  return owner !== undefined && owner.trim().length > 0
+}
+
+/** The Team root's working directory, which workspace-relative paths resolve against. */
+function workspaceDir(root: Agent): string | undefined {
+  return root.session.header.cwd
+}
+
+/** What a caller must do before an inactive task can complete. */
+function completeRemedy(task: TeamTaskSnapshot): string {
+  if (task.status !== 'pending') return 'reopen it, then claim or reassign it'
+  return task.ownerId === undefined ? 'claim or reassign it first' : 'its owner must start it first'
+}
+
 /** The task recorded under `id`, or the not-found refusal. */
 function taskOn(state: TeamState, id: TeamTaskId): TeamTaskSnapshot {
   const task = state.tasks.find(candidate => candidate.id === id)
@@ -75,6 +92,15 @@ export interface TeamTaskBoardHost {
   readonly fs: () => FileSystem | undefined
   /** Where completed outputs are retained, or undefined for hashing only. */
   readonly artifactRoot: string | undefined
+  /** Who decides which member works a task: `push` refuses `claim`, `pull` refuses `reassign` to an owner. */
+  readonly assignment: TeamAssignment | undefined
+}
+
+/** A pending task with every blocker completed and no owner. */
+export interface ReadyTask {
+  readonly id: TeamTaskId
+  readonly subject: string
+  readonly revision: number
 }
 
 /** Owns Team task limits, authorization, transitions, and derived views. */
@@ -99,12 +125,13 @@ export class TeamTaskBoard {
     return this.record(membership.root, request, (state) => {
       this.assertSubjectFree(state, request.subject)
       const blockedBy = this.dependencies(request.blockedBy ?? [], state)
-      const outputs = this.outputs(request.outputs ?? [])
+      const cwd = workspaceDir(membership.root)
+      const outputs = this.outputs(request.outputs ?? [], cwd)
       return {
         status: 'pending',
         blockedBy,
         ...this.edgeInstructions(request.edgeInstructions, blockedBy),
-        writeScopes: this.writeScopes(request.writeScopes ?? []),
+        writeScopes: this.writeScopes(request.writeScopes ?? [], cwd),
         ...outputs.length === 0 ? {} : { outputs },
       }
     })
@@ -192,6 +219,31 @@ export class TeamTaskBoard {
   }
 
   /**
+   * List pending tasks with every blocker completed and no owner, in creation order.
+   * @param root - exact live Team Lead whose board is read.
+   * @returns id, subject, and revision of each such task.
+   */
+  readyUnclaimed(root: Agent): ReadyTask[] {
+    const state = this.journal.state(root)
+    return state.tasks
+      .filter(task => task.status === 'pending' && task.ownerId === undefined && this.taskReady(state, task))
+      .map(task => ({ id: task.id, subject: task.subject, revision: task.revision }))
+  }
+
+  /**
+   * The owners of every in-progress task on one board.
+   * @param root - exact live Team Lead whose board is read.
+   * @returns the owning member or run Session ids.
+   */
+  inProgressOwners(root: Agent): Set<SessionId> {
+    const owners = new Set<SessionId>()
+    for (const task of this.journal.state(root).tasks) {
+      if (task.status === 'in_progress' && task.ownerId !== undefined) owners.add(task.ownerId)
+    }
+    return owners
+  }
+
+  /**
    * Return one task, including a deleted tombstone.
    * @param membership - exact caller membership resolved by the Team roster.
    * @param id - Team-local task identity.
@@ -249,11 +301,28 @@ export class TeamTaskBoard {
       let next: TeamTaskSnapshot
       switch (request.action) {
         case 'claim':
-          if (current.ownerId !== undefined && current.ownerId !== caller.id) {
-            throw new TeamError(`team task "${current.id}" is owned by another member`, 'TEAM_TASK_ALREADY_CLAIMED')
+          if (this.host.assignment === 'push') {
+            throw new TeamError('assignment is push: the Lead assigns shared tasks to members; nobody claims', 'TEAM_ASSIGNMENT_PUSH')
           }
-          if (current.status !== 'pending' || !this.taskReady(state, current)) {
-            throw new TeamError(`team task "${current.id}" is not ready to claim`, 'TEAM_TASK_BLOCKED')
+          if (current.ownerId !== undefined && current.ownerId !== caller.id) {
+            throw new TeamError(
+              `team task "${current.id}" is owned by "${this.ownerName(root, state, current.ownerId)}" (status ${current.status})`,
+              'TEAM_TASK_ALREADY_CLAIMED',
+            )
+          }
+          // Claiming a task the caller already works on changes nothing: answer with the task and its brief.
+          if (current.status === 'in_progress') return this.briefedView(root, state, current)
+          if (current.status !== 'pending') {
+            throw new TeamError(
+              `team task "${current.id}" is ${current.status} (revision ${current.revision}); reopen it before claiming`,
+              'TEAM_TASK_INVALID_TRANSITION',
+            )
+          }
+          if (!this.taskReady(state, current)) {
+            throw new TeamError(
+              `team task "${current.id}" is blocked by ${this.unfinishedBlockers(state, current)}`,
+              'TEAM_TASK_BLOCKED',
+            )
           }
           next = { ...current, status: 'in_progress', ownerId: caller.id }
           break
@@ -271,14 +340,14 @@ export class TeamTaskBoard {
           }
           if (request.subject !== undefined) this.assertSubjectFree(state, request.subject, current.id)
           const { outputs: _outputs, ...withoutOutputs } = current
-          const outputs = request.outputs === undefined ? current.outputs : this.outputs(request.outputs)
+          const outputs = request.outputs === undefined ? current.outputs : this.outputs(request.outputs, workspaceDir(root))
           next = {
             ...withoutOutputs,
             ...request.subject === undefined ? {} : { subject: requiredText(request.subject, 'subject', 200) },
             ...request.description === undefined
               ? {}
               : { description: requiredText(request.description, 'description', 16_384) },
-            ...request.writeScopes === undefined ? {} : { writeScopes: this.writeScopes(request.writeScopes) },
+            ...request.writeScopes === undefined ? {} : { writeScopes: this.writeScopes(request.writeScopes, workspaceDir(root)) },
             ...outputs === undefined || outputs.length === 0 ? {} : { outputs },
           }
           break
@@ -306,7 +375,14 @@ export class TeamTaskBoard {
         }
         case 'complete': {
           authorizeOwner()
-          if (current.status !== 'in_progress') throw new TeamError('only an in-progress task can complete', 'TEAM_TASK_INVALID_TRANSITION')
+          // Completing a completed task changes nothing: answer with the recorded task and its artifacts.
+          if (current.status === 'completed') return this.taskView(root, state, current)
+          if (current.status !== 'in_progress') {
+            throw new TeamError(
+              `only an in-progress task can complete; team task "${current.id}" is ${current.status} (revision ${current.revision}): ${completeRemedy(current)}`,
+              'TEAM_TASK_INVALID_TRANSITION',
+            )
+          }
           if (current.holds !== undefined && current.holds.length > 0) {
             const held = current.holds.map(hold => `${hold.note} on ${hold.task} from ${hold.from}`).join(', ')
             throw new TeamError(
@@ -327,7 +403,7 @@ export class TeamTaskBoard {
           break
         case 'reassign': {
           if (!lead) throw new TeamError('only the Team Lead can reassign tasks', 'TEAM_LEAD_REQUIRED')
-          if (request.owner === undefined || request.owner.trim().length === 0) {
+          if (!hasOwner(request.owner)) {
             if (current.status !== 'pending' && current.status !== 'in_progress') {
               throw new TeamError(
                 'only a pending or in-progress task can be unassigned',
@@ -336,6 +412,12 @@ export class TeamTaskBoard {
             }
             next = this.withoutOwner({ ...current, status: 'pending' })
             break
+          }
+          if (this.host.assignment === 'pull') {
+            throw new TeamError(
+              'assignment is pull: members claim ready tasks themselves; the Lead may unassign a task but names no owner',
+              'TEAM_ASSIGNMENT_PULL',
+            )
           }
           if (current.status !== 'pending') {
             throw new TeamError(
@@ -373,7 +455,7 @@ export class TeamTaskBoard {
       const view = this.taskView(root, state, task)
       // Starting work is where the owner reads what it is working to.
       const starts = request.action === 'claim' || (request.action === 'reassign' && task.ownerId !== undefined)
-      return starts ? { ...view, brief: taskBrief(state, task) } : view
+      return starts ? this.briefedView(root, state, task) : view
     })
   }
 
@@ -387,7 +469,7 @@ export class TeamTaskBoard {
     return await checkOutputs({
       fs,
       task,
-      cwd: root.session.header.cwd,
+      cwd: workspaceDir(root),
       teamId: TeamId(root.id),
       completed: state.tasks.filter(candidate => candidate.status === 'completed' && candidate.id !== task.id),
       artifactRoot: this.host.artifactRoot,
@@ -492,11 +574,11 @@ export class TeamTaskBoard {
   }
 
   /** Normalize and validate declared outputs: workspace-relative paths, unique within the task, schemas the harness can enforce. */
-  private outputs(values: readonly ArtifactContract[]): ArtifactContract[] {
+  private outputs(values: readonly ArtifactContract[], cwd: string | undefined): ArtifactContract[] {
     const seen = new Set<string>()
     const result: ArtifactContract[] = []
     for (const contract of values) {
-      const path = writeScope(contract.path)
+      const path = writeScope(contract.path, cwd)
       if (seen.has(path)) throw new TeamError(`duplicate output ${JSON.stringify(path)}`, 'TEAM_INVALID_ARGUMENT')
       seen.add(path)
       if (contract.schema !== undefined) {
@@ -578,8 +660,8 @@ export class TeamTaskBoard {
   }
 
   /** Normalize and de-duplicate task write scopes. */
-  private writeScopes(values: readonly string[]): string[] {
-    return [...new Set(values.map(writeScope))]
+  private writeScopes(values: readonly string[], cwd: string | undefined): string[] {
+    return [...new Set(values.map(value => writeScope(value, cwd)))]
   }
 
   /** Map shared task-graph validation onto stable command error codes. */
@@ -593,6 +675,15 @@ export class TeamTaskBoard {
     }
   }
 
+  /** Name each blocker that has not completed, with its status, for a refusal message. */
+  private unfinishedBlockers(state: TeamState, task: TeamTaskSnapshot): string {
+    return task.blockedBy
+      .map(id => [id, state.tasks.find(candidate => candidate.id === id)?.status] as const)
+      .filter(([, status]) => status !== 'completed')
+      .map(([id, status]) => `"${id}" (${status ?? 'missing'})`)
+      .join(', ')
+  }
+
   /** Whether all current blockers completed. */
   private taskReady(state: TeamState, task: TeamTaskSnapshot): boolean {
     return task.blockedBy.every(id => state.tasks.find(candidate => candidate.id === id)?.status === 'completed')
@@ -602,6 +693,11 @@ export class TeamTaskBoard {
   private withoutOwner(task: TeamTaskSnapshot): TeamTaskSnapshot {
     const { ownerId: _ownerId, lostCause: _lostCause, ownerStop: _ownerStop, artifacts: _artifacts, ...without } = task
     return without
+  }
+
+  /** A task view with the brief its owner works to, returned where work starts. */
+  private briefedView(root: Agent, state: TeamState, task: TeamTaskSnapshot): TeamTaskView {
+    return { ...this.taskView(root, state, task), brief: taskBrief(state, task) }
   }
 
   /** Model-facing owner name: the Lead, a roster name, or the child Session id of a tracked run. */
