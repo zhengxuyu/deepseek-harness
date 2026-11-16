@@ -1,5 +1,5 @@
 ---
-description: "九个让模型创建、发消息与协调 teammate 的工具，供挂载实验性 Team 插件的组合使用。"
+description: "十个让模型创建、发消息与协调 teammate 的工具，供挂载实验性 Team 插件的组合使用。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-本包让模型创建具名 teammate、向它们发送消息、查看可用状态、等待进展、中断卡住的工作，并通过共享任务板协调。每个团队成员都会获得相同的九个工具，以及在共享工作区协调的指引。当模型只应在你明确要求后运行团队时，选择本包。它会取代同名的旧版 subagent 控件，因此同时需要两者的组合必须禁用旧定义。本包以实验性名称公开发布，但不提供稳定性保证。
+本包让模型创建具名 teammate、向它们发送消息、查看可用状态、等待进展、中断卡住的工作，并通过共享任务板协调。每个团队成员都会获得相同的十个工具，以及在共享工作区协调的指引。当模型只应在你明确要求后运行团队时，选择本包。它会取代同名的旧版 subagent 控件，因此同时需要两者的组合必须禁用旧定义。本包以实验性名称公开发布，但不提供稳定性保证。
 
 ## 目录
 
@@ -25,7 +25,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-当模型应该通过工具运行一支团队时，在 `@deepseek-ai/dsh-experimental-agent-team` 之上挂载本包。挂载后，每个团队成员——Lead 与每个 teammate——都会获得相同的九个工具，以及相同的协作策略。`spawn_teammate` 在初始任务前加上 teammate 的角色和名字。
+当模型应该通过工具运行一支团队时，在 `@deepseek-ai/dsh-experimental-agent-team` 之上挂载本包。挂载后，每个团队成员——Lead 与每个 teammate——都会获得相同的十个工具，以及相同的协作策略。`spawn_teammate` 在初始任务前加上 teammate 的角色和名字。
 
 ### 何时选择
 
@@ -50,11 +50,13 @@ kind: "package-reference"
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-experimental-tool-agent-team)是每个受支持字段及其 JSDoc 的穷尽式真源。
 
+`leadTools` 默认不设置；设置后，Team Lead 只拿到列出的全局工具和 Team 工具，由 Lead 规划、查看和派活，运行命令与修改文件交给 teammate；teammate 保留全部工具，Lead 的提示里多一段说明。例如 `leadTools: [read, glob, grep, todo_write]` 让 Lead 能读文件，但不能用 `bash`、`edit`、`write`。安装 Lead 作用域时不是全局工具的名字（尚未注册、只注册在某个 agent 自己的作用域里，或 PTC 的 `run_code` 传输）会被忽略，所以工具插件要先于本插件挂载；Lead 的那段提示会列出它实际拥有的工具。
+
 试试这样要求 Lead 模型：「创建一个名为 reviewer 的 teammate 检查 diff，再把变更摘要发给 reviewer」。模型会调用创建工具，然后调用消息工具。
 
 ### 模型能做什么
 
-九个工具分为四类能力：
+十个工具分为四类能力：
 
 - **创建 teammate**——`spawn_teammate` 接收名字、描述与初始任务；只有 Lead 可以调用它。
 - **发送消息**——`send_message` 在最近的步骤边界对运行中的成员进行 steering（中途引导）、启动或恢复非活动成员。
@@ -91,12 +93,12 @@ kind: "package-reference"
 
 | 文件 | 职责 |
 |---|---|
-| [`src/index.ts`](src/index.ts) | 插件入口：配置、固定策略文本与九个 scoped 工具注册 |
+| [`src/index.ts`](src/index.ts) | 插件入口：配置、固定策略文本与十个 scoped 工具注册 |
 | — | 不发布运行时不变式伴生入口；Team 服务拥有持久化与授权关系。 |
 
 ### 策略与工具
 
-member scope 上的一个 `team:policy` 段落说明共享的协作规则；固定文本与九个工具注册都声明在 [`src/index.ts`](src/index.ts)。九个工具 schema 注册在发布时被识别为 Team member 的 scope 中。与旧全局 continuable-subagent 控件同名的 scoped 注册只会为团队成员覆盖这些全局控件。
+member scope 上的一个 `team:policy` 段落说明共享的协作规则；固定文本与十个工具注册都声明在 [`src/index.ts`](src/index.ts)。十个工具 schema 注册在发布时被识别为 Team member 的 scope 中。与旧全局 continuable-subagent 控件同名的 scoped 注册只会为团队成员覆盖这些全局控件。
 
 ### 按作用域注册与拆除
 
@@ -125,7 +127,7 @@ member scope 上的一个 `team:policy` 段落说明共享的协作规则；固�
 
 #### 模型看到什么
 
-一段共享 system 策略会说明显式 delegation 要求、共享 cwd 行为、文件陈旧版本恢复、Bash／formatter／codegen 风险、task／write-scope 协调、Steer 投递、mailbox 不重试规则，以及 Lead 必须在回答前等待。Lead 与 teammate 的全部九个 Team schema 相同；执行时检查仅限 Lead 的操作权限。`spawn_teammate` 在初始 user 消息前加上 `<system-reminder>\nYou are teammate "<name>".\n</system-reminder>`，接着是一个空行和任务。该前缀不含 Team id，禁用运行时上下文时也能生效。fork 继承历史，不额外添加 Lead 身份消息。
+一段共享 system 策略会说明显式 delegation 要求、共享 cwd 行为、文件陈旧版本恢复、Bash／formatter／codegen 风险、task／write-scope 协调、Steer 投递、mailbox 不重试规则、`lost` 任务须经 `reopen` 恢复、进行中与已完成任务的文本与边已冻结、`lastStop` 表示成员最近一次回合如何结束、`wait_agent` 返回等待期间变化的成员与任务、`outputs` 是 `complete` 在磁盘上检查的完成定义、每个活跃任务独占其输出路径与 subject、blocker 说明、`claim` 返回且 `reassign` 时邮寄的简报，以及 Lead 必须在回答前等待。`team_task_create` 要求 `outputs`。Lead 与 teammate 的全部十个 Team schema 相同；执行时检查仅限 Lead 的操作权限。`spawn_teammate` 在初始 user 消息前加上 `<system-reminder>\nYou are teammate "<name>".\n</system-reminder>`，接着是一个空行和任务。该前缀不含 Team id，禁用运行时上下文时也能生效。fork 继承历史，不额外添加 Lead 身份消息。
 
 #### Token 影响
 

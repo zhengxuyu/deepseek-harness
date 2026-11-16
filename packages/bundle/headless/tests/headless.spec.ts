@@ -421,6 +421,63 @@ describe('headless runner', () => {
     await test.ctx.fiber.dispose()
   })
 
+  it('lets a settlement provider extend the run and fails the exit for what it could not settle', async () => {
+    const calls: string[] = []
+    const test = await bench({
+      afterPrompt(session, message) { appendTurn(session, 1, message, 'first answer', true) },
+    })
+    test.ctx.provide('headlessSettlement', {
+      settle: (root: Agent) => {
+        calls.push(root.status)
+        // A settling child wakes the root once more; the runner folds that turn too.
+        appendTurn(root.session, 2, {
+          role: 'user', content: [{ type: 'text', text: 'notice' }], source: { kind: 'user' }, id: brandString<MessageId>('notice'),
+        } satisfies UserMessage, 'answer after the notice', true)
+        return Promise.resolve({ unsettled: ['task-3 "subagent run via spawn" owned by child: still in progress'] })
+      },
+    })
+    expect(await test.run()).toEqual({
+      code: 1,
+      out: 'answer after the notice\n',
+      err: 'dsh: unsettled: task-3 "subagent run via spawn" owned by child: still in progress\n',
+      order: ['flush', 'exit'],
+    })
+    expect(calls).toEqual(['idle'])
+    await test.ctx.fiber.dispose()
+  })
+
+  it('exits 0 when the settlement provider reports nothing outstanding', async () => {
+    const test = await bench({
+      afterPrompt(session, message) { appendTurn(session, 1, message, 'settled answer', true) },
+    })
+    test.ctx.provide('headlessSettlement', { settle: () => Promise.resolve({ unsettled: [] }) })
+    expect(await test.run()).toMatchObject({ code: 0, out: 'settled answer\n', err: '' })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('exits 1 and names a final turn cut off at the output limit', async () => {
+    const test = await bench({
+      afterPrompt(session, message) {
+        session.append('turn/start', { turn: 1 })
+        session.append('step/start', { turn: 1, step: 1 })
+        session.append('user/message', message, { surfaceOp: 'append' })
+        session.append('assistant/message', {
+          stream: [],
+          turn: 1,
+          step: 1,
+          message: createAssistantMessage({
+            content: [{ type: 'text', text: 'partial answer' }],
+            source: { provider: 'test-provider', model: 'test-model' },
+          }),
+        }, { surfaceOp: 'append' })
+        session.append('step/end', { turn: 1, step: 1 })
+        session.append('turn/end', { turn: 1, reason: { kind: 'max-tokens' } })
+      },
+    })
+    expect(await test.run()).toMatchObject({ code: 1, out: 'partial answer\n', err: 'dsh: turn ended: max-tokens\n' })
+    await test.ctx.fiber.dispose()
+  })
+
   it('exits 1 when the final turn does not complete', async () => {
     const test = await bench({
       afterPrompt(session, message) { appendTurn(session, 1, message, undefined, false) },

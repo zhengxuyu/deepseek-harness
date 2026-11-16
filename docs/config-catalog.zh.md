@@ -747,10 +747,61 @@ export interface Config {
   readonly maxMessageBytes?: number
   /** Maximum milliseconds allowed for Team-owned runtime disposal. */
   readonly disposalTimeoutMs?: number
+  /**
+   * Record every subagent run delegated below the Lead as an owned in-progress
+   * task on the Lead's board, completed or lost when the run ends. Off by
+   * default: the board then holds only tasks members created.
+   */
+  readonly trackSubagentRuns?: boolean
+  /**
+   * Absolute harness-local directory under which every completed output is
+   * retained as `<team>/<task>/<path>`, so a later task that overwrites the
+   * same path leaves the previous version and its diff recoverable. Absent
+   * means outputs are hashed but not retained.
+   */
+  readonly artifactRoot?: string
+  /**
+   * Who decides which member works a shared task. Absent leaves both ways open:
+   * the Lead may `reassign` a task to a member and any member may `claim` one.
+   * `push`: only the Lead assigns, with `reassign` and an owner; `claim` is
+   * refused. `pull`: members `claim` ready tasks themselves and `reassign` with
+   * an owner is refused (unassigning is not). Under pull the Lead can spawn a
+   * teammate only while more ready tasks wait unclaimed than teammates are free
+   * to claim them, and the spawn prompt says the work comes from the board;
+   * inactive teammates are mailed about ready, unclaimed tasks (each task once
+   * per teammate while it stays ready at one revision, at most as many
+   * teammates as there are such tasks); and those tasks count as outstanding
+   * for headless settlement, so a run does not end between the offer and the claim.
+   */
+  readonly assignment?: TeamAssignment
+}
+
+/** Who decides which member works a shared task; see {@link Config.assignment}. */
+export type TeamAssignment = 'push' | 'pull'
+```
+
+来源： [`packages/experimental/agent-team/src/types.ts:274`](../packages/experimental/agent-team/src/types.ts)
+
+<a id="deepseek-aidsh-experimental-agent-team-settlement"></a>
+
+## `@deepseek-ai/dsh-experimental-agent-team-settlement`
+
+需要： `agentTeams`
+
+```ts config-catalog
+/** Deployment limits for how long a one-shot run follows delegated work. */
+export interface Config {
+  /** Milliseconds after the root turn ends before every task still in progress is marked lost. */
+  readonly deadlineMs: number
+  /**
+   * Milliseconds without any Team change, while no task owner is running, before
+   * the remaining tasks are marked lost. At least ten seconds, at most one hour.
+   */
+  readonly stallMs: number
 }
 ```
 
-来源： [`packages/experimental/agent-team/src/types.ts:130`](../packages/experimental/agent-team/src/types.ts)
+来源： [`packages/experimental/agent-team-settlement/src/index.ts:26`](../packages/experimental/agent-team-settlement/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-api-speech-to-text"></a>
 
@@ -1079,16 +1130,43 @@ export interface Config {
 需要： `agents` · `agentTeams` · `tools` · `systemPrompt`
 
 ```ts config-catalog
-/** Tool routing configuration. */
+/** Tool routing and frontier configuration. */
 export interface Config {
   /** Continuable-subagent provider used for fresh teammates. */
   readonly freshProvider?: string
   /** Continuable-subagent provider used for completed-prefix fork teammates. */
   readonly forkProvider?: string
+  /** Dependency hops around an edited task that its result's `frontier.around` covers; `0` omits the neighbourhood. */
+  readonly frontierHops?: number
+  /** Rows kept per frontier list (ready, running, lost, upstream, downstream); a cut list sets `truncated`. */
+  readonly frontierRows?: number
+  /**
+   * When set, the Team Lead is offered only these global tools besides the Team tools, so it
+   * plans and delegates while teammates do the work; teammates keep every tool. Names that are
+   * not global tools when the Lead's scope is installed (unregistered yet, scope-local, or the
+   * PTC transport) are ignored, so plugin load order matters. Unset offers every tool to everyone.
+   */
+  readonly leadTools?: string[]
 }
 ```
 
-来源： [`packages/experimental/tool-agent-team/src/index.ts:17`](../packages/experimental/tool-agent-team/src/index.ts)
+来源： [`packages/experimental/tool-agent-team/src/index.ts:19`](../packages/experimental/tool-agent-team/src/index.ts)
+
+<a id="deepseek-aidsh-experimental-turn-continuation"></a>
+
+## `@deepseek-ai/dsh-experimental-turn-continuation`
+
+```ts config-catalog
+/** Deployment bounds for how often one turn is continued. */
+export interface Config {
+  /** Maximum continuation notices sent within one turn before it is allowed to end as it is. */
+  readonly maxContinuations: number
+  /** Whether a message cut off at the output limit is continued too, not only an empty one. */
+  readonly onMaxTokens: boolean
+}
+```
+
+来源： [`packages/experimental/turn-continuation/src/index.ts:49`](../packages/experimental/turn-continuation/src/index.ts)
 
 <a id="deepseek-aidsh-file-reference-local"></a>
 

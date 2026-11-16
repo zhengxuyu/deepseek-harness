@@ -599,10 +599,13 @@ const TOOL_PACKAGES: ToolPackage[] = [
         role: 'lead' as const,
         name: 'lead',
       }
-      ctx.provide('agentTeams', {
+      const teams = {
         tryMembership: (candidate: Agent) => candidate === agent ? membership : undefined,
         membership: () => membership,
-      } as unknown as TeamService)
+      } as unknown as TeamService
+      // The catalog documents the default deployment: no assignment rule.
+      teams.assignmentMode = () => undefined
+      ctx.provide('agentTeams', teams)
       await ctx.plugin(Object.assign(async (inner: Context) => {
         agent = {
           id: session.id,

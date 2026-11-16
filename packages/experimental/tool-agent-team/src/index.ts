@@ -3,28 +3,49 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { TeamTaskId } from '@deepseek-ai/dsh-experimental-agent-team'
-import type { TeamMemberView } from '@deepseek-ai/dsh-experimental-agent-team'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { TeamError, TeamTaskId } from '@deepseek-ai/dsh-experimental-agent-team'
+import type { TeamMemberView, TeamTaskView } from '@deepseek-ai/dsh-experimental-agent-team'
+import { defineTool, RUN_CODE_NAME } from '@deepseek-ai/dsh-tools'
 import type { InferValue, ValueSchemaSpec } from '@deepseek-ai/dsh-tools'
+import { FRONTIER_SCHEMA, frontier } from './frontier.ts'
+import type { FrontierBounds } from './frontier.ts'
 
 /** Cordis plugin name. */
 export const name = 'tool-agent-team'
 /** Services required by the Team tool plugin. */
 export const inject = ['agents', 'agentTeams', 'tools', 'systemPrompt']
 
-/** Tool routing configuration. */
+/** Tool routing and frontier configuration. */
 export interface Config {
   /** Continuable-subagent provider used for fresh teammates. */
   readonly freshProvider?: string
   /** Continuable-subagent provider used for completed-prefix fork teammates. */
   readonly forkProvider?: string
+  /** Dependency hops around an edited task that its result's `frontier.around` covers; `0` omits the neighbourhood. */
+  readonly frontierHops?: number
+  /** Rows kept per frontier list (ready, running, lost, upstream, downstream); a cut list sets `truncated`. */
+  readonly frontierRows?: number
+  /**
+   * When set, the Team Lead is offered only these global tools besides the Team tools, so it
+   * plans and delegates while teammates do the work; teammates keep every tool. Names that are
+   * not global tools when the Lead's scope is installed (unregistered yet, scope-local, or the
+   * PTC transport) are ignored, so plugin load order matters. Unset offers every tool to everyone.
+   */
+  readonly leadTools?: string[]
 }
+
+/** Config with every default applied; `leadTools` stays optional because unset means no restriction. */
+type ResolvedConfig = Required<Omit<Config, 'leadTools'>> & Pick<Config, 'leadTools'>
 
 /** Loader schema for the opt-in Team tool plugin. */
 export const Config: z<Config> = z.object({
   freshProvider: z.string().default('spawn'),
   forkProvider: z.string().default('fork'),
+  frontierHops: z.natural().default(1),
+  frontierRows: z.natural().min(1).default(20),
+  // Preserve omission: an explicit empty list offers the Lead no global tool at all. A bare array
+  // schema fills a missing value with [], while a union has no default, so unset stays undefined.
+  leadTools: z.union([z.array(z.string())]),
 })
 
 /** Model-facing collaboration guidance shared by Lead and teammates. */
@@ -34,7 +55,19 @@ The Team Lead and all teammates share the same working directory and filesystem.
 
 Prefer read/edit/write for file changes. If a file operation returns FS_STALE_VERSION, read the current file, rebase your intended change onto the new content, and retry. Bash, formatters, code generators, and scripts are not fully protected by the filesystem version guard; coordinate them explicitly and have the Lead review the final diff and run tests.
 
-Use the target returned by spawn_teammate or list_agents for send_message and interrupt_agent, or as owner when assigning or filtering shared tasks. send_message steers a running target at its nearest step boundary and starts or resumes an inactive target. inactive means no turn is executing; it does not describe task completion, success, failure, or waiting for other agents. provisioning means member creation is in progress; failed means member creation failed. A delivered peer item starts with its stable message id and sender name. A successful send is already durable even when its result says queued; do not resend it. Shared-task workflow is list, get, claim with the current revision, perform the work, then complete. Task readiness never starts an owner. Before wait_agent, use list_agents and make sure another required member is running or provisioning; use send_message first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Re-list after wakeup or timeout. The Lead must wait for required teammates before giving the final answer.`
+Use the target returned by spawn_teammate or list_agents for send_message and interrupt_agent, or as owner when assigning or filtering shared tasks. send_message steers a running target at its nearest step boundary and starts or resumes an inactive target. inactive means no turn is executing; it does not describe task completion, success, failure, or waiting for other agents. provisioning means member creation is in progress; failed means member creation failed. lastStop is how a member's latest turn ended: completed, aborted, error, max-tokens (cut off at the output limit), or refusal; an inactive member whose lastStop is not completed did not finish that turn's work. A delivered peer item starts with its stable message id and sender name. A successful send is already durable even when its result says queued; do not resend it. Shared-task workflow is list, get, team_task_update with action claim and the current revision, perform the work, then team_task_update with action complete; claim, complete, release, reopen, reassign, and the other task transitions are actions of team_task_update, not tools of their own. Every task declares outputs, the files it must produce; complete is refused until every non-optional output exists on disk and passes its kind's check, so a task is done only when its artifacts are. Two live tasks cannot declare the same output path, and a subject a live task already carries is refused: depend on that task, edit it, or reopen it if it is lost, instead of creating a twin. A blocker entry may carry an instruction saying what the task takes from that blocker's artifacts. claim returns a brief composed from the recorded task, its inputs, and its outputs; a reassigned member receives the same brief by mail. Task readiness never starts an owner. A lost task's owner can no longer finish it: reopen it, then claim or reassign it. In-progress and completed tasks cannot be edited, rewired, or deleted. Before wait_agent, use list_agents and make sure another required member is running or provisioning; use send_message first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Its result lists the members and tasks that changed while it waited. team_task_note sends a note to a task instead of a member: it is recorded on the task, mailed to the task's current owner, and shown in the brief of whoever claims the task later; a note that names another live task's declared output path holds that task from completing until the Lead acknowledges the hold with team_task_update action acknowledge. Every task edit and every wait_agent result also carries frontier: the ready, running, and lost tasks, how many are blocked or completed, the edited task's upstream and downstream neighbours, and each member's status; read it instead of re-listing or remembering the board. The Lead must wait for required teammates before giving the final answer.`
+
+/** Lead-only guidance when {@link Config.leadTools} narrows the Lead to `allowed` besides the Team tools. */
+function leadScope(allowed: readonly string[]): string {
+  const tools = allowed.length === 0 ? 'no tools besides the Team tools' : `only ${allowed.join(', ')} besides the Team tools`
+  return `As the Team Lead you plan and delegate: you have ${tools}. Give implementation, file changes, test runs, and the final review to teammates, and wait for the teammates whose work the answer needs.`
+}
+
+/** The assignment rule every member sees when agent-team's `assignment` is set. */
+const ASSIGNMENT_POLICY = {
+  push: `Shared tasks are assigned (push): the Lead assigns every shared task to a named member with team_task_update action reassign and an owner. Nobody claims under push, so in the shared-task workflow the Lead's reassign takes the place of claim: a member works the tasks it is assigned, whose briefs arrive by mail, and completes them.`,
+  pull: `Shared tasks are claimed (pull): the Lead creates shared tasks and never names an owner, and members claim ready tasks themselves with team_task_update action claim. All work goes on the board as tasks before a teammate is spawned: a spawn_teammate prompt says who the teammate is and what it is good at, never which task to do, and spawning is refused while the teammates without a task could claim every ready one. A member that completes a task claims another ready one from the frontier before ending its turn; an inactive member is mailed when ready tasks are left unclaimed.`,
+} as const
 
 const ACTIVE_WAIT_STATUSES: ReadonlySet<TeamMemberView['status']> = new Set(['running', 'provisioning'])
 const NO_ACTIVE_PEER_MESSAGE = 'No other Team member is running or provisioning. wait_agent cannot make progress or wake inactive teammates. Re-list with list_agents and team_task_list, then use send_message to wake each required inactive teammate before waiting again.'
@@ -56,6 +89,7 @@ const MEMBER_VIEW_SCHEMA = {
     context: { type: 'string', enum: ['fresh', 'fork'] },
     model: { type: 'string' },
     diagnostics: { type: 'array', required: true, items: { type: 'string' } },
+    lastStop: { type: 'string' },
   },
 } as const
 
@@ -65,7 +99,80 @@ function modelMember(member: TeamMemberView): InferValue<typeof MEMBER_VIEW_SCHE
   return { target: name, ...details }
 }
 
+/** One declared output: the path and the check it must pass at completion. */
+const OUTPUT_CONTRACT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    path: { type: 'string', required: true, description: 'Workspace-relative file path.' },
+    kind: {
+      type: 'string',
+      required: true,
+      enum: ['file', 'json', 'csv', 'npy', 'image', 'python'],
+      description: 'file: exists and non-empty; json: parses and matches schema when given; csv: has a header and rows; npy and image: format magic bytes; python: an entry file that imports no workspace module, so it runs alone.',
+    },
+    schema: {
+      type: 'object',
+      additionalProperties: true,
+      description: 'JSON Schema a json output must satisfy, using only type, properties, required, additionalProperties, items, enum, const, and oneOf; other keywords such as minItems or pattern are refused.',
+    },
+    optional: { type: 'boolean', description: 'Whether completion may proceed without this file.' },
+  },
+} as const
+
+/** One recorded artifact of a completed task. */
+const TASK_ARTIFACT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    path: { type: 'string', required: true },
+    bytes: { type: 'integer', required: true },
+    sha256: { type: 'string', required: true },
+    supersedes: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { task: { type: 'string', required: true }, sha256: { type: 'string', required: true } },
+    },
+    previousVersion: { type: 'string' },
+  },
+} as const
+
+/** A blocker reference: a task id, or the id with what this task takes from that blocker's artifacts. */
+const BLOCKER_SCHEMA = {
+  oneOf: [
+    { type: 'string' },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        task: { type: 'string', required: true, description: 'Blocking task id.' },
+        instruction: { type: 'string', required: true, description: 'What this task takes from the blocker\'s artifacts.' },
+      },
+    },
+  ],
+} as const
+
 /** One shared task, matching the public `TeamTaskView`. */
+const TASK_NOTE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'string', required: true },
+    from: { type: 'string', required: true },
+    text: { type: 'string', required: true },
+  },
+} as const
+
+const TASK_HOLD_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    note: { type: 'string', required: true },
+    task: { type: 'string', required: true },
+    from: { type: 'string', required: true },
+  },
+} as const
+
 const TASK_VIEW_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -74,14 +181,55 @@ const TASK_VIEW_SCHEMA = {
     revision: { type: 'integer', required: true },
     subject: { type: 'string', required: true },
     description: { type: 'string', required: true },
-    status: { type: 'string', required: true, enum: ['pending', 'in_progress', 'completed', 'deleted'] },
+    status: { type: 'string', required: true, enum: ['pending', 'in_progress', 'completed', 'lost', 'deleted'] },
     ownerName: { type: 'string' },
+    lostCause: { type: 'string', enum: ['owner-failed', 'run-ended'] },
+    ownerStop: { type: 'string' },
     blockedBy: { type: 'array', required: true, items: { type: 'string' } },
+    edgeInstructions: { type: 'object', additionalProperties: true },
     writeScopes: { type: 'array', required: true, items: { type: 'string' } },
+    outputs: { type: 'array', required: true, items: OUTPUT_CONTRACT_SCHEMA },
+    artifacts: { type: 'array', items: TASK_ARTIFACT_SCHEMA },
+    brief: { type: 'string' },
+    notes: { type: 'array', items: TASK_NOTE_SCHEMA },
+    holds: { type: 'array', items: TASK_HOLD_SCHEMA },
     ready: { type: 'boolean', required: true },
     writeScopeWarnings: { type: 'array', required: true, items: { type: 'string' } },
   },
 } as const
+
+/** A task edit's result: the task plus the frontier after the edit. */
+const TASK_EDIT_VALUE_SCHEMA = {
+  ...TASK_VIEW_SCHEMA,
+  properties: { ...TASK_VIEW_SCHEMA.properties, frontier: { ...FRONTIER_SCHEMA, required: true } },
+} as const
+
+/** A note's result: the noted task, the note id, the tasks the note holds, and the frontier. */
+const TASK_NOTE_VALUE_SCHEMA = {
+  ...TASK_EDIT_VALUE_SCHEMA,
+  properties: {
+    ...TASK_EDIT_VALUE_SCHEMA.properties,
+    noteId: { type: 'string', required: true },
+    held: { type: 'array', required: true, items: { type: 'string' } },
+  },
+} as const
+
+type BlockerArg = InferValue<typeof BLOCKER_SCHEMA>
+
+/** Split blocker arguments into the id list and the instructions keyed by id. */
+function blockers(values: readonly BlockerArg[]): { blockedBy: TeamTaskId[]; edgeInstructions: Record<string, string> } {
+  const blockedBy: TeamTaskId[] = []
+  const edgeInstructions: Record<string, string> = {}
+  for (const value of values) {
+    if (typeof value === 'string') {
+      blockedBy.push(TeamTaskId(value))
+    } else {
+      blockedBy.push(TeamTaskId(value.task))
+      edgeInstructions[value.task] = value.instruction
+    }
+  }
+  return { blockedBy, edgeInstructions }
+}
 
 const SPAWN_VALUE_SCHEMA = {
   type: 'object',
@@ -102,12 +250,51 @@ const SEND_VALUE_SCHEMA = {
   },
 } as const
 
-/** `noProgress` is present only on the model-only shortcut that skips the wait. */
+/** A roster row as it changed while waiting: availability and latest turn outcome. */
+const MEMBER_CHANGE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    target: { type: 'string', required: true },
+    status: { type: 'string', required: true, enum: ['running', 'inactive', 'provisioning', 'failed'] },
+    lastStop: { type: 'string' },
+  },
+} as const
+
+/** A task row as it changed while waiting: status, revision, owner, and how it was lost. */
+const TASK_CHANGE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'string', required: true },
+    revision: { type: 'integer', required: true },
+    status: { type: 'string', required: true, enum: ['pending', 'in_progress', 'completed', 'lost', 'deleted'] },
+    ownerName: { type: 'string' },
+    lostCause: { type: 'string', enum: ['owner-failed', 'run-ended'] },
+    ownerStop: { type: 'string' },
+  },
+} as const
+
+/**
+ * `changes` lists what differs between the roster and board read when the wait
+ * started and when it ended; `noProgress` is present only on the model-only
+ * shortcut that skips the wait.
+ */
 const WAIT_VALUE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   properties: {
     timedOut: { type: 'boolean', required: true },
+    frontier: { ...FRONTIER_SCHEMA, required: true },
+    changes: {
+      type: 'object',
+      required: true,
+      additionalProperties: false,
+      properties: {
+        members: { type: 'array', required: true, items: MEMBER_CHANGE_SCHEMA },
+        tasks: { type: 'array', required: true, items: TASK_CHANGE_SCHEMA },
+      },
+    },
     noProgress: {
       type: 'object',
       additionalProperties: false,
@@ -118,6 +305,47 @@ const WAIT_VALUE_SCHEMA = {
     },
   },
 } as const
+
+type MemberChange = InferValue<typeof MEMBER_CHANGE_SCHEMA>
+type TaskChange = InferValue<typeof TASK_CHANGE_SCHEMA>
+type WaitChanges = InferValue<typeof WAIT_VALUE_SCHEMA>['changes']
+
+/** The roster and board facts a wait compares. */
+interface WaitObservation {
+  readonly members: readonly TeamMemberView[]
+  readonly tasks: readonly TeamTaskView[]
+}
+
+function memberChange(member: TeamMemberView): MemberChange {
+  return { target: member.name, status: member.status, ...member.lastStop === undefined ? {} : { lastStop: member.lastStop } }
+}
+
+function taskChange(task: TeamTaskView): TaskChange {
+  return {
+    id: task.id,
+    revision: task.revision,
+    status: task.status,
+    ...task.ownerName === undefined ? {} : { ownerName: task.ownerName },
+    ...task.lostCause === undefined ? {} : { lostCause: task.lostCause },
+    ...task.ownerStop === undefined ? {} : { ownerStop: task.ownerStop },
+  }
+}
+
+/** Rows whose model-facing change fields differ from the earlier observation, plus rows that appeared. */
+function waitChanges(before: WaitObservation, after: WaitObservation): WaitChanges {
+  const members = new Map(before.members.map(member => [member.id, JSON.stringify(memberChange(member))]))
+  const tasks = new Map(before.tasks.map(task => [task.id, JSON.stringify(taskChange(task))]))
+  return {
+    members: after.members.flatMap((member) => {
+      const row = memberChange(member)
+      return members.get(member.id) === JSON.stringify(row) ? [] : [row]
+    }),
+    tasks: after.tasks.flatMap((task) => {
+      const row = taskChange(task)
+      return tasks.get(task.id) === JSON.stringify(row) ? [] : [row]
+    }),
+  }
+}
 
 const INTERRUPT_VALUE_SCHEMA = {
   type: 'object',
@@ -161,7 +389,16 @@ function callingAgent(agent: Agent | undefined, toolName: string): Agent {
 }
 
 /** Register the complete Team tool set in one exact Agent scope. */
-function install(agent: Agent, ctx: Context, config: Required<Config>): () => void {
+function install(agent: Agent, ctx: Context, config: ResolvedConfig): () => void {
+  const withFrontier = (caller: Agent, task: TeamTaskView): TeamTaskView & { frontier: ReturnType<typeof frontier> } => ({
+    ...task,
+    frontier: frontier(
+      ctx.agentTeams.listTasks(caller),
+      ctx.agentTeams.listMembers(caller),
+      { hops: config.frontierHops, rows: config.frontierRows },
+      task.id,
+    ),
+  })
   const scoped = agent.ctx
   const disposers: Array<() => unknown> = []
   const register = (disposer: () => unknown): void => { disposers.push(disposer) }
@@ -171,6 +408,28 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
       order: scoped.systemPrompt.getSectionOrder('TEAM_POLICY'),
       text: POLICY,
     }))
+    const assignment = ctx.agentTeams.assignmentMode()
+    if (assignment !== undefined) {
+      register(scoped.systemPrompt.section({
+        name: 'team:assignment',
+        order: scoped.systemPrompt.getSectionOrder('TEAM_POLICY'),
+        text: ASSIGNMENT_POLICY[assignment],
+      }))
+    }
+    if (config.leadTools !== undefined && ctx.agentTeams.tryMembership(agent)?.role === 'lead') {
+      // Only a global tool can be restricted; the Lead keeps whatever was registered in its own scope.
+      const global = new Set(ctx.tools.schemas().map(tool => tool.name))
+      const visible = new Set(ctx.tools.schemas(agent).map(tool => tool.name))
+      const allowed = [...new Set(config.leadTools)]
+        .filter(name => name !== RUN_CODE_NAME && global.has(name) && visible.has(name))
+      register(scoped.tools.restrict({ allow: allowed }))
+      // Sits beside the Team policy, which it narrows for the Lead.
+      register(scoped.systemPrompt.section({
+        name: 'team:lead-scope',
+        order: scoped.systemPrompt.getSectionOrder('TEAM_POLICY'),
+        text: leadScope(allowed),
+      }))
+    }
 
     register(scoped.tools.register(defineTool({
       name: 'spawn_teammate',
@@ -223,7 +482,7 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
 
     register(scoped.tools.register(defineTool({
       name: 'list_agents',
-      description: 'List the Lead and every durable teammate with an addressable target and current availability. inactive means no turn is executing, not a task result. provisioning and failed describe member creation.',
+      description: 'List the Lead and every durable teammate with an addressable target, current availability, and lastStop, how its latest turn ended. inactive means no turn is executing, not a task result. provisioning and failed describe member creation.',
       parameters: {},
       output: jsonOutput(MEMBER_LIST_VALUE_SCHEMA),
       execute(_args, exec) {
@@ -233,7 +492,7 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
 
     register(scoped.tools.register(defineTool({
       name: 'wait_agent',
-      description: 'Wait for the next teammate status, mailbox, or shared-task change after this call starts. This never wakes inactive members and returns noProgress immediately when no other member is running or provisioning. Re-list after wakeup or timeout instead of polling.',
+      description: 'Wait for the next teammate status, mailbox, or shared-task change after this call starts, and return the members and tasks that changed. This never wakes inactive members and returns noProgress immediately when no other member is running or provisioning.',
       parameters: {
         timeout_ms: {
           type: 'integer',
@@ -247,22 +506,28 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
         // Preserve TeamService's authoritative timeout validation before the
         // model-only no-progress shortcut.
         if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 10_000 || timeoutMs > 3_600_000) {
-          return await ctx.agentTeams.waitForChange(caller, timeoutMs, exec.signal)
+          await ctx.agentTeams.waitForChange(caller, timeoutMs, exec.signal)
         }
         // The active-peer read and waiter registration must remain one synchronous
         // span; awaiting between them can lose the only peer-status edge.
-        const hasActivePeer = ctx.agentTeams.listMembers(caller).some(member =>
+        const before: WaitObservation = { members: ctx.agentTeams.listMembers(caller), tasks: ctx.agentTeams.listTasks(caller) }
+        const hasActivePeer = before.members.some(member =>
           member.id !== caller.id && ACTIVE_WAIT_STATUSES.has(member.status))
+        const bounds: FrontierBounds = { hops: config.frontierHops, rows: config.frontierRows }
         if (!hasActivePeer) {
           return {
             timedOut: false,
+            frontier: frontier(before.tasks, before.members, bounds),
+            changes: { members: [], tasks: [] },
             noProgress: {
               reason: 'no-active-peer' as const,
               message: NO_ACTIVE_PEER_MESSAGE,
             },
           }
         }
-        return await ctx.agentTeams.waitForChange(caller, timeoutMs, exec.signal)
+        const { timedOut } = await ctx.agentTeams.waitForChange(caller, timeoutMs, exec.signal)
+        const after: WaitObservation = { members: ctx.agentTeams.listMembers(caller), tasks: ctx.agentTeams.listTasks(caller) }
+        return { timedOut, frontier: frontier(after.tasks, after.members, bounds), changes: waitChanges(before, after) }
       },
     })))
 
@@ -280,25 +545,35 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
 
     register(scoped.tools.register(defineTool({
       name: 'team_task_create',
-      description: 'Create one unowned pending task on the shared Team task board.',
+      description: 'Create one unowned pending task on the shared Team task board. outputs is the definition of done: complete is refused until every non-optional output exists and passes its check. A subject a live task already carries is refused; depend on that task instead. The result carries the frontier after the edit.',
       parameters: {
         subject: { type: 'string', required: true, description: 'Concise task title.' },
         description: { type: 'string', required: true, description: 'Complete task details and acceptance criteria.' },
-        blocked_by: { type: 'array', items: { type: 'string' }, description: 'Task ids that must complete first.' },
+        outputs: {
+          type: 'array',
+          required: true,
+          items: OUTPUT_CONTRACT_SCHEMA,
+          description: 'Files this task must produce; empty for a task with no file deliverable.',
+        },
+        blocked_by: { type: 'array', items: BLOCKER_SCHEMA, description: 'Tasks that must complete first, each optionally with what this task takes from it.' },
         write_scopes: {
           type: 'array',
           items: { type: 'string' },
           description: 'Advisory workspace-relative file or directory prefixes this task expects to modify.',
         },
       },
-      output: jsonOutput(TASK_VIEW_SCHEMA),
+      output: jsonOutput(TASK_EDIT_VALUE_SCHEMA),
       async execute(args, exec) {
-        return await ctx.agentTeams.createTask(callingAgent(exec.agent, 'team_task_create'), {
+        const caller = callingAgent(exec.agent, 'team_task_create')
+        const edges = args.blocked_by === undefined ? undefined : blockers(args.blocked_by)
+        const task = await ctx.agentTeams.createTask(caller, {
           subject: args.subject,
           description: args.description,
-          ...args.blocked_by === undefined ? {} : { blockedBy: args.blocked_by.map(TeamTaskId) },
+          outputs: args.outputs,
+          ...edges === undefined ? {} : { blockedBy: edges.blockedBy, edgeInstructions: edges.edgeInstructions },
           ...args.write_scopes === undefined ? {} : { writeScopes: args.write_scopes },
         })
+        return withFrontier(caller, task)
       },
     })))
 
@@ -308,7 +583,7 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
       parameters: {
         status: {
           type: 'string',
-          enum: ['pending', 'in_progress', 'completed'],
+          enum: ['pending', 'in_progress', 'completed', 'lost'],
           description: 'Optional exact status filter.',
         },
         owner: { type: 'string', description: 'Optional member target from spawn_teammate or list_agents, matching ownerName; use unowned for tasks without an owner.' },
@@ -351,34 +626,58 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
 
     register(scoped.tools.register(defineTool({
       name: 'team_task_update',
-      description: 'Compare-and-set a shared task action using the latest revision from team_task_get or team_task_list.',
+      description: 'Compare-and-set a shared task action using the latest revision from team_task_get or team_task_list. claim, complete, release, reopen, reassign, and the other transitions are values of action here, not separate tools. The result carries the frontier after the edit.',
       parameters: {
         task_id: { type: 'string', required: true, description: 'Shared task id.' },
         expected_revision: { type: 'integer', required: true, description: 'Current task revision used as the CAS precondition.' },
         action: {
           type: 'string',
           required: true,
-          enum: ['claim', 'release', 'edit', 'set_dependencies', 'complete', 'reopen', 'reassign', 'delete'],
-          description: 'Task transition to apply.',
+          enum: ['claim', 'release', 'edit', 'set_dependencies', 'complete', 'reopen', 'reassign', 'delete', 'acknowledge'],
+          description: 'Task transition to apply; acknowledge clears one hold (Lead only).',
         },
+        note: { type: 'string', description: 'The hold to clear for acknowledge: a note id from the task\'s holds.' },
         subject: { type: 'string', description: 'Replacement title for edit.' },
         description: { type: 'string', description: 'Replacement details for edit.' },
-        blocked_by: { type: 'array', items: { type: 'string' }, description: 'Complete blocker list for set_dependencies.' },
+        outputs: { type: 'array', items: OUTPUT_CONTRACT_SCHEMA, description: 'Replacement output contracts for edit.' },
+        blocked_by: { type: 'array', items: BLOCKER_SCHEMA, description: 'Complete blocker list for set_dependencies, each optionally with an instruction.' },
         write_scopes: { type: 'array', items: { type: 'string' }, description: 'Replacement advisory write scopes for edit.' },
         owner: { type: 'string', description: 'Member target from spawn_teammate or list_agents for Lead-only reassign; omit to unassign.' },
       },
-      output: jsonOutput(TASK_VIEW_SCHEMA),
+      output: jsonOutput(TASK_EDIT_VALUE_SCHEMA),
       async execute(args, exec) {
-        return await ctx.agentTeams.updateTask(callingAgent(exec.agent, 'team_task_update'), {
+        const caller = callingAgent(exec.agent, 'team_task_update')
+        const edges = args.blocked_by === undefined ? undefined : blockers(args.blocked_by)
+        const task = await ctx.agentTeams.updateTask(caller, {
           taskId: TeamTaskId(args.task_id),
           expectedRevision: args.expected_revision,
           action: args.action,
           ...args.subject === undefined ? {} : { subject: args.subject },
           ...args.description === undefined ? {} : { description: args.description },
-          ...args.blocked_by === undefined ? {} : { blockedBy: args.blocked_by.map(TeamTaskId) },
+          ...args.outputs === undefined ? {} : { outputs: args.outputs },
+          ...edges === undefined ? {} : { blockedBy: edges.blockedBy, edgeInstructions: edges.edgeInstructions },
           ...args.write_scopes === undefined ? {} : { writeScopes: args.write_scopes },
           ...args.owner === undefined ? {} : { owner: args.owner },
+          ...args.note === undefined ? {} : { note: args.note },
+        }).catch((error: unknown) => {
+          throw transitionHint(error)
         })
+        return withFrontier(caller, task)
+      },
+    })))
+
+    register(scoped.tools.register(defineTool({
+      name: 'team_task_note',
+      description: 'Send a note to a shared task rather than to a member: recorded on the task, mailed to its current owner, and included in the brief of whoever claims it. A note naming another live task\'s declared output path holds that task from completing until the Lead acknowledges. The result carries the frontier.',
+      parameters: {
+        task_id: { type: 'string', required: true, description: 'Shared task id the note is about.' },
+        text: { type: 'string', required: true, description: 'Self-contained note for whoever works the task.' },
+      },
+      output: jsonOutput(TASK_NOTE_VALUE_SCHEMA),
+      async execute(args, exec) {
+        const caller = callingAgent(exec.agent, 'team_task_note')
+        const noted = await ctx.agentTeams.noteTask(caller, { taskId: TeamTaskId(args.task_id), text: args.text, signal: exec.signal })
+        return { ...withFrontier(caller, noted), noteId: noted.noteId, held: noted.held }
       },
     })))
   } catch (error: unknown) {
@@ -390,11 +689,26 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
   }
 }
 
+/** Appended to an invalid-transition refusal, whose remedy names other transitions. */
+const TRANSITION_HINT = 'claim, complete, release, reopen, and reassign are team_task_update actions, not tools of their own'
+
+/**
+ * Say which tool carries the transitions an invalid-transition refusal names:
+ * models read "claim it first" as a `team_task_claim` tool that does not exist.
+ */
+function transitionHint(error: unknown): unknown {
+  if (!(error instanceof TeamError) || error.code !== 'TEAM_TASK_INVALID_TRANSITION') return error
+  return new TeamError(`${error.message} (${TRANSITION_HINT})`, error.code, { cause: error })
+}
+
 /** Install Team tools in every live or subsequently published Team member scope. */
 export function apply(ctx: Context, config: Config = {}): void {
-  const resolved: Required<Config> = {
+  const resolved: ResolvedConfig = {
     freshProvider: config.freshProvider ?? 'spawn',
     forkProvider: config.forkProvider ?? 'fork',
+    frontierHops: config.frontierHops ?? 1,
+    frontierRows: config.frontierRows ?? 20,
+    ...config.leadTools === undefined ? {} : { leadTools: config.leadTools },
   }
   const installed = new Map<Agent, () => void>()
   const maybeInstall = (agent: Agent): void => {

@@ -27,6 +27,7 @@ const task: TeamTask = {
   blockedBy: [],
   writeScopes: ['src'],
   ready: false,
+  outputs: [],
   writeScopeWarnings: ['write scopes overlap with task-2'],
 }
 const view: TeamView = {
@@ -157,6 +158,7 @@ describe('TeamAction', () => {
         { ...unownedTask, id: 'ready-task' as TeamTaskId, status: 'pending', ready: true },
         { ...unownedTask, id: 'blocked-task' as TeamTaskId, status: 'pending', ready: false, blockedBy: [TASK_1] },
         { ...task, id: 'completed-task' as TeamTaskId, status: 'completed' },
+        { ...task, id: 'lost-task' as TeamTaskId, status: 'lost', lostCause: 'run-ended', ownerName: 'worker' },
       ],
     }
     const load = vi.fn(() => Promise.resolve({ ok: true as const, value: richView }))
@@ -174,7 +176,8 @@ describe('TeamAction', () => {
     expect(provisioningMember.querySelector('[data-state="ongoing"]')).not.toBeNull()
     const tasks = [...document.querySelectorAll('article')]
     expect(tasks.map(card => card.querySelector('[data-state]')?.getAttribute('data-state')))
-      .toEqual(['idle', 'warning', 'done'])
+      .toEqual(['idle', 'warning', 'done', 'error'])
+    expect(screen.getByText(zh['status.lost'])).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: /^worker运行中/u }))
     expect(await screen.findByText('Error: navigation failed')).toBeTruthy()
