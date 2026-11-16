@@ -2189,6 +2189,21 @@ describe('Preconditions', () => {
       message: 'subject "verify" is already live task "task-1" (lost); reopen it instead of creating a twin',
     })
   })
+
+  it('deletes a lost task without its lost cause or owner stop', async () => {
+    const { ctx, lead } = await setup([])
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
+    const claimed = await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action: 'claim' })
+    const lost = await ctx.agentTeams.markLost(lead, claimed.id, 'owner-failed', 'aborted')
+    expect(lost).toMatchObject({ status: 'lost', lostCause: 'owner-failed', ownerStop: 'aborted' })
+    const deleted = await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: lost.revision, action: 'delete' })
+    expect(deleted).toMatchObject({ status: 'deleted', ownerName: 'lead' })
+    expect('lostCause' in deleted).toBe(false)
+    expect('ownerStop' in deleted).toBe(false)
+    // The tombstone is a valid persisted record: the durable projection accepts it.
+    expect(durable(lead).tasks[0]).toMatchObject({ status: 'deleted', ownerId: lead.id })
+    expect(ctx.agentTeams.listTasks(lead)).toEqual([])
+  })
 })
 
 describe('Notes are edges', () => {
@@ -2336,6 +2351,23 @@ describe('Artifact contracts', () => {
     // A task with no declared outputs still needs something to edit.
     await expect(ctx.agentTeams.updateTask(lead, { taskId: other.id, expectedRevision: cleared.revision, action: 'edit' }))
       .rejects.toMatchObject({ code: 'TEAM_INVALID_ARGUMENT' })
+  })
+
+  it('refuses a python output that imports a module beside it in a subdirectory', async () => {
+    const dir = workspace()
+    const { ctx, lead } = await setup([], {}, dir)
+    const task = await ctx.agentTeams.createTask(lead, {
+      subject: 'entry', description: 'entry', outputs: [{ path: 'src/main.py', kind: 'python' }],
+    })
+    const claimed = await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action: 'claim' })
+    mkdirSync(join(dir, 'src/pkg'), { recursive: true })
+    writeFileSync(join(dir, 'src/utils.py'), 'X = 1\n')
+    writeFileSync(join(dir, 'src/pkg/__init__.py'), '')
+    writeFileSync(join(dir, 'src/main.py'), 'import os, utils\nimport pkg\n')
+    const complete = () => ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: claimed.revision, action: 'complete' })
+    await expect(complete()).rejects.toThrow('src/main.py: imports workspace modules (utils, pkg), so it does not run alone')
+    writeFileSync(join(dir, 'src/main.py'), 'import os\n')
+    await expect(complete()).resolves.toMatchObject({ status: 'completed' })
   })
 
   it('refuses completion until every declared output exists and passes its check, then records the artifacts', async () => {
