@@ -1,0 +1,97 @@
+name: Claude PR review
+
+# Claude reviews every non-draft pull request opened from a branch of this
+# repository and reports findings as inline comments plus one summary comment.
+# It never approves, requests changes, or pushes: the review is advisory and
+# does not count toward the required approval.
+#
+# Setup (repository Settings → Secrets and variables → Actions): add
+# ANTHROPIC_API_KEY. Without the secret the job passes without reviewing, so
+# forks and unconfigured checkouts stay green.
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+permissions:
+  contents: read
+
+# A new push supersedes the review of the previous head.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: Claude PR review
+    # Secrets are not available to pull requests from forks, and a draft is not
+    # ready for review.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Check for the API key
+        id: key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        shell: bash
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            echo 'present=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'present=false' >> "$GITHUB_OUTPUT"
+            echo 'Claude PR review skipped: the ANTHROPIC_API_KEY secret is not set.'
+          fi
+
+      - name: Check out the pull request
+        if: steps.key.outputs.present == 'true'
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Review
+        if: steps.key.outputs.present == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          track_progress: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Review this pull request. Read AGENTS.md at the repository root, and the
+            AGENTS.md closest to each changed file, before judging the change: they
+            are this repository's rules.
+
+            Review the code a human wrote. Skip generated files: anything whose
+            header says it is generated, docs/persistence-schema.json,
+            docs/persistence-changes/*.schema.json, snapshots/, and pnpm-lock.yaml.
+
+            Look for, in this order:
+            1. Correctness: logic errors, unhandled edge cases, invalid state
+               transitions, records that would fail their own persisted schema.
+            2. Security: injection, path traversal, leaked credentials, missing
+               authorization.
+            3. Resource use: unbounded reads or loops, work done while holding a lock
+               or transaction, leaks.
+            4. Tests: behavior that changed without a test that covers it.
+            5. Violations of the AGENTS.md rules that apply to the changed files.
+
+            Report only what you have checked against the code. For each finding give
+            the file and line, what goes wrong, and a concrete input or state that
+            triggers it. Do not comment on style a linter would catch, and do not
+            praise.
+
+            Post each finding as an inline comment on the line it concerns. Then post
+            one top-level comment that lists the findings by severity (must fix,
+            should fix, suggestion) and says what you did not review. If you found
+            nothing, say so in that comment.
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
