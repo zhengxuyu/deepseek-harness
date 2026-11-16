@@ -123,12 +123,14 @@ async function checkOne(
       break
     case 'python': {
       const local: string[] = []
+      const directory = contract.path.slice(0, contract.path.lastIndexOf('/') + 1)
       for (const name of pythonImports(text())) {
         if (name === '.') {
           local.push('a relative import')
           continue
         }
-        for (const candidate of [`${name}.py`, `${name}/__init__.py`]) {
+        // Python resolves an import beside the entry file first, so its directory counts as well as the workspace root.
+        for (const candidate of [...new Set(['', directory].flatMap(base => [`${base}${name}.py`, `${base}${name}/__init__.py`]))]) {
           const moduleTarget = await fs.resolve(candidate, cwd === undefined ? {} : { cwd })
           if ((await fs.stat(moduleTarget)) !== undefined) {
             local.push(name)

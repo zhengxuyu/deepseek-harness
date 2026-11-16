@@ -448,7 +448,9 @@ export class TeamTaskBoard {
           if (dependent !== undefined) {
             throw new TeamError(`team task "${current.id}" still blocks "${dependent.id}"`, 'TEAM_TASK_HAS_DEPENDENTS')
           }
-          next = { ...current, status: 'deleted' }
+          // A tombstone is no longer lost: the cause and the owner's stop belong to the `lost` status alone.
+          const { lostCause: _lostCause, ownerStop: _ownerStop, ...rest } = current
+          next = { ...rest, status: 'deleted' }
           break
         }
         /* v8 ignore next 2 -- TeamTaskAction is closed and every member is handled above. */
