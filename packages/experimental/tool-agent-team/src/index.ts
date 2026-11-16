@@ -43,8 +43,9 @@ export const Config: z<Config> = z.object({
   forkProvider: z.string().default('fork'),
   frontierHops: z.natural().default(1),
   frontierRows: z.natural().min(1).default(20),
-  // Preserve omission: an explicit empty list offers the Lead no global tool at all.
-  leadTools: z.array(z.string()).default(undefined as unknown as string[]),
+  // Preserve omission: an explicit empty list offers the Lead no global tool at all. A bare array
+  // schema fills a missing value with [], while a union has no default, so unset stays undefined.
+  leadTools: z.union([z.array(z.string())]),
 })
 
 /** Model-facing collaboration guidance shared by Lead and teammates. */
