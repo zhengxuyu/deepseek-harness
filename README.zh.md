@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-> **分支说明。** 此后本 fork 的 `master` 分支将存放我们的修改。如需跑 baseline 实验，请使用 [`dsh-offical-c36a83f`](https://github.com/zhengxuyu/deepseek-harness/tree/dsh-offical-c36a83f) 分支。
+> **分支说明。** 此后本 fork 的 `master` 分支将存放我们的修改。如需跑 baseline 实验，请使用 [`baseline-official`](https://github.com/zhengxuyu/deepseek-harness/tree/baseline-official) tag。
 
 DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的开源 agent harness（智能体框架）。
 

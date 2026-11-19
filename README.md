@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-> **Branch notice.** From now on, the `master` branch of this fork holds our own modifications. To run baseline experiments, use the [`dsh-offical-c36a83f`](https://github.com/zhengxuyu/deepseek-harness/tree/dsh-offical-c36a83f) branch.
+> **Branch notice.** From now on, the `master` branch of this fork holds our own modifications. To run baseline experiments, use the [`baseline-official`](https://github.com/zhengxuyu/deepseek-harness/tree/baseline-official) tag.
 
 DeepSeek Harness (`dsh`) is an open-source agent harness developed by [DeepSeek AI](https://deepseek.com).
 
