@@ -1,13 +1,14 @@
 /** Settlement over the Team board: waiting, waking, stalling, deadlines, and disposal. */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
+import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
@@ -30,18 +31,20 @@ afterEach(() => {
 async function setup(
   script: ConstructorParameters<typeof MockAdapter>[0],
   config: Partial<Settlement.Config> = {},
+  workspace?: string,
 ) {
   const ctx = new Context()
   await mountAgentLoopTestDependencies(ctx)
   const storageRoot = mkdtempSync(join(tmpdir(), 'dsh-team-settlement-'))
   roots.push(storageRoot)
+  if (workspace !== undefined) await ctx.plugin(LocalFileSystem, { cwd: workspace })
   await ctx.plugin(JsonlSessionPersistence, { root: storageRoot })
   await ctx.plugin(TestSessionQuery)
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(SubagentService)
   await ctx.plugin(SubagentSpawn, { providerName: 'spawn' })
   await ctx.plugin(TeamService, { trackSubagentRuns: true })
-  const fiber = await ctx.plugin(Settlement, { deadlineMs: 3_600_000, stallMs: 10_000, stopGraceMs: 5_000, ...config })
+  const fiber = await ctx.plugin(Settlement, { deadlineMs: 3_600_000, stallMs: 10_000, stopGraceMs: 5_000, outputs: [], ...config })
   ctx.llm.registerAdapter(['mock'], new MockAdapter(script))
   const lead = await ctx.agentLoop.create(SessionId('lead'), { provider: 'mock', model: 'mock' })
   const begin = (root: Agent, task = 'the request') => {
@@ -60,6 +63,12 @@ function content(text: string) {
   return [{ type: 'text' as const, text }]
 }
 
+/** Every settlement reminder in the root's log. */
+function reminders(agent: Agent) {
+  return agent.session.snapshotEvents()
+    .flatMap(event => event.type === 'user/message' && event.data.source.kind === 'agent-team-settlement' ? [event.data] : [])
+}
+
 async function spawnTeammate(ctx: Context, lead: Agent, name: string): Promise<Agent> {
   const started = await ctx.agentTeams.spawnTeammate(lead, {
     name, description: `${name} responsibility`, prompt: content(`${name} initial`), context: 'fresh', provider: 'spawn', signal: SIGNAL,
@@ -75,8 +84,10 @@ describe('agent-team-settlement', () => {
   it('validates config: all three windows are required and bounded', () => {
     expect(() => new Config({ deadlineMs: 1 } as never)).toThrow()
     expect(() => new Config({ deadlineMs: 1, stallMs: 10_000 } as never)).toThrow()
-    expect(() => new Config({ deadlineMs: 2_147_483_648, stallMs: 10_000, stopGraceMs: 1 })).toThrow()
-    expect(new Config({ deadlineMs: 1, stallMs: 10_000, stopGraceMs: 1 })).toEqual({ deadlineMs: 1, stallMs: 10_000, stopGraceMs: 1 })
+    expect(() => new Config({ deadlineMs: 2_147_483_648, stallMs: 10_000, stopGraceMs: 1, outputs: [] })).toThrow()
+    expect(new Config({ deadlineMs: 1, stallMs: 10_000, stopGraceMs: 1 } as never))
+      .toEqual({ deadlineMs: 1, stallMs: 10_000, stopGraceMs: 1, outputs: [] })
+    expect(() => new Config({ deadlineMs: 1, stallMs: 10_000, stopGraceMs: 1, outputs: [{ path: 'a', kind: 'folder' }] } as never)).toThrow()
   })
 
   it('records the run\'s task as in-progress work owned by the root, cut to the board\'s limits', async () => {
@@ -121,6 +132,61 @@ describe('agent-team-settlement', () => {
       unsettled: [{ id: task!.id, subject: 'the request', owner: 'lead', state: 'lost', reason: 'the turn ended max-tokens' }],
     })
     expect(ctx.agentTeams.getTask(lead, task!.id)).toMatchObject({ status: 'lost', lostCause: 'owner-failed' })
+  })
+
+  it('reminds the root once to complete a run\'s task that declares outputs, then loses it', async () => {
+    const { ctx, lead, begin } = await setup(
+      [textResponse('done'), textResponse('still done')],
+      { outputs: [{ path: 'out/result.json', kind: 'json' }] },
+    )
+    const run = await begin(lead)
+    lead.followup(prompt('the request'))
+    const [task] = ctx.agentTeams.listTasks(lead)
+    expect(task).toMatchObject({ status: 'in_progress', outputs: [{ path: 'out/result.json', kind: 'json' }] })
+    await expect(run.settle()).resolves.toEqual({
+      unsettled: [{
+        id: task!.id,
+        subject: 'the request',
+        owner: 'lead',
+        state: 'lost',
+        reason: 'the turn completed without completing the task and its declared outputs, after one reminder',
+      }],
+    })
+    expect(ctx.agentTeams.getTask(lead, task!.id)).toMatchObject({ status: 'lost', lostCause: 'owner-failed' })
+    expect(reminders(lead)).toHaveLength(1)
+    const [reminder] = reminders(lead)
+    expect(reminder!.source).toMatchObject({
+      taskId: task!.id, form: 'notice', summary: `reminded to complete ${task!.id} and its declared outputs`,
+    })
+    expect(reminder!.content).toEqual([{
+      type: 'text',
+      text: `Your turn ended, but task ${task!.id}, which this run was started with and you own, is still in progress. `
+        + 'It declares outputs that are checked on disk: out/result.json. '
+        + `Produce them, then call team_task_update with action complete on ${task!.id} at revision 1. `
+        + 'This reminder is sent once; if your next turn ends with the task still in progress, the run records it as lost.',
+    }])
+  })
+
+  it('accepts a run\'s task with declared outputs that the root completes after the reminder', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'dsh-team-settlement-workspace-'))
+    roots.push(workspace)
+    const { ctx, lead, begin } = await setup(
+      [textResponse('done'), 'hang'],
+      { outputs: [{ path: 'result.txt', kind: 'file' }] },
+      workspace,
+    )
+    const run = await begin(lead)
+    lead.followup(prompt('the request'))
+    const [task] = ctx.agentTeams.listTasks(lead)
+    const settled = run.settle()
+    await vi.waitFor(() => {
+      expect(reminders(lead)).toHaveLength(1)
+    }, { timeout: 5_000 })
+    writeFileSync(join(workspace, 'result.txt'), 'the result')
+    await ctx.agentTeams.updateTask(lead, { taskId: task!.id, expectedRevision: task!.revision, action: 'complete' })
+    lead.cancel({ kind: 'user' })
+    await expect(settled).resolves.toEqual({ unsettled: [] })
+    expect(ctx.agentTeams.getTask(lead, task!.id)).toMatchObject({ status: 'completed', artifacts: [{ path: 'result.txt', bytes: 10 }] })
   })
 
   it('accepts a run\'s task the root completed or deleted itself and reports one it left pending', async () => {

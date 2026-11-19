@@ -53,6 +53,8 @@ export interface TrackedRunRequest {
   readonly subject: string
   readonly description: string
   readonly ownerId: SessionId
+  /** Files the work must produce, checked on disk when the task completes. */
+  readonly outputs?: readonly ArtifactContract[]
 }
 
 /** The fields a transition carries over unchanged, with the status, owner, cause, owner goal, and recorded artifacts removed. */
@@ -189,23 +191,28 @@ export class TeamTaskBoard {
    * @returns the revision-one task view.
    */
   async trackRun(root: Agent, request: TrackedRunRequest): Promise<TeamTaskView> {
-    return this.record(root, request, () => ({
-      status: 'in_progress',
-      ownerId: request.ownerId,
-      blockedBy: [],
-      writeScopes: [],
-    }))
+    return this.record(root, request, () => {
+      const outputs = this.outputs(request.outputs ?? [])
+      return {
+        status: 'in_progress',
+        ownerId: request.ownerId,
+        blockedBy: [],
+        writeScopes: [],
+        ...outputs.length === 0 ? {} : { outputs },
+      }
+    })
   }
 
   /**
-   * Complete one in-progress task from the harness, bypassing member authorization.
+   * Complete one in-progress task from the harness, bypassing member authorization but not the output check.
    * @param root - exact live Team Lead whose log holds the task.
    * @param id - task the harness observed finished.
    * @param ownerId - the owner the harness observed finishing it; the task is refused when another owner holds it.
    * @returns the completed task view.
+   * @throws TeamError `TEAM_TASK_OUTPUT_MISSING` when a declared output is not acceptable on disk.
    */
   async completeRun(root: Agent, id: TeamTaskId, ownerId: SessionId): Promise<TeamTaskView> {
-    return this.transition(root, id, ownerId, current => completed(current, []))
+    return this.transition(root, id, ownerId, async (current, state) => completed(current, await this.settle(root, state, current)))
   }
 
   /**
@@ -461,7 +468,7 @@ export class TeamTaskBoard {
     root: Agent,
     id: TeamTaskId,
     ownerId: SessionId | undefined,
-    next: (current: InProgressTeamTask) => TeamTaskSnapshot,
+    next: (current: InProgressTeamTask, state: TeamState) => TeamTaskSnapshot | Promise<TeamTaskSnapshot>,
   ): Promise<TeamTaskView> {
     return this.journal.transact(root.id, async () => {
       const state = this.journal.state(root)
@@ -476,7 +483,7 @@ export class TeamTaskBoard {
           'TEAM_TASK_INVALID_TRANSITION',
         )
       }
-      const task: TeamTaskSnapshot = { ...next(current), revision: current.revision + 1 }
+      const task: TeamTaskSnapshot = { ...await next(current, state), revision: current.revision + 1 }
       await this.journal.appendAndFlush(root, 'team/task', { version: 3, teamId: TeamId(root.id), task })
       return this.taskView(root, state, task)
     })
@@ -509,7 +516,8 @@ export class TeamTaskBoard {
     if (task.outputs === undefined || !taskUncollected(task.status)) return
     for (const contract of task.outputs) {
       const other = state.tasks.find(candidate =>
-        candidate.id !== task.id && taskUncollected(candidate.status) && (candidate.outputs ?? []).some(item => item.path === contract.path))
+        candidate.id !== task.id && taskUncollected(candidate.status)
+        && (candidate.outputs ?? []).some(item => item.path === contract.path))
       if (other !== undefined) {
         throw new TeamError(`output ${JSON.stringify(contract.path)} is already declared by live task "${other.id}"`, 'TEAM_TASK_OUTPUT_CONFLICT')
       }

@@ -271,13 +271,14 @@ async updateTask(caller: Agent, request: UpdateTeamTaskRequest): Promise<TeamTas
  * Any member may be the caller; the harness uses it for work no member
  * created a task for, such as the request a run was started with.
  * @param caller - exact live Team member that owns the work.
- * @param request - subject and description of the work.
+ * @param request - subject and description of the work, and the files it must produce.
  * @returns the revision-one task view, in progress and owned by the caller.
  */
-async beginTask(caller: Agent, request: Pick<CreateTeamTaskRequest, 'subject' | 'description'>): Promise<TeamTaskView>
+async beginTask(caller: Agent, request: Pick<CreateTeamTaskRequest, 'subject' | 'description' | 'outputs'>): Promise<TeamTaskView>
 
 /**
- * Complete one in-progress task on behalf of the harness, bypassing member authorization.
+ * Complete one in-progress task on behalf of the harness, bypassing member
+ * authorization. Declared outputs are checked on disk as `complete` checks them.
  * @param caller - exact live Team member whose board holds the task.
  * @param id - task the harness observed finished.
  * @param ownerId - the owner the harness observed finishing it. A task another owner holds is

@@ -2637,6 +2637,23 @@ describe('Artifact contracts', () => {
       .rejects.toMatchObject({ code: 'TEAM_INVALID_ARGUMENT' })
   })
 
+  it('checks the declared outputs of begun work when the harness completes it', async () => {
+    const dir = workspace()
+    const { ctx, lead } = await setup([], {}, dir)
+    const begun = await ctx.agentTeams.beginTask(lead, {
+      subject: 'the request', description: 'what the run was asked', outputs: [{ path: './report.txt', kind: 'file' }],
+    })
+    expect(begun).toMatchObject({ status: 'in_progress', ownerName: 'lead', outputs: [{ path: 'report.txt', kind: 'file' }] })
+    await expect(ctx.agentTeams.markCompleted(lead, begun.id, lead.id)).rejects.toMatchObject({
+      code: 'TEAM_TASK_OUTPUT_MISSING', message: `team task "${begun.id}" cannot complete: report.txt: declared, not produced`,
+    })
+    expect(ctx.agentTeams.getTask(lead, begun.id).status).toBe('in_progress')
+    writeFileSync(join(dir, 'report.txt'), 'done')
+    expect(await ctx.agentTeams.markCompleted(lead, begun.id, lead.id)).toMatchObject({
+      status: 'completed', artifacts: [{ path: 'report.txt', bytes: 4 }],
+    })
+  })
+
   it('refuses completion until every declared output exists and passes its check, then records the artifacts', async () => {
     const dir = workspace()
     const { ctx, lead } = await setup([], {}, dir)
