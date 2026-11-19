@@ -1895,6 +1895,31 @@ describe('Lost tasks and the frozen executed graph', () => {
     expect(claimed.status).toBe('in_progress')
   })
 
+  it('records work any member has begun as its own in-progress task, and completes it for the harness', async () => {
+    const { ctx, lead } = await setup(['hang'])
+    const started = await spawn(ctx, lead, 'worker')
+    const worker = await waitRunning(ctx, started.member.id)
+    const own = await ctx.agentTeams.beginTask(lead, { subject: 'the request', description: 'what the run was asked' })
+    const theirs = await ctx.agentTeams.beginTask(worker, { subject: 'begun by worker', description: 'already under way' })
+    expect(own).toMatchObject({ status: 'in_progress', ownerName: 'lead', revision: 1, blockedBy: [], writeScopes: [] })
+    expect(theirs).toMatchObject({ status: 'in_progress', ownerName: 'worker', revision: 1 })
+    expect(durable(lead).tasks).toMatchObject([{ ownerId: lead.id }, { ownerId: worker.id }])
+    expect(ctx.agentTeams.outstandingTasks(lead)).toEqual([
+      { id: own.id, subject: 'the request', ownerName: 'lead', live: false },
+      { id: theirs.id, subject: 'begun by worker', ownerName: 'worker', live: true },
+    ])
+
+    // The harness completes either member's task the same way, from any member of the Team.
+    expect(await ctx.agentTeams.markCompleted(worker, own.id)).toMatchObject({ status: 'completed', ownerName: 'lead' })
+    expect(await ctx.agentTeams.markCompleted(lead, theirs.id)).toMatchObject({ status: 'completed', ownerName: 'worker' })
+    await expect(ctx.agentTeams.markCompleted(lead, own.id))
+      .rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
+    expect(ctx.agentTeams.outstandingTasks(lead)).toEqual([])
+
+    ctx.agentTeams.interrupt(lead, 'worker')
+    await waitNoAgent(ctx, worker.id)
+  })
+
   it('freezes completed tasks and reports Lead-owned work as not live while the Lead is idle', async () => {
     const { ctx, lead } = await setup([])
     const task = await ctx.agentTeams.createTask(lead, { subject: 'own', description: 'own' })

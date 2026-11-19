@@ -767,7 +767,11 @@ export interface Config {
 ```ts config-catalog
 /** Deployment limits for how long a one-shot run follows delegated work. */
 export interface Config {
-  /** Milliseconds after the root turn ends before every task still in progress is marked lost. */
+  /**
+   * Milliseconds from the start of the run before the root's turn is cancelled
+   * and every task still in progress is marked lost. At most 2147483647, the
+   * longest delay a timer accepts.
+   */
   readonly deadlineMs: number
   /**
    * Milliseconds without any Team change, while no task owner is running, before
@@ -777,7 +781,7 @@ export interface Config {
 }
 ```
 
-来源： [`packages/experimental/agent-team-settlement/src/index.ts:26`](../packages/experimental/agent-team-settlement/src/index.ts)
+来源： [`packages/experimental/agent-team-settlement/src/index.ts:30`](../packages/experimental/agent-team-settlement/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-api-speech-to-text"></a>
 

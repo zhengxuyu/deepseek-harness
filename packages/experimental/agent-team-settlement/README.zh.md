@@ -1,5 +1,5 @@
 ---
-description: "在委派的 Team 任务完成前保持 headless 运行存活，用 deadline 与停滞窗口限定等待，并把运行放弃的工作记录为 lost。"
+description: "把 headless 运行的任务记录到 Team 任务板上，在它与委派的 Team 任务完成前保持运行存活，用 deadline 与停滞窗口限定整个运行，并把运行放弃的工作记录为 lost。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-当一次性的 `dsh --profile headless` 运行把工作委派给队友或子 Agent、且不能在这些工作结算前退出时，挂载本包。它在 Agent Teams 任务板之上提供运行器可选的 `ctx.headlessSettlement`：只要有任务处于 `in_progress`，运行就继续；结算中的子 Agent 可以再次唤醒根 Agent 执行一个回合；到 deadline 或停滞后仍未完成的任务会在任务板上标记为 `lost`，并在 stderr 上报告、以非零退出。代价是等待本身，由两个必填窗口限定。
+当 `dsh --profile headless` 运行把工作委派给队友或子 Agent、且不能在这些工作结算前退出时，挂载本包。它在 Agent Teams 任务板之上提供运行器的 `ctx.headlessSettlement`：运行的任务被记录为根 Agent 名下的 `in_progress` 任务；只要根 Agent 处于回合中或有任务处于 `in_progress`，运行就继续；运行的任务随根 Agent 最后一个 completed 回合完成。到 deadline 时根 Agent 的回合被取消；此时或停滞后仍未完成的工作会被标记为 `lost`，并以非零退出报告。
 
 ## 目录
 
@@ -48,7 +48,7 @@ kind: "package-reference"
 
 | 字段 | 默认值 | 含义 |
 |---|---|---|
-| `deadlineMs` | 必填 | 根回合首次结束后经过多少毫秒，把所有仍在进行中的任务标记为 lost。 |
+| `deadlineMs` | 必填，1 到 2147483647 | 运行开始后经过多少毫秒，取消根 Agent 的回合并把所有仍在进行中的任务标记为 lost。 |
 | `stallMs` | 必填，10000 到 3600000 | 在没有任务 owner 运行时，Team 多少毫秒没有任何变化后把剩余任务标记为 lost。 |
 
 `agent-team` 上的 `trackSubagentRuns` 让普通的 `subagent` 委派出现在任务板上；没有它时只跟踪成员认领的任务。生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-experimental-agent-team-settlement)是所有可接受字段的完整来源。
@@ -61,7 +61,7 @@ kind: "package-reference"
 <details>
 <summary>实现内部 — 点击展开</summary>
 
-`settle(root)` 循环执行：等待根 Agent idle，通过 `TeamService.outstandingTasks` 列出任务板上未结算的任务，没有时返回。否则等待下一次 Team 变化：有 owner 在运行时等到剩余的 deadline，没有时等 `stallMs`。停滞超时或 deadline 到期时，对每个剩余任务调用 `TeamService.markLost(root, id, 'run-ended')`，并为每个标记的任务返回一行；期间被其 owner 完成的任务既不会被标记也不会被报告，而因其他原因标记失败的任务在任务板上保持 `in_progress`，并连同该失败原因一起报告。运行器把每一行打印为 `dsh: unsettled: <row>` 并以非零退出。lost 任务保留其 owner 记录；之后恢复的 Lead 通过 `reopen` 恢复它们。插件 dispose 会中止进行中的等待。
+`begin(root, task)` 通过 `TeamService.beginTask` 把任务记录为根 Agent 自己的 `in_progress` 任务，首行作为 subject、全文作为 description，各自截断到任务板的长度上限，并开始计算 deadline。返回的运行的 `settle()` 循环执行：最多用剩余的 deadline 等待根 Agent idle，然后通过 `TeamService.outstandingTasks` 列出任务板上未结算的任务。只剩运行的任务时，按根 Agent 最近的 `turn/end` 结算它：`completed` 时通过 `TeamService.markCompleted` 完成它，其他原因或根本没有回合时以 `owner-failed` 标记为 `lost` 并报告；根 Agent 已自行完成的运行任务被接受，被它 release 或删除的则按其所处状态报告。否则循环等待下一次 Team 变化：有 owner 在运行时等到剩余的 deadline，没有时等 `stallMs`。deadline 到期时，仍处于回合中的根 Agent 被取消，取消原因是指明该 deadline 的 `hook`。停滞超时或 deadline 到期时，对每个剩余任务（包括运行的任务）调用 `TeamService.markLost(root, id, 'run-ended')`，并为每个标记的任务返回一行；期间被其 owner 完成的任务既不会被标记也不会被报告，而因其他原因标记失败的任务在任务板上保持 `in_progress`，并连同该失败原因一起报告。运行器把每一行打印为 `dsh: unsettled: <row>` 并以非零退出。lost 任务保留其 owner 记录；之后恢复的 Lead 通过 `reopen` 恢复它们。插件 dispose 会中止进行中的等待。
 
 | 文件 | 角色 |
 |---|---|
@@ -76,7 +76,7 @@ kind: "package-reference"
 ## 延伸阅读
 
 - [Headless 组合包](../../bundle/headless/README.zh.md)：消费 `ctx.headlessSettlement` 并把报告映射为退出码的运行器。
-- [Agent Teams 服务](../agent-team/README.zh.md)：`lost`、`outstandingTasks`、`markLost` 与 `trackSubagentRuns`。
+- [Agent Teams 服务](../agent-team/README.zh.md)：`lost`、`beginTask`、`markCompleted`、`outstandingTasks`、`markLost` 与 `trackSubagentRuns`。
 - [Agent Teams 子系统](../../../docs/subsystems/agent-team.zh.md)：持久 Team 类型与服务 API。
 - [实验性包](../README.zh.md)：孵化状态与发布策略。
 
@@ -85,11 +85,11 @@ kind: "package-reference"
 <a id="model-experience"></a>
 ## 模型体验
 
-无，因为结算只在任务板上等待并把任务标记为 lost，不向任何模型请求添加内容；根 Agent 看到的只是其子 Agent 与队友本来就会发送的结算通知与 peer 消息。
+间接通过 Team 任务工具产生影响，它们的结果让根 Agent 在任务板上多看到一行：运行的任务，状态 `in_progress`，owner 是根 Agent，description 是提交的任务文本。
 
 #### KV Cache 影响
 
-无；本插件不向任何请求前缀添加内容。
+无；本插件不向任何请求前缀添加内容，任务行只出现在工具结果中。
 
 ## 已知限制与暂缓事项
 
@@ -98,6 +98,7 @@ kind: "package-reference"
 这些限制描述结算等待能观察到什么、不能观察到什么。
 
 - **deadline 与停滞只按墙钟计时**：没有按任务的预算，也没有比一次 Team 变化更细的进度概念；长时间运行却不触碰任务板的子 Agent 只要处于 `running` 就会让运行一直存活。
+- **运行的任务不检查产出**：它在根 Agent 的回合以 `completed` 结束且没有其他未结算任务时完成，而不是在检查了根 Agent 的产出之后。
 - **进程外子 Agent 在结束前都视为运行中**：从不进入 agent 注册表的 provider 承载的子 Agent 无法被观察到 idle，因此只有它的 `subagent/end` 或 deadline 能结算它的任务。
 - **尚无 keyless snapshot**：组装后的插件由包测试与 headless 运行器的 seam 测试覆盖；录制回放场景需要一次真实的委派模型运行。
 

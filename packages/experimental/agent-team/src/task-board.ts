@@ -31,7 +31,7 @@ const TASK_GRAPH_ERROR_CODES: Record<TeamTaskGraphViolation, string> = {
   cycle: 'TEAM_TASK_DEPENDENCY_CYCLE',
 }
 
-/** A run the harness records on the Lead board as one owned in-progress task. */
+/** Work already under way that the harness records on the Lead board as one owned in-progress task. */
 export interface TrackedRunRequest {
   readonly subject: string
   readonly description: string
@@ -69,9 +69,9 @@ export class TeamTaskBoard {
   }
 
   /**
-   * Record one delegated run as an owned in-progress task with no blockers or scopes.
-   * @param root - exact live Team Lead whose log records the run.
-   * @param request - subject, description, and the run's child Session as owner.
+   * Record a delegated run, or work a member has begun, as an owned in-progress task with no blockers or scopes.
+   * @param root - exact live Team Lead whose log records the work.
+   * @param request - subject, description, and the owning member or the run's child Session.
    * @returns the revision-one task view.
    */
   async trackRun(root: Agent, request: TrackedRunRequest): Promise<TeamTaskView> {
@@ -84,9 +84,9 @@ export class TeamTaskBoard {
   }
 
   /**
-   * Complete one tracked run's task from the harness, bypassing member authorization.
+   * Complete one in-progress task from the harness, bypassing member authorization.
    * @param root - exact live Team Lead whose log holds the task.
-   * @param id - task recorded by {@link trackRun}.
+   * @param id - task the harness observed finished.
    * @returns the completed task view.
    */
   async completeRun(root: Agent, id: TeamTaskId): Promise<TeamTaskView> {

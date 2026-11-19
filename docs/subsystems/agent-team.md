@@ -156,6 +156,24 @@ listTasks(caller: Agent): TeamTaskView[]
 async updateTask(caller: Agent, request: UpdateTeamTaskRequest): Promise<TeamTaskView>
 
 /**
+ * Record work the caller has already begun as an in-progress task it owns.
+ * Any member may be the caller; the harness uses it for work no member
+ * created a task for, such as the request a run was started with.
+ * @param caller - exact live Team member that owns the work.
+ * @param request - subject and description of the work.
+ * @returns the revision-one task view, in progress and owned by the caller.
+ */
+async beginTask(caller: Agent, request: Pick<CreateTeamTaskRequest, 'subject' | 'description'>): Promise<TeamTaskView>
+
+/**
+ * Complete one in-progress task on behalf of the harness, bypassing member authorization.
+ * @param caller - exact live Team member whose board holds the task.
+ * @param id - task the harness observed finished.
+ * @returns the completed task view.
+ */
+async markCompleted(caller: Agent, id: TeamTaskId): Promise<TeamTaskView>
+
+/**
  * List in-progress tasks on the caller's Team board with whether each owner is still running.
  * @param caller - exact live Team member reading the board.
  * @returns outstanding rows in creation order; empty once every claimed task settled.
