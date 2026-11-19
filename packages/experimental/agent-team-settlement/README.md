@@ -61,7 +61,7 @@ Choose it for unattended runs, such as benchmarks, where the root may end its tu
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-`settle(root)` loops: wait for the root to be idle, list the board's outstanding tasks through `TeamService.outstandingTasks`, and return when there are none. Otherwise it waits for the next Team change: for the remaining deadline while some owner is running, for `stallMs` while none is. A stall timeout or the deadline calls `TeamService.markLost(root, id, 'run-ended')` on each remaining task and returns one row per task marked; a task whose owner completed it in the meantime is neither marked nor reported. The runner prints each row as `dsh: unsettled: <row>` and exits non-zero. Lost tasks keep their owner recorded; a later resumed Lead recovers them through `reopen`. Plugin disposal aborts a wait in progress.
+`settle(root)` loops: wait for the root to be idle, list the board's outstanding tasks through `TeamService.outstandingTasks`, and return when there are none. Otherwise it waits for the next Team change: for the remaining deadline while some owner is running, for `stallMs` while none is. A stall timeout or the deadline calls `TeamService.markLost(root, id, 'run-ended')` on each remaining task and returns one row per task marked; a task whose owner completed it in the meantime is neither marked nor reported, while a task whose mark failed for any other reason stays `in_progress` on the board and is reported with that failure. The runner prints each row as `dsh: unsettled: <row>` and exits non-zero. Lost tasks keep their owner recorded; a later resumed Lead recovers them through `reopen`. Plugin disposal aborts a wait in progress.
 
 | File | Role |
 |---|---|

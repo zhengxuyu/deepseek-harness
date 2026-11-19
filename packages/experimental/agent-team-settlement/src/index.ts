@@ -13,6 +13,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { TeamError } from '@deepseek-ai/dsh-experimental-agent-team'
 import type { OutstandingTeamTask, TeamService } from '@deepseek-ai/dsh-experimental-agent-team'
 import type { HeadlessSettlement, HeadlessSettlementReport } from '@deepseek-ai/dsh-headless'
 
@@ -49,7 +50,9 @@ function row(task: OutstandingTeamTask, why: string): string {
 
 /**
  * Mark every outstanding task lost and describe each. A task that settled
- * between the listing and the mark is not lost and not reported.
+ * between the listing and the mark is not lost and not reported. A task whose
+ * mark failed for any other reason is reported with that failure, so the run
+ * still exits non-zero for work it neither collected nor recorded as lost.
  */
 async function abandon(
   teams: TeamService,
@@ -61,9 +64,12 @@ async function abandon(
   for (const task of outstanding) {
     try {
       await teams.markLost(root, task.id, 'run-ended')
-    } catch {
-      // The only transition the mark can lose is to the owner finishing first,
-      // which the board rejects as a no-longer-in-progress task.
+    } catch (error) {
+      // The board refuses the mark with this code only when the task left
+      // in_progress first, which is the owner settling it.
+      if (error instanceof TeamError && error.code === 'TEAM_TASK_INVALID_TRANSITION') continue
+      const failure = error instanceof Error ? error.message : String(error)
+      unsettled.push(row(task, `${why}; recording it as lost failed: ${failure}`))
       continue
     }
     unsettled.push(row(task, why))

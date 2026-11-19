@@ -171,6 +171,34 @@ describe('agent-team-settlement', () => {
     expect(ctx.agentTeams.getTask(lead, TeamTaskId(first.id)).status).toBe('in_progress')
   })
 
+  it('reports a task whose lost mark failed, and still marks the tasks after it', async () => {
+    const { ctx, lead, settle } = await setup([], { deadlineMs: 1 })
+    const tasks = []
+    for (const subject of ['first', 'second', 'third']) {
+      const task = await ctx.agentTeams.createTask(lead, { subject, description: subject })
+      await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action: 'claim' })
+      tasks.push(task)
+    }
+    const [first, second, third] = tasks
+    vi.spyOn(ctx.agentTeams, 'markLost')
+      .mockRejectedValueOnce(new Error('disk full'))
+      .mockRejectedValueOnce('refused')
+    vi.useFakeTimers()
+    const settled = settle(lead)
+    await vi.waitFor(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(ctx.agentTeams.getTask(lead, third!.id).status).toBe('lost')
+    })
+    await expect(settled).resolves.toEqual({
+      unsettled: [
+        `${first!.id} "first" owned by lead: still in progress at the 1 ms deadline; recording it as lost failed: disk full`,
+        `${second!.id} "second" owned by lead: still in progress at the 1 ms deadline; recording it as lost failed: refused`,
+        `${third!.id} "third" owned by lead: still in progress at the 1 ms deadline`,
+      ],
+    })
+    expect(ctx.agentTeams.getTask(lead, first!.id).status).toBe('in_progress')
+  })
+
   it('abandons its wait when the plugin is disposed', async () => {
     const { ctx, lead, fiber, settle } = await setup([])
     const task = await ctx.agentTeams.createTask(lead, { subject: 'waiting', description: 'waiting' })
