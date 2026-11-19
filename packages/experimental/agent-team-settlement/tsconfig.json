@@ -10,6 +10,7 @@
     { "path": "../../../vendor/schemastery" },
     { "path": "../../../vendor/cordis" },
     { "path": "../../core/agent" },
+    { "path": "../../llm/llm" },
     { "path": "../../bundle/headless" },
     { "path": "../agent-team" }
   ]

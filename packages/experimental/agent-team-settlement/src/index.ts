@@ -4,8 +4,10 @@
  * is started with is recorded as an in-progress task owned by the root, like
  * any task a member works on. The run keeps going while the root is in a turn
  * or any task on its board is in progress; a settling child may wake the root
- * again. The run's task completes when the root's last turn completed with
- * nothing else outstanding. When the deadline passes the root's turn is
+ * again. A run's task without declared outputs completes when the root's last
+ * turn completed with nothing else outstanding. One with declared outputs is
+ * completed only by the root, through the task tool that checks them on disk;
+ * the root is reminded once. When the deadline passes the root's turn is
  * cancelled, and work still open then, or when nothing is running and nothing
  * changes for the stall window, is marked `lost` and reported, so the run never
  * records a result it did not collect.
@@ -17,7 +19,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { TeamError } from '@deepseek-ai/dsh-experimental-agent-team'
-import type { OutstandingTeamTask, TeamService, TeamTaskId } from '@deepseek-ai/dsh-experimental-agent-team'
+import type { ArtifactContract, OutstandingTeamTask, TeamService, TeamTaskId, TeamTaskView } from '@deepseek-ai/dsh-experimental-agent-team'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { ContextFormed } from '@deepseek-ai/dsh-llm'
 import type { HeadlessSettlement, HeadlessSettlementReport } from '@deepseek-ai/dsh-headless'
 
 /** Stable Cordis plugin name. */
@@ -26,7 +30,25 @@ export const name = 'agent-team-settlement'
 /** The Team board this plugin settles over. */
 export const inject = ['agentTeams']
 
-/** Deployment limits for how long a one-shot run follows delegated work. */
+/** Source of the reminder sent to a root whose turn completed with the run's declared outputs unsettled. */
+export interface AgentTeamSettlementSource {
+  kind: 'agent-team-settlement'
+  /** The run's task the reminder is about. */
+  taskId: TeamTaskId
+}
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /**
+     * Reminder attribution; readers preserve the notice without this producer,
+     * and the kind imposes no validation, replay, or authority requirement.
+     * @persistenceAttribution
+     */
+    'agent-team-settlement': AgentTeamSettlementSource & ContextFormed
+  }
+}
+
+/** Deployment limits for how long a one-shot run follows delegated work, and what the run must produce. */
 export interface Config {
   /**
    * Milliseconds from the start of the run before the root's turn is cancelled
@@ -39,6 +61,12 @@ export interface Config {
    * the remaining tasks are marked lost. At least ten seconds, at most one hour.
    */
   readonly stallMs: number
+  /**
+   * Files the run's task must produce, declared on it like any task's outputs.
+   * When any is declared, only the root completes the run's task, through the
+   * task tool that checks them on disk. Empty when omitted.
+   */
+  readonly outputs: ArtifactContract[]
 }
 
 /** The longest delay `setTimeout` accepts without firing at once. */
@@ -47,6 +75,12 @@ const MAX_TIMER_MS = 2_147_483_647
 export const Config: z<Config> = z.object({
   deadlineMs: z.number().step(1).min(1).max(MAX_TIMER_MS).required(),
   stallMs: z.number().step(1).min(10_000).max(3_600_000).required(),
+  outputs: z.array(z.object({
+    path: z.string().required(),
+    kind: z.union(['file', 'json', 'csv', 'npy', 'image', 'python'] as const).required(),
+    schema: z.any(),
+    optional: z.boolean(),
+  })),
 })
 
 /** The Team change wait accepts ten seconds through one hour. */
@@ -57,11 +91,12 @@ const MAX_WAIT_MS = 3_600_000
 const SUBJECT_LIMIT = 200
 const DESCRIPTION_LIMIT = 16_384
 
-/** One run being followed: its task on the board, its deadline, and how the root's latest turn ended. */
+/** One run being followed: its task on the board, its deadline, how the root's latest turn ended, and whether the root was reminded. */
 interface FollowedRun {
   readonly task: TeamTaskId
   readonly deadline: number
   lastTurnEnd?: string
+  reminded: boolean
 }
 
 /** One reported row for a task the run gave up on. */
@@ -114,23 +149,56 @@ async function idleWithin(root: Agent, ms: number): Promise<boolean> {
   }
 }
 
+/** Start a root turn telling the root its task's declared outputs are still unsettled. */
+function remind(root: Agent, task: TeamTaskView): void {
+  const paths = task.outputs.map(output => output.path).join(', ')
+  root.followup(createUserMessage({
+    content: [{
+      type: 'text',
+      text: `Your turn ended, but task ${task.id}, which this run was started with and you own, is still in progress. `
+        + `It declares outputs that are checked on disk: ${paths}. `
+        + `Produce them, then call team_task_update with action complete on ${task.id} at revision ${task.revision}. `
+        + 'This reminder is sent once; if your next turn ends with the task still in progress, the run records it as lost.',
+    }],
+    source: {
+      kind: 'agent-team-settlement',
+      taskId: task.id,
+      form: 'notice',
+      summary: `reminded to complete ${task.id} and its declared outputs`,
+    },
+  }))
+}
+
 /**
- * Settle the run's own task once nothing else is outstanding: complete it when
- * the root's latest turn completed, lose it when that turn ended any other way,
- * and report it when the root moved it out of progress without completing it.
+ * Settle the run's own task once nothing else is outstanding. A task the root
+ * completed is accepted, and one it moved out of progress is reported. A task
+ * still in progress is lost when the root's latest turn did not complete.
+ * After a completed turn, a task without declared outputs is completed here,
+ * and one with declared outputs is left to the root: reminded once, then lost.
+ * @returns the report, or undefined when the root was reminded and runs again.
  */
-async function close(teams: TeamService, root: Agent, run: FollowedRun): Promise<HeadlessSettlementReport> {
+async function close(teams: TeamService, root: Agent, run: FollowedRun): Promise<HeadlessSettlementReport | undefined> {
   const task = teams.getTask(root, run.task)
   if (task.status === 'completed') return { unsettled: [] }
   if (task.status !== 'in_progress') {
     return { unsettled: [`${task.id} "${task.subject}": the run's task was left ${task.status}`] }
   }
-  if (run.lastTurnEnd === 'completed') {
+  let ended: string
+  if (run.lastTurnEnd === undefined) {
+    ended = 'no turn ran'
+  } else if (run.lastTurnEnd !== 'completed') {
+    ended = `the turn ended ${run.lastTurnEnd}`
+  } else if (task.outputs.length === 0) {
     await teams.markCompleted(root, task.id)
     return { unsettled: [] }
+  } else if (!run.reminded) {
+    run.reminded = true
+    remind(root, task)
+    return undefined
+  } else {
+    ended = 'the turn completed without completing the task and its declared outputs, after one reminder'
   }
   await teams.markLost(root, task.id, 'owner-failed')
-  const ended = run.lastTurnEnd === undefined ? 'no turn ran' : `the turn ended ${run.lastTurnEnd}`
   return { unsettled: [`${task.id} "${task.subject}" owned by ${task.ownerName}: ${ended}`] }
 }
 
@@ -165,7 +233,11 @@ async function settle(
     }
     const outstanding = teams.outstandingTasks(root)
     const others = outstanding.filter(task => task.id !== run.task)
-    if (others.length === 0) return await close(teams, root, run)
+    if (others.length === 0) {
+      const report = await close(teams, root, run)
+      if (report !== undefined) return report
+      continue
+    }
     const live = others.some(task => task.live)
     const left = run.deadline - Date.now()
     const wait = Math.min(MAX_WAIT_MS, Math.max(MIN_WAIT_MS, live ? left : Math.min(left, config.stallMs)))
@@ -203,8 +275,8 @@ export function apply(ctx: Context, config: Config): void {
   const settlement: HeadlessSettlement = {
     async begin(root, task) {
       const deadline = Date.now() + config.deadlineMs
-      const recorded = await ctx.agentTeams.beginTask(root, taskText(task))
-      const run: FollowedRun = { task: recorded.id, deadline }
+      const recorded = await ctx.agentTeams.beginTask(root, { ...taskText(task), outputs: config.outputs })
+      const run: FollowedRun = { task: recorded.id, deadline, reminded: false }
       runs.set(root.id, run)
       return {
         async settle() {

@@ -6967,6 +6967,9 @@ importers:
       '@deepseek-ai/dsh-experimental-agent-team':
         specifier: workspace:^
         version: link:../agent-team
+      '@deepseek-ai/dsh-fs-local':
+        specifier: workspace:^
+        version: link:../../fs/fs-local
       '@deepseek-ai/dsh-headless':
         specifier: workspace:^
         version: link:../../bundle/headless

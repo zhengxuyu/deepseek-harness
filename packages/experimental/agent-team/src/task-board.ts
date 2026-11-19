@@ -43,6 +43,8 @@ export interface TrackedRunRequest {
   readonly subject: string
   readonly description: string
   readonly ownerId: SessionId
+  /** Files the work must produce, checked on disk when the task completes. */
+  readonly outputs?: readonly ArtifactContract[]
 }
 
 /** Whether a task is on the open part of the graph, where its text and edges may still change. */
@@ -102,22 +104,30 @@ export class TeamTaskBoard {
    * @returns the revision-one task view.
    */
   async trackRun(root: Agent, request: TrackedRunRequest): Promise<TeamTaskView> {
-    return this.record(root, request, () => ({
-      status: 'in_progress',
-      ownerId: request.ownerId,
-      blockedBy: [],
-      writeScopes: [],
-    }))
+    return this.record(root, request, () => {
+      const outputs = this.outputs(request.outputs ?? [])
+      return {
+        status: 'in_progress',
+        ownerId: request.ownerId,
+        blockedBy: [],
+        writeScopes: [],
+        ...outputs.length === 0 ? {} : { outputs },
+      }
+    })
   }
 
   /**
-   * Complete one in-progress task from the harness, bypassing member authorization.
+   * Complete one in-progress task from the harness, bypassing member authorization but not the output check.
    * @param root - exact live Team Lead whose log holds the task.
    * @param id - task the harness observed finished.
    * @returns the completed task view.
+   * @throws TeamError `TEAM_TASK_OUTPUT_MISSING` when a declared output is not acceptable on disk.
    */
   async completeRun(root: Agent, id: TeamTaskId): Promise<TeamTaskView> {
-    return this.transition(root, id, current => ({ ...current, status: 'completed' }))
+    return this.transition(root, id, async (current, state) => {
+      const artifacts = await this.settle(root, state, current)
+      return { ...current, status: 'completed', ...artifacts.length === 0 ? {} : { artifacts } }
+    })
   }
 
   /**
@@ -364,7 +374,7 @@ export class TeamTaskBoard {
   private async transition(
     root: Agent,
     id: TeamTaskId,
-    next: (current: TeamTaskSnapshot) => TeamTaskSnapshot,
+    next: (current: TeamTaskSnapshot, state: TeamState) => TeamTaskSnapshot | Promise<TeamTaskSnapshot>,
   ): Promise<TeamTaskView> {
     return this.journal.transact(root.id, async () => {
       const state = this.journal.state(root)
@@ -373,7 +383,7 @@ export class TeamTaskBoard {
       if (current.status !== 'in_progress') {
         throw new TeamError(`team task "${id}" is ${current.status}, not in progress`, 'TEAM_TASK_INVALID_TRANSITION')
       }
-      const task: TeamTaskSnapshot = { ...next(current), revision: current.revision + 1 }
+      const task: TeamTaskSnapshot = { ...await next(current, state), revision: current.revision + 1 }
       await this.journal.appendAndFlush(root, 'team/task', { version: 3, teamId: TeamId(root.id), task })
       return this.taskView(root, state, task)
     })

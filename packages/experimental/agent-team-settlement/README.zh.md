@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-当 `dsh --profile headless` 运行把工作委派给队友或子 Agent、且不能在这些工作结算前退出时，挂载本包。它在 Agent Teams 任务板之上提供运行器的 `ctx.headlessSettlement`：运行的任务被记录为根 Agent 名下的 `in_progress` 任务；只要根 Agent 处于回合中或有任务处于 `in_progress`，运行就继续；运行的任务随根 Agent 最后一个 completed 回合完成。到 deadline 时根 Agent 的回合被取消；此时或停滞后仍未完成的工作会被标记为 `lost`，并以非零退出报告。
+当 `dsh --profile headless` 运行把工作委派给队友或子 Agent、且不能在这些工作结算前退出时，挂载本包。它在 Agent Teams 任务板之上提供运行器的 `ctx.headlessSettlement`：运行的任务被记录为根 Agent 名下的 `in_progress` 任务；只要根 Agent 处于回合中或有任务处于 `in_progress`，运行就继续；运行的任务随根 Agent 最后一个 completed 回合完成，声明了产出时则只能由根 Agent 完成。到 deadline 时根 Agent 的回合被取消；此时或停滞后仍未完成的工作会被标记为 `lost`，并以非零退出报告。
 
 ## 目录
 
@@ -50,6 +50,7 @@ kind: "package-reference"
 |---|---|---|
 | `deadlineMs` | 必填，1 到 2147483647 | 运行开始后经过多少毫秒，取消根 Agent 的回合并把所有仍在进行中的任务标记为 lost。 |
 | `stallMs` | 必填，10000 到 3600000 | 在没有任务 owner 运行时，Team 多少毫秒没有任何变化后把剩余任务标记为 lost。 |
+| `outputs` | `[]` | 运行的任务必须产出的文件，每项为 `{ path, kind, schema?, optional? }`，与任何 Team 任务相同。只要声明了任何一项，运行的任务就只能由根 Agent 通过 `team_task_update` 完成，该工具会在磁盘上检查这些产出。 |
 
 `agent-team` 上的 `trackSubagentRuns` 让普通的 `subagent` 委派出现在任务板上；没有它时只跟踪成员认领的任务。生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-experimental-agent-team-settlement)是所有可接受字段的完整来源。
 
@@ -61,7 +62,7 @@ kind: "package-reference"
 <details>
 <summary>实现内部 — 点击展开</summary>
 
-`begin(root, task)` 通过 `TeamService.beginTask` 把任务记录为根 Agent 自己的 `in_progress` 任务，首行作为 subject、全文作为 description，各自截断到任务板的长度上限，并开始计算 deadline。返回的运行的 `settle()` 循环执行：最多用剩余的 deadline 等待根 Agent idle，然后通过 `TeamService.outstandingTasks` 列出任务板上未结算的任务。只剩运行的任务时，按根 Agent 最近的 `turn/end` 结算它：`completed` 时通过 `TeamService.markCompleted` 完成它，其他原因或根本没有回合时以 `owner-failed` 标记为 `lost` 并报告；根 Agent 已自行完成的运行任务被接受，被它 release 或删除的则按其所处状态报告。否则循环等待下一次 Team 变化：有 owner 在运行时等到剩余的 deadline，没有时等 `stallMs`。deadline 到期时，仍处于回合中的根 Agent 被取消，取消原因是指明该 deadline 的 `hook`。停滞超时或 deadline 到期时，对每个剩余任务（包括运行的任务）调用 `TeamService.markLost(root, id, 'run-ended')`，并为每个标记的任务返回一行；期间被其 owner 完成的任务既不会被标记也不会被报告，而因其他原因标记失败的任务在任务板上保持 `in_progress`，并连同该失败原因一起报告。运行器把每一行打印为 `dsh: unsettled: <row>` 并以非零退出。lost 任务保留其 owner 记录；之后恢复的 Lead 通过 `reopen` 恢复它们。插件 dispose 会中止进行中的等待。
+`begin(root, task)` 通过 `TeamService.beginTask` 把任务记录为根 Agent 自己的 `in_progress` 任务，首行作为 subject、全文作为 description，各自截断到任务板的长度上限，配置的 `outputs` 作为它声明的产出，并开始计算 deadline。返回的运行的 `settle()` 循环执行：最多用剩余的 deadline 等待根 Agent idle，然后通过 `TeamService.outstandingTasks` 列出任务板上未结算的任务。只剩运行的任务时，按根 Agent 最近的 `turn/end` 结算它：`completed` 且未声明产出时通过 `TeamService.markCompleted` 完成它，其他原因或根本没有回合时以 `owner-failed` 标记为 `lost` 并报告；根 Agent 已自行完成的运行任务被接受，被它 release 或删除的则按其所处状态报告。声明了产出的运行任务永远不由本插件完成：在一个 `completed` 回合结束而它仍处于 `in_progress` 之后，根 Agent 会收到一条写入日志的提醒，作为 follow-up 消息开启下一个回合；第二次出现这种回合时，任务以 `owner-failed` 标记为 `lost` 并报告。否则循环等待下一次 Team 变化：有 owner 在运行时等到剩余的 deadline，没有时等 `stallMs`。deadline 到期时，仍处于回合中的根 Agent 被取消，取消原因是指明该 deadline 的 `hook`。停滞超时或 deadline 到期时，对每个剩余任务（包括运行的任务）调用 `TeamService.markLost(root, id, 'run-ended')`，并为每个标记的任务返回一行；期间被其 owner 完成的任务既不会被标记也不会被报告，而因其他原因标记失败的任务在任务板上保持 `in_progress`，并连同该失败原因一起报告。运行器把每一行打印为 `dsh: unsettled: <row>` 并以非零退出。lost 任务保留其 owner 记录；之后恢复的 Lead 通过 `reopen` 恢复它们。插件 dispose 会中止进行中的等待。
 
 | 文件 | 角色 |
 |---|---|
@@ -85,11 +86,25 @@ kind: "package-reference"
 <a id="model-experience"></a>
 ## 模型体验
 
-间接通过 Team 任务工具产生影响，它们的结果让根 Agent 在任务板上多看到一行：运行的任务，状态 `in_progress`，owner 是根 Agent，description 是提交的任务文本。
+### 完成提醒
+
+#### 模型看到什么
+
+Team 任务工具让根 Agent 在任务板上多看到一行：运行的任务，状态 `in_progress`，owner 是根 Agent，description 是提交的任务文本，并带有配置的产出。当该任务声明了产出、而根 Agent 的回合以 completed 结束时它仍处于 `in_progress`，根 Agent 会收到一次下面这条消息，其中的任务 id、产出路径和 revision 按实际填入。不向系统提示词或工具 schema 添加任何内容。
+
+##### 提醒消息
+
+```markdown
+Your turn ended, but task task-1, which this run was started with and you own, is still in progress. It declares outputs that are checked on disk: out/result.json. Produce them, then call team_task_update with action complete on task-1 at revision 1. This reminder is sent once; if your next turn ends with the task still in progress, the run records it as lost.
+```
+
+#### Token 影响
+
+除非运行的任务声明了产出、且根 Agent 的某个回合结束时没有完成它，否则为零。提醒会保留在根 Agent 的历史中，并至少多花一次模型请求。
 
 #### KV Cache 影响
 
-无；本插件不向任何请求前缀添加内容，任务行只出现在工具结果中。
+仅追加；提醒位于可复用的请求前缀之后，不会使已有的 KV-cache 条目失效。
 
 ## 已知限制与暂缓事项
 
@@ -98,7 +113,7 @@ kind: "package-reference"
 这些限制描述结算等待能观察到什么、不能观察到什么。
 
 - **deadline 与停滞只按墙钟计时**：没有按任务的预算，也没有比一次 Team 变化更细的进度概念；长时间运行却不触碰任务板的子 Agent 只要处于 `running` 就会让运行一直存活。
-- **运行的任务不检查产出**：它在根 Agent 的回合以 `completed` 结束且没有其他未结算任务时完成，而不是在检查了根 Agent 的产出之后。
+- **未声明产出的运行任务不检查产出**：它在根 Agent 的回合以 `completed` 结束且没有其他未结算任务时完成；配置 `outputs` 可要求在磁盘上检查文件。
 - **进程外子 Agent 在结束前都视为运行中**：从不进入 agent 注册表的 provider 承载的子 Agent 无法被观察到 idle，因此只有它的 `subagent/end` 或 deadline 能结算它的任务。
 - **尚无 keyless snapshot**：组装后的插件由包测试与 headless 运行器的 seam 测试覆盖；录制回放场景需要一次真实的委派模型运行。
 

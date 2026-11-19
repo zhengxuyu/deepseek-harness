@@ -772,7 +772,7 @@ export interface Config {
 需要： `agentTeams`
 
 ```ts config-catalog
-/** Deployment limits for how long a one-shot run follows delegated work. */
+/** Deployment limits for how long a one-shot run follows delegated work, and what the run must produce. */
 export interface Config {
   /**
    * Milliseconds from the start of the run before the root's turn is cancelled
@@ -785,10 +785,18 @@ export interface Config {
    * the remaining tasks are marked lost. At least ten seconds, at most one hour.
    */
   readonly stallMs: number
+  /**
+   * Files the run's task must produce, declared on it like any task's outputs.
+   * When any is declared, only the root completes the run's task, through the
+   * task tool that checks them on disk. Empty when omitted.
+   */
+  readonly outputs: ArtifactContract[]
 }
 ```
 
-来源： [`packages/experimental/agent-team-settlement/src/index.ts:30`](../packages/experimental/agent-team-settlement/src/index.ts)
+依赖： [`ArtifactContract`](../packages/experimental/agent-team/src/index.ts)
+
+来源： [`packages/experimental/agent-team-settlement/src/index.ts:52`](../packages/experimental/agent-team-settlement/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-api-speech-to-text"></a>
 
