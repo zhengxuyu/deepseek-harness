@@ -123,17 +123,19 @@ The plugin adds no status of its own. It records the task the run was started wi
 
 ```mermaid
 flowchart TD
-  begin["begin: beginTask records the run's task, in_progress, owned by the root"] --> idle{"root idle before the deadline?"}
-  idle -- no --> cancel["cancel the root's turn; markLost run-ended on every in_progress task"] --> report
-  idle -- yes --> others{"other tasks in_progress?"}
-  others -- no --> last{"root's latest turn completed?"}
-  last -- yes --> done["markCompleted on the run's task"] --> report
-  last -- no --> lostRun["markLost owner-failed on the run's task"] --> report
-  others -- yes --> wait["waitForChange"] --> stalled{"timed out with no owner running?"}
-  stalled -- yes --> stall["markLost run-ended on the remaining tasks"] --> report
+  begin["beginTask"] --> idle{"root idle?"}
+  idle -- deadline passed --> cancel["cancel root"] --> ended["run-ended"] --> report
+  idle -- idle --> others{"others open?"}
+  others -- no --> last{"turn done?"}
+  last -- yes --> done["markCompleted"] --> report
+  last -- no --> failed["owner-failed"] --> report
+  others -- yes --> wait["waitForChange"] --> stalled{"stalled?"}
+  stalled -- yes --> ended
   stalled -- no --> idle
-  report["report unsettled rows"]
+  report["report"]
 ```
+
+`run-ended` and `owner-failed` are `markLost` causes: the first marks every task still `in_progress`, the second only the run's task. "Others open" asks whether any task other than the run's is `in_progress`; "stalled" means the wait timed out while no owner was running.
 
 | Outcome | Condition | Board record | Reported as unsettled |
 |---|---|---|---|

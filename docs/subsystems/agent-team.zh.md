@@ -123,17 +123,19 @@ stateDiagram-v2
 
 ```mermaid
 flowchart TD
-  begin["begin: beginTask records the run's task, in_progress, owned by the root"] --> idle{"root idle before the deadline?"}
-  idle -- no --> cancel["cancel the root's turn; markLost run-ended on every in_progress task"] --> report
-  idle -- yes --> others{"other tasks in_progress?"}
-  others -- no --> last{"root's latest turn completed?"}
-  last -- yes --> done["markCompleted on the run's task"] --> report
-  last -- no --> lostRun["markLost owner-failed on the run's task"] --> report
-  others -- yes --> wait["waitForChange"] --> stalled{"timed out with no owner running?"}
-  stalled -- yes --> stall["markLost run-ended on the remaining tasks"] --> report
+  begin["beginTask"] --> idle{"root idle?"}
+  idle -- deadline passed --> cancel["cancel root"] --> ended["run-ended"] --> report
+  idle -- idle --> others{"others open?"}
+  others -- no --> last{"turn done?"}
+  last -- yes --> done["markCompleted"] --> report
+  last -- no --> failed["owner-failed"] --> report
+  others -- yes --> wait["waitForChange"] --> stalled{"stalled?"}
+  stalled -- yes --> ended
   stalled -- no --> idle
-  report["report unsettled rows"]
+  report["report"]
 ```
+
+`run-ended` 与 `owner-failed` 是 `markLost` 的原因：前者标记所有仍处于 `in_progress` 的任务，后者只标记运行的任务。“others open”问的是除运行的任务外是否还有任务处于 `in_progress`；“stalled”表示等待超时且没有 owner 在运行。
 
 | 结果 | 条件 | 任务板记录 | 是否报告为 unsettled |
 |---|---|---|---|
