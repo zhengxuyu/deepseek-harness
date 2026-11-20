@@ -3,6 +3,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { load } from 'js-yaml'
 import { afterEach, describe, expect, it } from 'vitest'
 import { analyze, parseSessionLog, renderSummary } from './analyze.ts'
 import { OrdersReportCase } from './cases/orders-report/case.ts'
@@ -79,7 +80,7 @@ describe('standard case settings', () => {
     const patch = patchLayer(resolveSettings({}), '/home', 900_000)
     expect(patch).toContain('apiKeyEnv: OPENROUTER_API_KEY')
     expect(patch).toContain('compression: none')
-    expect(patch).toContain('root: /home/sessions')
+    expect(load(patch)).toContainEqual({ id: 'session-persistence-jsonl', config: { root: join('/home', 'sessions'), compression: 'none' } })
     expect(patch).toContain('id: agent-team-settlement')
     expect(patch).toContain('deadlineMs: 900000')
     expect(patch).toContain('trackSubagentRuns: true')
