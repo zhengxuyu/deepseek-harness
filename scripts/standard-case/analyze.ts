@@ -2,13 +2,13 @@
  * Analyze one finished standard-case run from what it left on disk: the
  * Session logs of the Lead and every teammate, the workspace, stderr, and
  * `run.json`. The analysis has three parts: measurements of the trajectory,
- * a timeline of the Team's events, and a rubric that judges the result and
- * the way the Team worked.
+ * a timeline of the Team's events, and the rubric the case judges the result
+ * and the Team's work by.
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { expectedRegionTotals, expectedTopCustomers } from './fixture.ts'
+import type { AgentMeasure, RubricItem, StandardCase, TaskOutcome } from './case.ts'
 import type { RunRecord } from './run.ts'
 
 /** One event of a Session log, as far as the analysis reads it. */
@@ -24,46 +24,16 @@ export interface SessionLog {
   readonly events: readonly LogEvent[]
 }
 
-/** What one agent did, measured from its own log. */
-export interface AgentMeasure {
-  readonly id: string
-  readonly name: string
-  readonly role: 'lead' | 'teammate'
-  readonly turns: number
-  readonly turnEnds: string[]
-  readonly modelRequests: number
-  readonly inputTokens: number
-  readonly outputTokens: number
-  readonly toolCalls: Record<string, number>
-  readonly toolErrors: number
-}
-
-/** The final state of one task on the Team board. */
-export interface TaskOutcome {
-  readonly id: string
-  readonly subject: string
-  readonly status: string
-  readonly owner: string | undefined
-  readonly lostCause: string | undefined
-  readonly revisions: number
-}
-
 /** One line of the Team timeline. */
 export interface TimelineEntry {
   readonly atSeconds: number
   readonly text: string
 }
 
-/** One judged criterion. */
-export interface RubricItem {
-  readonly id: string
-  readonly criterion: string
-  readonly passed: boolean
-  readonly detail: string
-}
-
 /** The whole analysis of one run. */
 export interface Analysis {
+  readonly case: string
+  readonly description: string
   readonly run: RunRecord | undefined
   readonly unsettled: string[]
   readonly agents: AgentMeasure[]
@@ -215,125 +185,13 @@ function readText(path: string): string | undefined {
   return existsSync(path) ? readFileSync(path, 'utf8') : undefined
 }
 
-function sameAmount(left: unknown, right: number): boolean {
-  const value = typeof left === 'string' ? Number(left) : left
-  return typeof value === 'number' && Math.abs(value - right) < 0.005
-}
-
-/**
- * Judge the three files the task asks for against the fixture's results.
- * @param workspace - the run's workspace.
- * @returns one rubric item per file.
- */
-export function judgeOutputs(workspace: string): RubricItem[] {
-  const regions = expectedRegionTotals()
-  const customers = expectedTopCustomers()
-  const items: RubricItem[] = []
-
-  const regionText = readText(join(workspace, 'out/region_totals.json'))
-  let regionDetail = 'out/region_totals.json is missing'
-  let regionPassed = false
-  if (regionText !== undefined) {
-    try {
-      const actual = record(JSON.parse(regionText))
-      const wrong = Object.entries(regions).filter(([region, total]) => !sameAmount(actual[region], total)).map(([region]) => region)
-      const extra = Object.keys(actual).filter(region => !(region in regions))
-      regionPassed = wrong.length === 0 && extra.length === 0
-      regionDetail = regionPassed ? 'every region total matches' : `wrong or missing: ${wrong.join(', ') || 'none'}; unexpected keys: ${extra.join(', ') || 'none'}`
-    } catch (error: unknown) {
-      regionDetail = `not valid JSON: ${error instanceof Error ? error.message : String(error)}`
-    }
-  }
-  items.push({ id: 'region-totals', criterion: 'out/region_totals.json states the paid total of every region', passed: regionPassed, detail: regionDetail })
-
-  const customerText = readText(join(workspace, 'out/top_customers.csv'))
-  let customerDetail = 'out/top_customers.csv is missing'
-  let customerPassed = false
-  if (customerText !== undefined) {
-    const [header, ...rows] = customerText.split('\n').map(line => line.trim()).filter(line => line !== '')
-    const parsed = rows.map(row => row.split(',').map(cell => cell.trim()))
-    customerPassed = header === 'customer,total' && parsed.length === customers.length
-      && customers.every((expected, index) => parsed[index]?.[0] === expected.customer && sameAmount(parsed[index][1], expected.total))
-    customerDetail = customerPassed ? 'header and all three rows match, in order' : `got header "${header ?? ''}" and rows ${JSON.stringify(parsed)}`
-  }
-  items.push({ id: 'top-customers', criterion: 'out/top_customers.csv lists the three highest-paying customers in order', passed: customerPassed, detail: customerDetail })
-
-  const report = readText(join(workspace, 'out/report.md'))
-  const topRegion = Object.entries(regions).toSorted((left, right) => right[1] - left[1]).slice(0, 1)
-  const needed = [
-    ...topRegion.flatMap(([region, total]) => [region, total.toFixed(2)]),
-    ...customers.slice(0, 1).flatMap(top => [top.customer, top.total.toFixed(2)]),
-  ]
-  const missing = report === undefined ? needed : needed.filter(piece => !report.includes(piece))
-  items.push({
-    id: 'report',
-    criterion: 'out/report.md names the top region and the top customer with their totals',
-    passed: report !== undefined && missing.length === 0,
-    detail: report === undefined ? 'out/report.md is missing' : missing.length === 0 ? 'all four facts are quoted' : `does not contain: ${missing.join(', ')}`,
-  })
-  return items
-}
-
-/**
- * Judge how the Team worked, from the board's final state and the agents' measures.
- * @param run - the run record, when one was written.
- * @param unsettled - the rows the runner printed as unsettled.
- * @param agents - every agent's measures.
- * @param tasks - every task's final state.
- * @returns the rubric items about the trajectory.
- */
-export function judgeTrajectory(
-  run: RunRecord | undefined,
-  unsettled: readonly string[],
-  agents: readonly AgentMeasure[],
-  tasks: readonly TaskOutcome[],
-): RubricItem[] {
-  const lead = agents.find(agent => agent.role === 'lead')
-  const teammates = agents.filter(agent => agent.role === 'teammate')
-  const live = tasks.filter(task => task.status !== 'deleted')
-  const open = live.filter(task => task.status !== 'completed')
-  const teammateOwners = new Set(live.filter(task => task.status === 'completed' && task.owner !== undefined && task.owner !== 'lead').map(task => task.owner))
-  const idle = teammates.filter(agent => agent.modelRequests === 0).map(agent => agent.name)
-  return [
-    {
-      id: 'exit',
-      criterion: 'dsh exited 0 with nothing unsettled',
-      passed: run?.exitCode === 0 && unsettled.length === 0,
-      detail: `exit ${run?.exitCode ?? 'unknown'}${run?.timedOut === true ? ' (stopped by the outer time limit)' : ''}, ${unsettled.length} unsettled row(s)`,
-    },
-    {
-      id: 'lead-turn',
-      criterion: 'the Lead\'s last turn completed',
-      passed: lead?.turnEnds.at(-1) === 'completed',
-      detail: lead === undefined ? 'no Lead log found' : `turn ends: ${lead.turnEnds.join(', ') || 'none'}`,
-    },
-    {
-      id: 'teammates',
-      criterion: 'at least two teammates were spawned and each made a model request',
-      passed: teammates.length >= 2 && idle.length === 0,
-      detail: `${teammates.length} teammate(s): ${teammates.map(agent => agent.name).join(', ') || 'none'}${idle.length === 0 ? '' : `; never ran: ${idle.join(', ')}`}`,
-    },
-    {
-      id: 'division',
-      criterion: 'two different teammates each completed a task',
-      passed: teammateOwners.size >= 2,
-      detail: `completed tasks are owned by: ${live.filter(task => task.status === 'completed').map(task => `${task.id}=${task.owner ?? 'nobody'}`).join(', ') || 'none'}`,
-    },
-    {
-      id: 'board',
-      criterion: 'every task on the board ended completed, none lost',
-      passed: live.length > 0 && open.length === 0,
-      detail: live.length === 0 ? 'the board recorded no task' : open.length === 0 ? `${live.length} task(s), all completed` : open.map(task => `${task.id} is ${task.status}${task.lostCause === undefined ? '' : ` (${task.lostCause})`}`).join('; '),
-    },
-  ]
-}
-
 /**
  * Analyze one run directory written by `run.ts`.
+ * @param standardCase - the case the run was given, which judges it.
  * @param out - the run's output directory.
  * @returns the measurements, timeline, and rubric.
  */
-export function analyze(out: string): Analysis {
+export function analyze(standardCase: StandardCase, out: string): Analysis {
   const runText = readText(join(out, 'run.json'))
   const run = runText === undefined ? undefined : JSON.parse(runText) as RunRecord
   const unsettled = (readText(join(out, 'stderr.log')) ?? '').split('\n')
@@ -346,8 +204,13 @@ export function analyze(out: string): Analysis {
     .map(log => measure(log, team?.members.get(log.id) ?? log.id, log === lead ? 'lead' : 'teammate'))
     .toSorted((left, right) => Number(right.role === 'lead') - Number(left.role === 'lead') || left.name.localeCompare(right.name))
   const tasks = team?.tasks ?? []
-  const rubric = [...judgeTrajectory(run, unsettled, agents, tasks), ...judgeOutputs(join(out, 'workspace'))]
+  const rubric = [
+    ...standardCase.judgeTrajectory({ exitCode: run?.exitCode, timedOut: run?.timedOut === true, unsettled, agents, tasks }),
+    ...standardCase.judgeOutputs(join(out, 'workspace')),
+  ]
   return {
+    case: standardCase.name,
+    description: standardCase.description,
     run,
     unsettled,
     agents,
@@ -370,7 +233,9 @@ function cell(value: string): string {
 export function renderSummary(analysis: Analysis): string {
   const { run, score } = analysis
   const lines = [
-    '# Agent Team standard case',
+    `# Standard case: ${analysis.case}`,
+    '',
+    analysis.description,
     '',
     `**Rubric: ${score.passed}/${score.total} passed.**`,
     '',
