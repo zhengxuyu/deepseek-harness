@@ -75,6 +75,44 @@ interface TeamTaskSnapshot {
 
 `pending` is unstarted or released, `in_progress` carries an owner, `completed` satisfies blockers, `lost` is an in-progress task whose owner the harness gave up on (`lostCause` is `owner-failed` or `run-ended`; the owner stays recorded until `reopen`), and `deleted` is a retained tombstone. `in_progress` and `completed` tasks are frozen: their text, edges, and assignment do not change. Views add owner name, readiness, lost cause, and write-scope overlap warnings without changing the durable snapshot.
 
+<a id="task-status-transitions"></a>
+
+### Task status transitions
+
+Every task follows one state machine, whoever owns it: the Lead, a teammate, or a tracked subagent run. Members differ in the tools they hold, not in how their tasks move.
+
+```mermaid
+stateDiagram-v2
+  [*] --> pending: createTask
+  [*] --> in_progress: beginTask
+  pending --> in_progress: claim, reassign to a member
+  in_progress --> pending: release, reassign to nobody
+  in_progress --> completed: complete, markCompleted
+  in_progress --> lost: markLost
+  completed --> pending: reopen
+  lost --> pending: reopen
+  pending --> deleted: delete
+  lost --> deleted: delete
+```
+
+A transition has one of two origins. A member action goes through `updateTask`, which requires the caller to be the task's owner or the Lead and compares `expectedRevision`. A harness transition goes through `beginTask`, `markCompleted`, or `markLost`, which skip member authorization because no member acted.
+
+| Transition | From | To | Origin | Condition |
+|---|---|---|---|---|
+| `createTask` | none | `pending` | member | board below `maxTasks` |
+| `beginTask` | none | `in_progress` | harness | the caller becomes the owner |
+| `claim` | `pending` | `in_progress` | member | every blocker is `completed`; no other owner |
+| `reassign` to a member | `pending` | `in_progress` | Lead | every blocker is `completed` |
+| `release` | `in_progress` | `pending` | owner or Lead | clears the owner |
+| `reassign` to nobody | `pending`, `in_progress` | `pending` | Lead | clears the owner |
+| `complete` | `in_progress` | `completed` | owner or Lead | |
+| `markCompleted` | `in_progress` | `completed` | harness | |
+| `markLost` | `in_progress` | `lost` | harness | records `lostCause`; keeps the owner |
+| `reopen` | `completed`, `lost` | `pending` | owner or Lead | clears the owner and `lostCause` |
+| `delete` | `pending`, `lost` | `deleted` | owner or Lead | no remaining task names it in `blockedBy` |
+
+`lost` is never a member action and is not terminal. A lost task cannot be claimed or completed and keeps blocking its dependents; `reopen` is its only way back to `pending`. `edit`, `set_dependencies`, and `delete` apply only to `pending` and `lost` tasks, so the executed part of the graph stays as its owners ran it. A request outside the table is refused and leaves the task unchanged.
+
 ## Replay
 
 `foldTeam()` replays one root Session into the roster, task board, and queued-minus-delivered mailbox that every Team operation reads. It selects records by `TeamId`, so events inherited by an ordinary fork retain the ancestor id and never enter the new root's state. Session event `seq` and `time` remain the ordering and timing record; Team snapshots do not duplicate them. Roster and task reads reach callers as views; pending mail stays internal to delivery and recovery. `team/task` payloads are written at version 3, which adds `lost` and `lostCause`; version 2 payloads remain readable. The package [README](../../packages/experimental/agent-team/README.md) owns operation, authorization, recovery, and limit behavior.

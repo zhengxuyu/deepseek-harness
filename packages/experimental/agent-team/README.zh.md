@@ -79,7 +79,7 @@ roster 显示每个成员的职责（`lead` 或 `teammate`）与当前状态：`
 
 当两个 in-progress 任务计划触及重叠路径时，文件提示会产生警告——它们绝不阻止任何操作。已删除任务保留在历史中，但从活动列表中消失。
 
-任务在五种状态之间转换：
+任务在五种状态之间转换；[转换参考](../../../docs/subsystems/agent-team.zh.md#task-status-transitions)列出每次转换由谁发起：
 
 ```mermaid
 stateDiagram-v2

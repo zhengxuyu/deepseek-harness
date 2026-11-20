@@ -75,6 +75,44 @@ interface TeamTaskSnapshot {
 
 `pending` 表示尚未开始或已经释放，`in_progress` 携带 owner，`completed` 满足 blocker，`lost` 是 harness 已放弃其 owner 的进行中任务（`lostCause` 为 `owner-failed` 或 `run-ended`；owner 记录保留到 `reopen` 为止），`deleted` 是保留的 tombstone。`in_progress` 与 `completed` 任务是冻结的：其文本、边与分配不再改变。view 会添加 owner name、readiness、lost cause 和 write-scope 重叠警告，但不会改变持久快照。
 
+<a id="task-status-transitions"></a>
+
+### 任务状态转换
+
+每个任务都遵循同一个状态机，无论 owner 是 Lead、teammate 还是被跟踪的 subagent 运行。成员之间的差别在于持有的工具，而不在于任务如何转换。
+
+```mermaid
+stateDiagram-v2
+  [*] --> pending: createTask
+  [*] --> in_progress: beginTask
+  pending --> in_progress: claim, reassign to a member
+  in_progress --> pending: release, reassign to nobody
+  in_progress --> completed: complete, markCompleted
+  in_progress --> lost: markLost
+  completed --> pending: reopen
+  lost --> pending: reopen
+  pending --> deleted: delete
+  lost --> deleted: delete
+```
+
+转换有两种来源。成员动作经过 `updateTask`，它要求调用方是任务的 owner 或 Lead，并比较 `expectedRevision`。harness 转换经过 `beginTask`、`markCompleted` 或 `markLost`，它们跳过成员授权，因为没有成员发起动作。
+
+| 转换 | 起始 | 目标 | 来源 | 条件 |
+|---|---|---|---|---|
+| `createTask` | 无 | `pending` | 成员 | 任务板未达到 `maxTasks` |
+| `beginTask` | 无 | `in_progress` | harness | 调用方成为 owner |
+| `claim` | `pending` | `in_progress` | 成员 | 每个 blocker 都是 `completed`；没有其他 owner |
+| `reassign` 给成员 | `pending` | `in_progress` | Lead | 每个 blocker 都是 `completed` |
+| `release` | `in_progress` | `pending` | owner 或 Lead | 清除 owner |
+| `reassign` 给无人 | `pending`、`in_progress` | `pending` | Lead | 清除 owner |
+| `complete` | `in_progress` | `completed` | owner 或 Lead | |
+| `markCompleted` | `in_progress` | `completed` | harness | |
+| `markLost` | `in_progress` | `lost` | harness | 记录 `lostCause`；保留 owner |
+| `reopen` | `completed`、`lost` | `pending` | owner 或 Lead | 清除 owner 与 `lostCause` |
+| `delete` | `pending`、`lost` | `deleted` | owner 或 Lead | 没有其他任务在 `blockedBy` 中引用它 |
+
+`lost` 从来不是成员动作，也不是终态。lost 任务不能被 claim 或完成，并继续阻塞依赖它的任务；`reopen` 是它回到 `pending` 的唯一途径。`edit`、`set_dependencies` 与 `delete` 只适用于 `pending` 与 `lost` 任务，因此图中已执行的部分保持 owner 运行时的样子。表外的请求会被拒绝，任务保持不变。
+
 ## 回放
 
 `foldTeam()` 把一个 Root Session 回放成每个 Team 操作所读取的 roster、任务板与 queued-minus-delivered mailbox。它按 `TeamId` 选取记录，因此普通 fork 继承的 event 保留 ancestor id，绝不会进入新 Root 的状态。Session event 的 `seq` 与 `time` 继续负责顺序和时间记录，Team snapshot 不再重复保存它们。roster 与 task 读取以 view 形式到达调用方，而 pending 邮件仅供投递与恢复内部使用。`team/task` payload 以版本 3 写入，新增 `lost` 与 `lostCause`；版本 2 的 payload 仍可读取。包 [README](../../packages/experimental/agent-team/README.zh.md)负责 operation、authorization、recovery 和限制行为。

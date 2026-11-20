@@ -79,7 +79,7 @@ Tasks have an owner: a member claims a task to start work, completes it when don
 
 File hints produce warnings when two in-progress tasks plan to touch overlapping paths — they never block anything. Deleted tasks remain in history but disappear from the active list.
 
-A task moves between five statuses:
+A task moves between five statuses; the [transition reference](../../../docs/subsystems/agent-team.md#task-status-transitions) lists who may make each move:
 
 ```mermaid
 stateDiagram-v2
