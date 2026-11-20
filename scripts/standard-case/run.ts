@@ -16,6 +16,7 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { createWriteStream, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { finished } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
 import { dump } from 'js-yaml'
 import type { StandardCase } from './case.ts'
@@ -51,6 +52,9 @@ export interface RunRecord {
 export const MODEL = 'deepseek/deepseek-v4.1-flash'
 /** The reasoning effort every standard-case run uses. */
 export const EFFORT = 'high'
+
+/** How long a run stopped at its time limit has to exit before it is killed. */
+const KILL_AFTER_MS = 120_000
 
 const DEFAULT_ROUTE = { api: 'openai-completions', baseURL: 'https://openrouter.ai/api/v1' }
 const DEFAULT_MODEL_SPEC = {
@@ -193,18 +197,24 @@ export async function runCase(standardCase: StandardCase, out: string): Promise<
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
-  child.stdout.pipe(createWriteStream(join(out, 'stdout.jsonl')))
-  child.stderr.pipe(createWriteStream(join(out, 'stderr.log')))
+  const stdout = child.stdout.pipe(createWriteStream(join(out, 'stdout.jsonl')))
+  const stderr = child.stderr.pipe(createWriteStream(join(out, 'stderr.log')))
   child.stderr.pipe(process.stderr)
   let timedOut = false
+  // SIGINT lets dsh flush its Session logs; a run that ignores it is killed after the grace period.
+  let killer: ReturnType<typeof setTimeout> | undefined
   const timer = setTimeout(() => {
     timedOut = true
     child.kill('SIGINT')
+    killer = setTimeout(() => { child.kill('SIGKILL') }, KILL_AFTER_MS)
   }, limitMs)
   const [exitCode, signal] = await new Promise<[number | null, NodeJS.Signals | null]>((done) => {
     child.on('close', (code, closeSignal) => { done([code, closeSignal]) })
   })
   clearTimeout(timer)
+  clearTimeout(killer)
+  // The analysis reads both files next; the child closing does not mean they reached the disk.
+  await Promise.all([finished(stdout), finished(stderr)])
   const record: RunRecord = {
     case: standardCase.name,
     settings,

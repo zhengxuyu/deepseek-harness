@@ -1,6 +1,6 @@
 /** The standard every registered case is held to; see `case.ts`. */
 
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -19,8 +19,11 @@ function workspace(): string {
   return root
 }
 
-function snapshot(directory: string): string[] {
+/** Every file below a directory with its content, so two preparations compare byte for byte. */
+function snapshot(directory: string): [path: string, content: string][] {
   return readdirSync(directory, { recursive: true, encoding: 'utf8' }).toSorted()
+    .filter(path => statSync(join(directory, path)).isFile())
+    .map(path => [path, readFileSync(join(directory, path), 'base64')])
 }
 
 describe('standard case registry', () => {
@@ -47,6 +50,7 @@ describe.each(cases.map(standardCase => [standardCase.name, standardCase] as con
     const second = workspace()
     standardCase.prepare(first)
     standardCase.prepare(second)
+    expect(snapshot(first).length).toBeGreaterThan(0)
     expect(snapshot(first)).toEqual(snapshot(second))
   })
 
