@@ -140,6 +140,22 @@ Lead delivery calls `Agent.steer()` directly. Teammate delivery uses the continu
 
 Tasks are complete versioned snapshots; every mutation carries `expectedRevision`, and a stale caller receives `TEAM_TASK_STALE_REVISION` instead of overwriting a newer value. Numeric `task-<n>` ids require a safe-integer suffix, and id-space exhaustion reports `TEAM_TASK_LIMIT` instead of reusing the final id. Deleted tasks remain tombstones for replay and id stability but do not consume `maxTasks` or appear in `listTasks()`. `writeScopes` are normalized workspace-relative prefixes; views warn on overlap with in-progress tasks but never block claim or authorize writes.
 
+A task moves between five statuses. `beginTask`, `markCompleted`, and `markLost` are the harness's transitions; the others are member actions.
+
+```mermaid
+stateDiagram-v2
+  [*] --> pending: create
+  [*] --> in_progress: beginTask
+  pending --> in_progress: claim, reassign to a member
+  in_progress --> pending: release, reassign to no owner
+  in_progress --> completed: complete, markCompleted
+  in_progress --> lost: markLost
+  completed --> pending: reopen
+  lost --> pending: reopen
+  pending --> deleted: delete
+  lost --> deleted: delete
+```
+
 The executed part of the graph is frozen. `edit`, `set_dependencies`, and `delete` are accepted only on `pending` or `lost` tasks; `reassign` to a member only on a ready `pending` task; `reassign` with no owner (a Lead-side release) on `pending` or `in_progress`. Everything else answers `TEAM_TASK_INVALID_TRANSITION`, so a running task keeps the text and edges its owner started from and a completed task keeps the record its result was produced for.
 
 The harness records and settles work without a member action. `beginTask(caller, request)` records work the calling member has already begun as an `in_progress` task it owns, for any member, and `markCompleted(caller, id)` completes one `in_progress` task; the settlement plugin uses both for the task a headless run was started with, which the Lead owns. `lost` is the harness's status, never a member action: `markLost(caller, id, cause)` moves one `in_progress` task there and keeps its owner recorded, and a member that fails provisioning loses whatever it claimed while provisioning (`owner-failed`). A lost task cannot be claimed or completed; `reopen` returns it to `pending` with no owner, and `edit` or `set_dependencies` may revise it first. Its dependents stay blocked and its write scopes no longer warn. `outstandingTasks(caller)` lists the `in_progress` tasks on the caller's board with whether each owner is currently running (a tracked run behind an out-of-process provider counts as running until it ends), which is what a one-shot host waits on before it exits.

@@ -140,6 +140,22 @@ Lead 可以停止 teammate 的当前轮次，而不会删除其排队的消息�
 
 任务是完整版本化快照；每次变更都携带 `expectedRevision`，陈旧调用方会收到 `TEAM_TASK_STALE_REVISION`，而不会覆盖更新的值。数字 `task-<n>` id 的后缀必须是安全整数，id 空间耗尽时报告 `TEAM_TASK_LIMIT`，而不是复用最后一个 id。已删除任务作为 tombstone 保留以供回放与维持 id 稳定，但不占用 `maxTasks`，也不出现在 `listTasks()` 中。`writeScopes` 是规范化后的 workspace 相对前缀；视图会对与 in-progress 任务的重叠发出警告，但绝不阻止 claim 或授予写权限。
 
+任务在五种状态之间转换。`beginTask`、`markCompleted` 与 `markLost` 是 harness 的转换；其余是成员动作。
+
+```mermaid
+stateDiagram-v2
+  [*] --> pending: create
+  [*] --> in_progress: beginTask
+  pending --> in_progress: claim, reassign to a member
+  in_progress --> pending: release, reassign to no owner
+  in_progress --> completed: complete, markCompleted
+  in_progress --> lost: markLost
+  completed --> pending: reopen
+  lost --> pending: reopen
+  pending --> deleted: delete
+  lost --> deleted: delete
+```
+
 图中已执行的部分是冻结的。`edit`、`set_dependencies` 与 `delete` 只接受 `pending` 或 `lost` 任务；`reassign` 给成员只接受 ready 的 `pending` 任务；不带 owner 的 `reassign`（Lead 侧的释放）接受 `pending` 或 `in_progress`。其余情况一律回答 `TEAM_TASK_INVALID_TRANSITION`，因此运行中的任务保持其 owner 开始时的文本与边，已完成的任务保持其结果所对应的记录。
 
 harness 记录和结算工作时不经过成员动作。`beginTask(caller, request)` 把调用成员已经开始的工作记录为它名下的 `in_progress` 任务，对任何成员都适用；`markCompleted(caller, id)` 完成一个 `in_progress` 任务。结算插件用这两个方法处理 headless 运行启动时的任务，该任务由 Lead 持有。`lost` 是 harness 的状态，绝不是成员动作：`markLost(caller, id, cause)` 把一个 `in_progress` 任务移入该状态并保留其 owner 记录；provisioning 失败的成员会丢失它在 provisioning 期间认领的一切（`owner-failed`）。lost 任务不能被 claim 或 complete；`reopen` 把它变回无 owner 的 `pending`，在此之前可以先用 `edit` 或 `set_dependencies` 修订它。它的依赖方保持阻塞，它的写范围不再产生警告。`outstandingTasks(caller)` 列出调用方任务板上的 `in_progress` 任务以及每个 owner 当前是否在运行（进程外 provider 承载的被跟踪运行在结束前都视为运行中），这正是一次性宿主在退出前等待的东西。
