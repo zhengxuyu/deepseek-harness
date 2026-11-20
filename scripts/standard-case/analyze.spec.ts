@@ -1,13 +1,15 @@
-/** The standard case's analysis: log folding, the rubric, and the rendered summary. */
+/** The standard-case runner and analysis: settings, log folding, the rubric, and the rendered summary. */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { analyze, parseSessionLog, renderSummary } from './analyze.ts'
-import { expectedRegionTotals, expectedTopCustomers, ordersCsv } from './fixture.ts'
+import { OrdersReportCase } from './cases/orders-report/case.ts'
+import { expectedRegionTotals, expectedTopCustomers, ordersCsv } from './cases/orders-report/fixture.ts'
 import { patchLayer, resolveSettings } from './run.ts'
 
+const standardCase = new OrdersReportCase()
 const roots: string[] = []
 
 afterEach(() => {
@@ -47,7 +49,7 @@ function runDirectory(logs: Record<string, string>, files: Record<string, string
   for (const [name, source] of Object.entries(files)) writeFileSync(join(out, 'workspace/out', name), source)
   writeFileSync(join(out, 'stderr.log'), stderr)
   writeFileSync(join(out, 'run.json'), JSON.stringify({
-    settings: resolveSettings({}), revision: 'r'.repeat(40), exitCode, signal: null, timedOut: false, startedAt: '2026-01-01T00:00:00.000Z', elapsedMs: 9_000,
+    case: standardCase.name, settings: resolveSettings({}), revision: 'r'.repeat(40), exitCode, signal: null, timedOut: false, startedAt: '2026-01-01T00:00:00.000Z', elapsedMs: 9_000,
   }))
   return out
 }
@@ -123,7 +125,7 @@ describe('standard case analysis', () => {
     }, 0)
     writeFileSync(join(out, 'dsh-home/sessions/workspace/lead/session.lock'), '')
 
-    const analysis = analyze(out)
+    const analysis = analyze(standardCase, out)
     expect(analysis.rubric.filter(item => !item.passed)).toEqual([])
     expect(analysis.score).toEqual({ passed: 8, total: 8 })
     expect(analysis.agents.map(agent => [agent.name, agent.role, agent.modelRequests, agent.toolErrors])).toEqual([
@@ -149,6 +151,7 @@ describe('standard case analysis', () => {
       'task-1 completed, owner lead: task-1 subject',
     ])
     const summary = renderSummary(analysis)
+    expect(summary).toContain('# Standard case: orders-report\n\nTwo teammates each derive')
     expect(summary).toContain('**Rubric: 8/8 passed.**')
     expect(summary).toContain('| lead | lead | 1 | completed | 1 | 100 | 20 | wait_agent×1, write×1 | 1 |')
     expect(summary).toContain('| 0.5 | member alice joined |')
@@ -174,7 +177,7 @@ describe('standard case analysis', () => {
       'report.md': 'north leads.',
     }, 1, 'dsh: AUTH\ndsh: unsettled: task-2 "x" owned by ghost: still in progress\n')
 
-    const analysis = analyze(out)
+    const analysis = analyze(standardCase, out)
     expect(Object.fromEntries(analysis.rubric.map(item => [item.id, item.detail]))).toEqual({
       'exit': 'exit 1, 1 unsettled row(s)',
       'lead-turn': 'turn ends: unknown',
@@ -200,14 +203,14 @@ describe('standard case analysis', () => {
     roots.push(out)
     mkdirSync(join(out, 'workspace/out'), { recursive: true })
     writeFileSync(join(out, 'workspace/out/region_totals.json'), '{')
-    const analysis = analyze(out)
-    expect(analysis).toMatchObject({ run: undefined, agents: [], tasks: [], timeline: [], unsettled: [], score: { passed: 0, total: 8 } })
+    const analysis = analyze(standardCase, out)
+    expect(analysis).toMatchObject({ case: 'orders-report', run: undefined, agents: [], tasks: [], timeline: [], unsettled: [], score: { passed: 0, total: 8 } })
     expect(analysis.rubric.map(item => item.detail)).toEqual([
       'exit unknown, 0 unsettled row(s)',
       'no Lead log found',
+      'the board recorded no task',
       '0 teammate(s): none',
       'completed tasks are owned by: none',
-      'the board recorded no task',
       expect.stringContaining('not valid JSON: '),
       'out/top_customers.csv is missing',
       'out/report.md is missing',

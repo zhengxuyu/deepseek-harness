@@ -1,7 +1,9 @@
 name: Agent Team standard case
 
-# One real-model `dsh --profile headless` run of a fixed Agent Team task, then
-# an analysis of its trajectory and result (`pnpm run standard-case`). It runs
+# One real-model `dsh --profile headless` run per standard case, each a fixed
+# Agent Team task, then an analysis of its trajectory and result
+# (`pnpm run standard-case`; scripts/standard-case/case.ts is the standard a
+# case implements). It runs
 # after every push to master, so the summary of consecutive runs shows how a
 # merge changed the Team's behavior. The run is an observation, not a gate: the
 # job fails only when the case could not be run or analyzed, never on the
@@ -74,7 +76,7 @@ jobs:
           STANDARD_CASE_ROUTE: ${{ vars.STANDARD_CASE_ROUTE }}
           STANDARD_CASE_MODEL_SPEC: ${{ vars.STANDARD_CASE_MODEL_SPEC }}
           STANDARD_CASE_DEADLINE_MS: ${{ vars.STANDARD_CASE_DEADLINE_MS }}
-        run: pnpm run standard-case "$RUNNER_TEMP/standard-case"
+        run: pnpm run standard-case --out "$RUNNER_TEMP/standard-case"
 
       - name: Upload the run
         if: always() && steps.key.outputs.present == 'true'
@@ -85,6 +87,6 @@ jobs:
           retention-days: 30
           path: |
             ${{ runner.temp }}/standard-case
-            !${{ runner.temp }}/standard-case/dsh-home/tmp
-            !${{ runner.temp }}/standard-case/dsh-home/profiles
-            !${{ runner.temp }}/standard-case/dsh-home/storages
+            !${{ runner.temp }}/standard-case/*/dsh-home/tmp
+            !${{ runner.temp }}/standard-case/*/dsh-home/profiles
+            !${{ runner.temp }}/standard-case/*/dsh-home/storages

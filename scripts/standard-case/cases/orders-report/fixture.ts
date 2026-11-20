@@ -1,4 +1,4 @@
-/** The standard case's fixed input and the results a correct run produces from it. */
+/** The orders-report case: its fixed input and the results a correct run produces from it. */
 
 /** One order row of the fixture. */
 export interface Order {

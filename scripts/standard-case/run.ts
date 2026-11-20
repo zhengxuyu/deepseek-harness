@@ -1,6 +1,6 @@
 /**
- * Run the Agent Team standard case: one `dsh --profile headless` run from
- * source, with a real model, on a fixed task in a fresh workspace. Everything
+ * Run one standard case: one `dsh --profile headless` run from source, with a
+ * real model, on the case's task in a fresh workspace the case prepared. Everything
  * the run leaves goes under the output directory: the workspace, the Harness
  * home with every Session log, stdout, stderr, and `run.json`.
  *
@@ -14,11 +14,11 @@
  */
 
 import { execFileSync, spawn } from 'node:child_process'
-import { createWriteStream, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { createWriteStream, mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { dump } from 'js-yaml'
-import { ordersCsv } from './fixture.ts'
+import type { StandardCase } from './case.ts'
 
 const root = resolve(import.meta.dirname, '../..')
 
@@ -35,6 +35,7 @@ export interface RunSettings {
 
 /** What `run.json` records about a finished run. */
 export interface RunRecord {
+  readonly case: string
   readonly settings: RunSettings
   readonly revision: string
   readonly exitCode: number | null
@@ -142,21 +143,22 @@ function revision(): string {
 }
 
 /**
- * Run the case once and leave everything under `out`.
+ * Run one case once and leave everything under `out`.
+ * @param standardCase - the case to run.
  * @param out - absolute output directory; created when missing.
  * @returns the run record also written to `run.json`.
  * @throws Error when the configured key variable is unset.
  */
-export async function runCase(out: string): Promise<RunRecord> {
+export async function runCase(standardCase: StandardCase, out: string): Promise<RunRecord> {
   const settings = resolveSettings(process.env)
   if ((process.env[settings.apiKeyEnv] ?? '') === '') throw new Error(`${settings.apiKeyEnv} is not set`)
   const workspace = join(out, 'workspace')
   const home = join(out, 'dsh-home')
-  mkdirSync(join(workspace, 'data'), { recursive: true })
+  mkdirSync(workspace, { recursive: true })
   mkdirSync(join(home, 'tmp'), { recursive: true })
-  writeFileSync(join(workspace, 'data', 'orders.csv'), ordersCsv())
+  standardCase.prepare(workspace)
   writeFileSync(join(home, 'cordis.patch.yml'), patchLayer(settings, home))
-  const task = readFileSync(join(import.meta.dirname, 'task.md'), 'utf8').trim()
+  const task = standardCase.task()
 
   const startedAt = new Date()
   // The outer limit only ends a run whose own settlement deadline did not.
@@ -189,6 +191,7 @@ export async function runCase(out: string): Promise<RunRecord> {
   })
   clearTimeout(timer)
   const record: RunRecord = {
+    case: standardCase.name,
     settings,
     revision: revision(),
     exitCode,
