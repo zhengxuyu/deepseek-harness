@@ -79,6 +79,22 @@ Tasks have an owner: a member claims a task to start work, completes it when don
 
 File hints produce warnings when two in-progress tasks plan to touch overlapping paths — they never block anything. Deleted tasks remain in history but disappear from the active list.
 
+A task moves between five statuses:
+
+```mermaid
+stateDiagram-v2
+  [*] --> pending: create
+  [*] --> in_progress: harness records a run
+  pending --> in_progress: claim or assign
+  in_progress --> pending: release
+  in_progress --> completed: complete
+  in_progress --> lost: harness gives up
+  completed --> pending: reopen
+  lost --> pending: reopen
+  pending --> deleted: delete
+  lost --> deleted: delete
+```
+
 A task whose owner the harness gave up on is `lost`, with its owner still named; reopen it to make it claimable again. Once a task is in progress or completed, its text and dependencies no longer change, and a running task cannot be handed to another member.
 
 ### Waiting and interruption
@@ -139,22 +155,6 @@ Lead delivery calls `Agent.steer()` directly. Teammate delivery uses the continu
 ### Shared task board
 
 Tasks are complete versioned snapshots; every mutation carries `expectedRevision`, and a stale caller receives `TEAM_TASK_STALE_REVISION` instead of overwriting a newer value. Numeric `task-<n>` ids require a safe-integer suffix, and id-space exhaustion reports `TEAM_TASK_LIMIT` instead of reusing the final id. Deleted tasks remain tombstones for replay and id stability but do not consume `maxTasks` or appear in `listTasks()`. `writeScopes` are normalized workspace-relative prefixes; views warn on overlap with in-progress tasks but never block claim or authorize writes.
-
-A task moves between five statuses. `beginTask`, `markCompleted`, and `markLost` are the harness's transitions; the others are member actions.
-
-```mermaid
-stateDiagram-v2
-  [*] --> pending: create
-  [*] --> in_progress: beginTask
-  pending --> in_progress: claim, reassign to a member
-  in_progress --> pending: release, reassign to no owner
-  in_progress --> completed: complete, markCompleted
-  in_progress --> lost: markLost
-  completed --> pending: reopen
-  lost --> pending: reopen
-  pending --> deleted: delete
-  lost --> deleted: delete
-```
 
 The executed part of the graph is frozen. `edit`, `set_dependencies`, and `delete` are accepted only on `pending` or `lost` tasks; `reassign` to a member only on a ready `pending` task; `reassign` with no owner (a Lead-side release) on `pending` or `in_progress`. Everything else answers `TEAM_TASK_INVALID_TRANSITION`, so a running task keeps the text and edges its owner started from and a completed task keeps the record its result was produced for.
 
