@@ -49,7 +49,7 @@ function runDirectory(logs: Record<string, string>, files: Record<string, string
   for (const [name, source] of Object.entries(files)) writeFileSync(join(out, 'workspace/out', name), source)
   writeFileSync(join(out, 'stderr.log'), stderr)
   writeFileSync(join(out, 'run.json'), JSON.stringify({
-    case: standardCase.name, settings: resolveSettings({}), revision: 'r'.repeat(40), exitCode, signal: null, timedOut: false, startedAt: '2026-01-01T00:00:00.000Z', elapsedMs: 9_000,
+    case: standardCase.name, settings: resolveSettings({}), settlement: true, revision: 'r'.repeat(40), exitCode, signal: null, timedOut: false, startedAt: '2026-01-01T00:00:00.000Z', elapsedMs: 9_000,
   }))
   return out
 }
@@ -77,12 +77,17 @@ describe('standard case settings', () => {
   })
 
   it('composes the model, the Team, and settlement into the patch layer', () => {
-    const patch = patchLayer(resolveSettings({}), '/home')
+    const patch = patchLayer(resolveSettings({}), '/home', true)
     expect(patch).toContain('apiKeyEnv: OPENROUTER_API_KEY')
     expect(patch).toContain('compression: none')
+    expect(patch).toContain('root: /home/sessions')
     expect(patch).toContain('id: agent-team-settlement')
     expect(patch).toContain('deadlineMs: 900000')
-    expect(patch).toContain('artifactRoot: /home/sessions/team-artifacts')
+    expect(patch).toContain('trackSubagentRuns: true')
+    const without = patchLayer(resolveSettings({}), '/home', false)
+    expect(without).toContain('id: tool-agent-team')
+    expect(without).not.toContain('agent-team-settlement')
+    expect(without).not.toContain('trackSubagentRuns')
   })
 })
 

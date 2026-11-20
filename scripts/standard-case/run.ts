@@ -14,7 +14,7 @@
  */
 
 import { execFileSync, spawn } from 'node:child_process'
-import { createWriteStream, mkdirSync, writeFileSync } from 'node:fs'
+import { createWriteStream, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { dump } from 'js-yaml'
@@ -37,6 +37,8 @@ export interface RunSettings {
 export interface RunRecord {
   readonly case: string
   readonly settings: RunSettings
+  /** Whether the revision ships `agent-team-settlement`, which the run then mounts. */
+  readonly settlement: boolean
   readonly revision: string
   readonly exitCode: number | null
   readonly signal: string | null
@@ -90,14 +92,24 @@ export function resolveSettings(env: NodeJS.ProcessEnv): RunSettings {
 }
 
 /**
+ * Whether this checkout ships the settlement plugin. A revision without it
+ * still runs the case; the run then ends with the Lead's turn.
+ * @returns true when the package's manifest exists.
+ */
+export function shipsSettlement(): boolean {
+  return existsSync(join(root, 'packages/experimental/agent-team-settlement/package.json'))
+}
+
+/**
  * Compose the home-level patch over `dsh-base`: the model and its route,
  * uncompressed Session logs, the Agent Team in place of the subagent tools,
- * and settlement over its board.
+ * and, when the revision ships it, settlement over the Team's board.
  * @param settings - the run's settings.
  * @param home - the run's Harness home.
+ * @param settlement - whether to mount `agent-team-settlement`.
  * @returns the `cordis.patch.yml` text.
  */
-export function patchLayer(settings: RunSettings, home: string): string {
+export function patchLayer(settings: RunSettings, home: string, settlement: boolean): string {
   const disabled = ['tool-subagent', 'tool-subagent-fork', 'tool-subagent-control', 'tool-subagent-list-agents']
   return dump([
     { id: 'agent-default-model', config: { provider: settings.provider, model: settings.model, reasoningEffort: settings.effort } },
@@ -121,18 +133,20 @@ export function patchLayer(settings: RunSettings, home: string): string {
         {
           id: 'agent-team',
           name: '@deepseek-ai/dsh-experimental-agent-team',
-          config: { trackSubagentRuns: true, artifactRoot: join(home, 'sessions', 'team-artifacts') },
+          ...settlement ? { config: { trackSubagentRuns: true } } : {},
         },
         {
           id: 'tool-agent-team',
           name: '@deepseek-ai/dsh-experimental-tool-agent-team',
           config: { freshProvider: 'spawn', forkProvider: 'fork' },
         },
-        {
-          id: 'agent-team-settlement',
-          name: '@deepseek-ai/dsh-experimental-agent-team-settlement',
-          config: { deadlineMs: settings.deadlineMs, stallMs: 120_000 },
-        },
+        ...settlement
+          ? [{
+            id: 'agent-team-settlement',
+            name: '@deepseek-ai/dsh-experimental-agent-team-settlement',
+            config: { deadlineMs: settings.deadlineMs, stallMs: 120_000 },
+          }]
+          : [],
       ],
     },
   ], { lineWidth: -1 })
@@ -157,11 +171,12 @@ export async function runCase(standardCase: StandardCase, out: string): Promise<
   mkdirSync(workspace, { recursive: true })
   mkdirSync(join(home, 'tmp'), { recursive: true })
   standardCase.prepare(workspace)
-  writeFileSync(join(home, 'cordis.patch.yml'), patchLayer(settings, home))
+  const settlement = shipsSettlement()
+  writeFileSync(join(home, 'cordis.patch.yml'), patchLayer(settings, home, settlement))
   const task = standardCase.task()
 
   const startedAt = new Date()
-  // The outer limit only ends a run whose own settlement deadline did not.
+  // The outer limit ends a run that its own settlement deadline did not, or that has none.
   const limitMs = settings.deadlineMs + 180_000
   const child = spawn(process.execPath, [
     '--import', fileURLToPath(import.meta.resolve('tsx/esm')),
@@ -193,6 +208,7 @@ export async function runCase(standardCase: StandardCase, out: string): Promise<
   const record: RunRecord = {
     case: standardCase.name,
     settings,
+    settlement,
     revision: revision(),
     exitCode,
     signal,

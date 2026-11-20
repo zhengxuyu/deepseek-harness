@@ -243,7 +243,7 @@ export function renderSummary(analysis: Analysis): string {
   if (run !== undefined) {
     lines.push(
       `Revision \`${run.revision.slice(0, 10)}\`, model \`${run.settings.model}\` over \`${run.settings.provider}\`, effort \`${run.settings.effort}\`, `
-      + `${Math.round(run.elapsedMs / 1000)} s, exit ${run.exitCode ?? run.signal ?? 'unknown'}.`,
+      + `settlement ${run.settlement ? 'mounted' : 'not shipped by this revision'}, ${Math.round(run.elapsedMs / 1000)} s, exit ${run.exitCode ?? run.signal ?? 'unknown'}.`,
       '',
     )
   }
