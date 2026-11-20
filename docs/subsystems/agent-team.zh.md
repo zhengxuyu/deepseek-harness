@@ -113,6 +113,40 @@ stateDiagram-v2
 
 `lost` 从来不是成员动作，也不是终态。lost 任务不能被 claim 或完成，并继续阻塞依赖它的任务；`reopen` 是它回到 `pending` 的唯一途径。`edit`、`set_dependencies` 与 `delete` 只适用于 `pending` 与 `lost` 任务，因此图中已执行的部分保持 owner 运行时的样子。表外的请求会被拒绝，任务保持不变。
 
+<a id="headless-settlement"></a>
+
+## Headless 结算
+
+`agent-team-settlement` 在任务板之上提供 headless runner 的 `ctx.headlessSettlement`。它决定一次性运行何时结束，并记录运行没有收回的工作。没有它时，runner 在 Root 的 turn 结束时退出。
+
+该插件不增加自己的状态。它通过 `beginTask` 把启动运行的任务记录为 Root 拥有的 `in_progress` 任务，此后只做 harness 转换 `markCompleted` 与 `markLost`。
+
+```mermaid
+flowchart TD
+  begin["begin: beginTask records the run's task, in_progress, owned by the root"] --> idle{"root idle before the deadline?"}
+  idle -- no --> cancel["cancel the root's turn; markLost run-ended on every in_progress task"] --> report
+  idle -- yes --> others{"other tasks in_progress?"}
+  others -- no --> last{"root's latest turn completed?"}
+  last -- yes --> done["markCompleted on the run's task"] --> report
+  last -- no --> lostRun["markLost owner-failed on the run's task"] --> report
+  others -- yes --> wait["waitForChange"] --> stalled{"timed out with no owner running?"}
+  stalled -- yes --> stall["markLost run-ended on the remaining tasks"] --> report
+  stalled -- no --> idle
+  report["report unsettled rows"]
+```
+
+| 结果 | 条件 | 任务板记录 | 是否报告为 unsettled |
+|---|---|---|---|
+| 已结算 | 没有其他任务处于 `in_progress`，且 Root 最近的 turn 已完成 | 运行的任务为 `completed` | 否 |
+| Root 失败 | 没有其他任务处于 `in_progress`，且 Root 最近的 turn 以其他方式结束，或没有 turn 运行过 | 运行的任务为 `lost`，`owner-failed` | 是 |
+| 截止时间 | 运行开始后已过 `deadlineMs` | Root 的 turn 被取消；每个 `in_progress` 任务为 `lost`，`run-ended` | 是 |
+| 停滞 | 没有 owner 在运行，且 `stallMs` 内没有 Team 变化 | 每个 `in_progress` 任务为 `lost`，`run-ended` | 是 |
+| 任务被移走 | Root 把运行的任务移出 `in_progress` 却没有完成它 | 不变 | 是 |
+
+只要有 owner 在运行，等待就持续到截止时间，因此较慢的 teammate 不算停滞。在列出与 `markLost` 之间离开 `in_progress` 的任务既不被标记也不被报告。因其他原因失败的 `markLost` 会连同该失败一起报告。
+
+runner 为每个报告行向 stderr 写一行 `dsh: unsettled: <row>`，仅当 Root 的 turn 已完成且没有报告行时以 0 退出。
+
 ## 回放
 
 `foldTeam()` 把一个 Root Session 回放成每个 Team 操作所读取的 roster、任务板与 queued-minus-delivered mailbox。它按 `TeamId` 选取记录，因此普通 fork 继承的 event 保留 ancestor id，绝不会进入新 Root 的状态。Session event 的 `seq` 与 `time` 继续负责顺序和时间记录，Team snapshot 不再重复保存它们。roster 与 task 读取以 view 形式到达调用方，而 pending 邮件仅供投递与恢复内部使用。`team/task` payload 以版本 3 写入，新增 `lost` 与 `lostCause`；版本 2 的 payload 仍可读取。包 [README](../../packages/experimental/agent-team/README.zh.md)负责 operation、authorization、recovery 和限制行为。

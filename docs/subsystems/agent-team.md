@@ -113,6 +113,40 @@ A transition has one of two origins. A member action goes through `updateTask`, 
 
 `lost` is never a member action and is not terminal. A lost task cannot be claimed or completed and keeps blocking its dependents; `reopen` is its only way back to `pending`. `edit`, `set_dependencies`, and `delete` apply only to `pending` and `lost` tasks, so the executed part of the graph stays as its owners ran it. A request outside the table is refused and leaves the task unchanged.
 
+<a id="headless-settlement"></a>
+
+## Headless settlement
+
+`agent-team-settlement` provides the headless runner's `ctx.headlessSettlement` over the task board. It decides when a one-shot run ends and records what the run did not collect. Without it the runner exits when the root's turn ends.
+
+The plugin adds no status of its own. It records the task the run was started with through `beginTask`, as an `in_progress` task the root owns, and then makes only the harness transitions `markCompleted` and `markLost`.
+
+```mermaid
+flowchart TD
+  begin["begin: beginTask records the run's task, in_progress, owned by the root"] --> idle{"root idle before the deadline?"}
+  idle -- no --> cancel["cancel the root's turn; markLost run-ended on every in_progress task"] --> report
+  idle -- yes --> others{"other tasks in_progress?"}
+  others -- no --> last{"root's latest turn completed?"}
+  last -- yes --> done["markCompleted on the run's task"] --> report
+  last -- no --> lostRun["markLost owner-failed on the run's task"] --> report
+  others -- yes --> wait["waitForChange"] --> stalled{"timed out with no owner running?"}
+  stalled -- yes --> stall["markLost run-ended on the remaining tasks"] --> report
+  stalled -- no --> idle
+  report["report unsettled rows"]
+```
+
+| Outcome | Condition | Board record | Reported as unsettled |
+|---|---|---|---|
+| Settled | no other task is `in_progress` and the root's latest turn completed | the run's task is `completed` | no |
+| Root failed | no other task is `in_progress` and the root's latest turn ended any other way, or no turn ran | the run's task is `lost`, `owner-failed` | yes |
+| Deadline | `deadlineMs` passed since the run began | the root's turn is cancelled; every `in_progress` task is `lost`, `run-ended` | yes |
+| Stall | no owner is running and no Team change arrived for `stallMs` | every `in_progress` task is `lost`, `run-ended` | yes |
+| Task moved | the root moved the run's task out of `in_progress` without completing it | unchanged | yes |
+
+While any owner is running, the wait lasts until the deadline, so a slow teammate is not a stall. A task that leaves `in_progress` between the listing and its `markLost` is neither marked nor reported. A `markLost` that fails for another reason is reported with that failure.
+
+The runner writes one `dsh: unsettled: <row>` line to stderr per reported row and exits 0 only when the root's turn completed and no row was reported.
+
 ## Replay
 
 `foldTeam()` replays one root Session into the roster, task board, and queued-minus-delivered mailbox that every Team operation reads. It selects records by `TeamId`, so events inherited by an ordinary fork retain the ancestor id and never enter the new root's state. Session event `seq` and `time` remain the ordering and timing record; Team snapshots do not duplicate them. Roster and task reads reach callers as views; pending mail stays internal to delivery and recovery. `team/task` payloads are written at version 3, which adds `lost` and `lostCause`; version 2 payloads remain readable. The package [README](../../packages/experimental/agent-team/README.md) owns operation, authorization, recovery, and limit behavior.
