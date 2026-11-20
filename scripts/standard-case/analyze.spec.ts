@@ -64,12 +64,12 @@ describe('standard case fixture', () => {
 
 describe('standard case settings', () => {
   it('defaults the route, treats empty variables as unset, and rejects malformed ones', () => {
-    expect(resolveSettings({ STANDARD_CASE_MODEL: '', STANDARD_CASE_ROUTE: ' ' })).toMatchObject({
-      provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash', apiKeyEnv: 'OPENROUTER_API_KEY', deadlineMs: 900_000,
+    expect(resolveSettings({ STANDARD_CASE_PROVIDER: '', STANDARD_CASE_ROUTE: ' ' })).toMatchObject({
+      provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash', effort: 'high', apiKeyEnv: 'OPENROUTER_API_KEY', deadlineMs: 900_000,
       route: { baseURL: 'https://openrouter.ai/api/v1' },
     })
-    expect(resolveSettings({ STANDARD_CASE_MODEL: 'm', STANDARD_CASE_ROUTE: '{"api":"x"}', STANDARD_CASE_DEADLINE_MS: '60000' }))
-      .toMatchObject({ model: 'm', route: { api: 'x' }, deadlineMs: 60_000 })
+    expect(resolveSettings({ STANDARD_CASE_PROVIDER: 'p', STANDARD_CASE_ROUTE: '{"api":"x"}', STANDARD_CASE_DEADLINE_MS: '60000' }))
+      .toMatchObject({ provider: 'p', model: 'deepseek/deepseek-v4.1-flash', route: { api: 'x' }, deadlineMs: 60_000 })
     expect(() => resolveSettings({ STANDARD_CASE_DEADLINE_MS: '5' })).toThrow('at least 60000')
     expect(() => resolveSettings({ STANDARD_CASE_ROUTE: '[]' })).toThrow('must be a JSON object')
   })

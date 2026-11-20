@@ -6,9 +6,10 @@
  *
  * Started through `pnpm run standard-case`; see `index.ts`.
  *
- * The model route comes from the environment: `STANDARD_CASE_PROVIDER`,
- * `STANDARD_CASE_MODEL`, `STANDARD_CASE_EFFORT`, `STANDARD_CASE_API_KEY_ENV`
- * (the name of the variable holding the key), `STANDARD_CASE_ROUTE` and
+ * The model and its reasoning effort are fixed, so runs at different
+ * revisions differ only by the code. Where the model is reached comes from the
+ * environment: `STANDARD_CASE_PROVIDER`, `STANDARD_CASE_API_KEY_ENV` (the name
+ * of the variable holding the key), `STANDARD_CASE_ROUTE` and
  * `STANDARD_CASE_MODEL_SPEC` (JSON), and `STANDARD_CASE_DEADLINE_MS`.
  */
 
@@ -43,6 +44,11 @@ export interface RunRecord {
   readonly elapsedMs: number
 }
 
+/** The model every standard-case run uses. */
+export const MODEL = 'deepseek/deepseek-v4.1-flash'
+/** The reasoning effort every standard-case run uses. */
+export const EFFORT = 'high'
+
 const DEFAULT_ROUTE = { api: 'openai-completions', baseURL: 'https://openrouter.ai/api/v1' }
 const DEFAULT_MODEL_SPEC = {
   contextWindow: 1_048_576,
@@ -61,8 +67,8 @@ function jsonEnv(env: NodeJS.ProcessEnv, name: string, fallback: Record<string, 
 }
 
 /**
- * Resolve the run's settings from the environment, defaulting to the DeepSeek
- * flash model over OpenRouter.
+ * Resolve the run's settings: the fixed model and effort, and the route from
+ * the environment, defaulting to OpenRouter.
  * @param env - the process environment.
  * @returns the settings; the key itself is read later, by name.
  */
@@ -73,8 +79,8 @@ export function resolveSettings(env: NodeJS.ProcessEnv): RunSettings {
   if (!Number.isInteger(deadlineMs) || deadlineMs < 60_000) throw new Error('STANDARD_CASE_DEADLINE_MS must be an integer of at least 60000')
   return {
     provider: set('STANDARD_CASE_PROVIDER') ?? 'openrouter',
-    model: set('STANDARD_CASE_MODEL') ?? 'deepseek/deepseek-v4.1-flash',
-    effort: set('STANDARD_CASE_EFFORT') ?? 'high',
+    model: MODEL,
+    effort: EFFORT,
     apiKeyEnv: set('STANDARD_CASE_API_KEY_ENV') ?? 'OPENROUTER_API_KEY',
     route: jsonEnv(env, 'STANDARD_CASE_ROUTE', DEFAULT_ROUTE),
     modelSpec: jsonEnv(env, 'STANDARD_CASE_MODEL_SPEC', DEFAULT_MODEL_SPEC),

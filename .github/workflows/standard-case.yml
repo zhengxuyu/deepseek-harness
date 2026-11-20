@@ -8,10 +8,10 @@ name: Agent Team standard case
 # rubric, since one model run varies.
 #
 # The model key is the repository secret OPENROUTER_API_KEY. Without it the job
-# reports that it was skipped. Repository variables STANDARD_CASE_PROVIDER,
-# STANDARD_CASE_MODEL, STANDARD_CASE_EFFORT, STANDARD_CASE_ROUTE,
-# STANDARD_CASE_MODEL_SPEC, and STANDARD_CASE_DEADLINE_MS override the route;
-# scripts/standard-case/run.ts documents them.
+# reports that it was skipped. The model and reasoning effort are fixed in
+# scripts/standard-case/run.ts. Repository variables STANDARD_CASE_PROVIDER,
+# STANDARD_CASE_ROUTE, STANDARD_CASE_MODEL_SPEC, and STANDARD_CASE_DEADLINE_MS
+# override where the model is reached and the run's time limit.
 #
 # SECURITY: never add a `pull_request_target` trigger. This workflow runs the
 # checked-out code with the model key, so it may only run code already on
@@ -71,8 +71,6 @@ jobs:
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           STANDARD_CASE_PROVIDER: ${{ vars.STANDARD_CASE_PROVIDER }}
-          STANDARD_CASE_MODEL: ${{ vars.STANDARD_CASE_MODEL }}
-          STANDARD_CASE_EFFORT: ${{ vars.STANDARD_CASE_EFFORT }}
           STANDARD_CASE_ROUTE: ${{ vars.STANDARD_CASE_ROUTE }}
           STANDARD_CASE_MODEL_SPEC: ${{ vars.STANDARD_CASE_MODEL_SPEC }}
           STANDARD_CASE_DEADLINE_MS: ${{ vars.STANDARD_CASE_DEADLINE_MS }}
