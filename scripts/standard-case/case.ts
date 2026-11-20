@@ -81,6 +81,20 @@ export abstract class StandardCase {
   protected abstract readonly directory: string
   /** What the case expects of the Team. */
   abstract readonly expectations: TeamExpectations
+  /**
+   * Which dispatch of the workflow runs the case: `default` cases run when a
+   * dispatch names no case, `named` cases only when a dispatch names them.
+   */
+  abstract readonly cadence: 'default' | 'named'
+  /** Milliseconds the run may take: the settlement deadline, and the limit after which the run is stopped. */
+  abstract readonly timeLimitMs: number
+  /**
+   * Commands the run's agents and {@link judgeOutputs} need on `PATH`, beyond
+   * what dsh itself needs. A case is refused before it starts when one is missing.
+   */
+  abstract readonly requiredTools: readonly string[]
+  /** Where {@link requiredTools} come from, shown when one is missing; empty when none is required. */
+  abstract readonly toolsHint: string
 
   /**
    * Write the files the run starts with into a fresh workspace. The result

@@ -2,8 +2,10 @@
 
 import type { StandardCase } from '../case.ts'
 import { OrdersReportCase } from './orders-report/case.ts'
+import { RtlToLayoutCase } from './rtl-to-layout/case.ts'
 
 /** The registered cases. Add a new case's instance here. */
 export const cases: readonly StandardCase[] = [
   new OrdersReportCase(),
+  new RtlToLayoutCase(),
 ]

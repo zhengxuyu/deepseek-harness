@@ -3,6 +3,7 @@
  *
  *   pnpm run standard-case                     run every case, then analyze each
  *   pnpm run standard-case <case>...           run only the named cases
+ *   pnpm run standard-case --cadence default   run only the cases of that cadence
  *   pnpm run standard-case --list              print the cases and exit
  *   pnpm run standard-case --out <dir>         choose the output directory
  *   pnpm run standard-case --analyze --out <dir>   analyze existing runs again
@@ -15,6 +16,7 @@
  * to `GITHUB_STEP_SUMMARY` when set. `case.ts` says how to add a case.
  */
 
+import { spawnSync } from 'node:child_process'
 import { appendFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -23,6 +25,10 @@ import { cases } from './cases/index.ts'
 import { runCase } from './run.ts'
 
 const root = resolve(import.meta.dirname, '../..')
+
+function onPath(command: string): boolean {
+  return spawnSync(process.platform === 'win32' ? 'where' : 'which', [command], { stdio: 'ignore' }).status === 0
+}
 
 async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
@@ -33,16 +39,24 @@ async function main(argv: string[]): Promise<number> {
       analyze: { type: 'boolean', default: false },
       strict: { type: 'boolean', default: false },
       out: { type: 'string' },
+      cadence: { type: 'string' },
     },
   })
   if (values.list) {
-    for (const standardCase of cases) console.log(`${standardCase.name}\t${standardCase.description}`)
+    for (const standardCase of cases) console.log(`${standardCase.name}\t${standardCase.cadence}\t${standardCase.description}`)
     return 0
   }
   const unknown = positionals.filter(name => !cases.some(standardCase => standardCase.name === name))
   if (unknown.length > 0) throw new Error(`unknown case(s): ${unknown.join(', ')}; --list prints the cases`)
   if (values.analyze && values.out === undefined) throw new Error('--analyze needs --out <dir>, the directory of the runs to analyze')
-  const selected = positionals.length === 0 ? cases : cases.filter(standardCase => positionals.includes(standardCase.name))
+  if (values.cadence !== undefined && values.cadence !== 'default' && values.cadence !== 'named') throw new Error('--cadence takes default or named')
+  const selected = cases.filter(standardCase =>
+    (positionals.length === 0 || positionals.includes(standardCase.name))
+    && (values.cadence === undefined || standardCase.cadence === values.cadence))
+  for (const standardCase of selected) {
+    const missing = standardCase.requiredTools.filter(tool => !onPath(tool))
+    if (missing.length > 0) throw new Error(`${standardCase.name} needs ${missing.join(', ')} on PATH: ${standardCase.toolsHint}`)
+  }
   const stamp = new Date().toISOString().replaceAll(/[-:]|\.\d+/gu, '')
   // pnpm runs the script from the repository root; a relative directory is relative to where it was invoked.
   const out = resolve(process.env.INIT_CWD ?? process.cwd(), values.out ?? join(root, '.artifacts/standard-case', stamp))

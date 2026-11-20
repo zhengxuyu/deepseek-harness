@@ -43,6 +43,9 @@ describe.each(cases.map(standardCase => [standardCase.name, standardCase] as con
     expect(standardCase.task().length).toBeGreaterThan(50)
     expect(Number.isInteger(standardCase.expectations.minTeammates) && standardCase.expectations.minTeammates >= 0).toBe(true)
     expect(standardCase.expectations.minTeammatesCompletingTasks).toBeLessThanOrEqual(standardCase.expectations.minTeammates)
+    expect(['default', 'named']).toContain(standardCase.cadence)
+    expect(Number.isInteger(standardCase.timeLimitMs) && standardCase.timeLimitMs >= 60_000).toBe(true)
+    expect(standardCase.toolsHint.trim() === '').toBe(standardCase.requiredTools.length === 0)
   })
 
   it('prepares the same workspace every time', () => {

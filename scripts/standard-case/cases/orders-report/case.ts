@@ -26,6 +26,10 @@ export class OrdersReportCase extends StandardCase {
   readonly description = 'Two teammates each derive one file from an orders table in parallel, then the Lead writes a report from both.'
   protected readonly directory = import.meta.dirname
   readonly expectations: TeamExpectations = { minTeammates: 2, minTeammatesCompletingTasks: 2 }
+  readonly cadence = 'default'
+  readonly timeLimitMs = 900_000
+  readonly requiredTools: readonly string[] = []
+  readonly toolsHint = ''
 
   prepare(workspace: string): void {
     mkdirSync(join(workspace, 'data'), { recursive: true })

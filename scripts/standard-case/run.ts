@@ -10,7 +10,7 @@
  * revisions differ only by the code. Where the model is reached comes from the
  * environment: `STANDARD_CASE_PROVIDER`, `STANDARD_CASE_API_KEY_ENV` (the name
  * of the variable holding the key), `STANDARD_CASE_ROUTE` and
- * `STANDARD_CASE_MODEL_SPEC` (JSON), and `STANDARD_CASE_DEADLINE_MS`.
+ * `STANDARD_CASE_MODEL_SPEC` (JSON). The time limit is the case's own.
  */
 
 import { execFileSync, spawn } from 'node:child_process'
@@ -31,7 +31,6 @@ export interface RunSettings {
   readonly apiKeyEnv: string
   readonly route: Record<string, unknown>
   readonly modelSpec: Record<string, unknown>
-  readonly deadlineMs: number
 }
 
 /** What `run.json` records about a finished run. */
@@ -82,8 +81,6 @@ function jsonEnv(env: NodeJS.ProcessEnv, name: string, fallback: Record<string, 
 export function resolveSettings(env: NodeJS.ProcessEnv): RunSettings {
   // A workflow passes an unset repository variable as an empty string.
   const set = (name: string): string | undefined => (env[name] ?? '').trim() === '' ? undefined : env[name]
-  const deadlineMs = Number(set('STANDARD_CASE_DEADLINE_MS') ?? 900_000)
-  if (!Number.isInteger(deadlineMs) || deadlineMs < 60_000) throw new Error('STANDARD_CASE_DEADLINE_MS must be an integer of at least 60000')
   return {
     provider: set('STANDARD_CASE_PROVIDER') ?? 'openrouter',
     model: MODEL,
@@ -91,7 +88,6 @@ export function resolveSettings(env: NodeJS.ProcessEnv): RunSettings {
     apiKeyEnv: set('STANDARD_CASE_API_KEY_ENV') ?? 'OPENROUTER_API_KEY',
     route: jsonEnv(env, 'STANDARD_CASE_ROUTE', DEFAULT_ROUTE),
     modelSpec: jsonEnv(env, 'STANDARD_CASE_MODEL_SPEC', DEFAULT_MODEL_SPEC),
-    deadlineMs,
   }
 }
 
@@ -110,10 +106,10 @@ export function shipsSettlement(): boolean {
  * and, when the revision ships it, settlement over the Team's board.
  * @param settings - the run's settings.
  * @param home - the run's Harness home.
- * @param settlement - whether to mount `agent-team-settlement`.
+ * @param settlement - the settlement deadline in milliseconds, or undefined to leave `agent-team-settlement` unmounted.
  * @returns the `cordis.patch.yml` text.
  */
-export function patchLayer(settings: RunSettings, home: string, settlement: boolean): string {
+export function patchLayer(settings: RunSettings, home: string, settlement: number | undefined): string {
   const disabled = ['tool-subagent', 'tool-subagent-fork', 'tool-subagent-control', 'tool-subagent-list-agents']
   return dump([
     { id: 'agent-default-model', config: { provider: settings.provider, model: settings.model, reasoningEffort: settings.effort } },
@@ -137,18 +133,18 @@ export function patchLayer(settings: RunSettings, home: string, settlement: bool
         {
           id: 'agent-team',
           name: '@deepseek-ai/dsh-experimental-agent-team',
-          ...settlement ? { config: { trackSubagentRuns: true } } : {},
+          ...settlement === undefined ? {} : { config: { trackSubagentRuns: true } },
         },
         {
           id: 'tool-agent-team',
           name: '@deepseek-ai/dsh-experimental-tool-agent-team',
           config: { freshProvider: 'spawn', forkProvider: 'fork' },
         },
-        ...settlement
+        ...settlement !== undefined
           ? [{
             id: 'agent-team-settlement',
             name: '@deepseek-ai/dsh-experimental-agent-team-settlement',
-            config: { deadlineMs: settings.deadlineMs, stallMs: 120_000 },
+            config: { deadlineMs: settlement, stallMs: 120_000 },
           }]
           : [],
       ],
@@ -176,12 +172,12 @@ export async function runCase(standardCase: StandardCase, out: string): Promise<
   mkdirSync(join(home, 'tmp'), { recursive: true })
   standardCase.prepare(workspace)
   const settlement = shipsSettlement()
-  writeFileSync(join(home, 'cordis.patch.yml'), patchLayer(settings, home, settlement))
+  writeFileSync(join(home, 'cordis.patch.yml'), patchLayer(settings, home, settlement ? standardCase.timeLimitMs : undefined))
   const task = standardCase.task()
 
   const startedAt = new Date()
   // The outer limit ends a run that its own settlement deadline did not, or that has none.
-  const limitMs = settings.deadlineMs + 180_000
+  const limitMs = standardCase.timeLimitMs + 180_000
   const child = spawn(process.execPath, [
     '--import', fileURLToPath(import.meta.resolve('tsx/esm')),
     join(root, 'apps/cli/src/bin.ts'), '--profile', 'headless', '--json', task,
