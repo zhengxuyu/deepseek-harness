@@ -79,7 +79,7 @@ function jsonEnv(env: NodeJS.ProcessEnv, name: string, fallback: Record<string, 
  * @returns the settings; the key itself is read later, by name.
  */
 export function resolveSettings(env: NodeJS.ProcessEnv): RunSettings {
-  // A workflow passes an unset repository variable as an empty string.
+  // An empty variable counts as unset.
   const set = (name: string): string | undefined => (env[name] ?? '').trim() === '' ? undefined : env[name]
   return {
     provider: set('STANDARD_CASE_PROVIDER') ?? 'openrouter',
@@ -125,7 +125,7 @@ export function patchLayer(settings: RunSettings, home: string, settlement: numb
         },
       },
     },
-    // Uncompressed logs, so the analysis and anyone opening the artifact read them as plain JSON lines.
+    // Uncompressed logs, so the analysis and anyone opening the run directory read them as plain JSON lines.
     { id: 'session-persistence-jsonl', config: { root: join(home, 'sessions'), compression: 'none' } },
     ...disabled.map(id => ({ id, disabled: true })),
     {

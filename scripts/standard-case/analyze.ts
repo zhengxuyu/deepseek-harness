@@ -226,7 +226,7 @@ function cell(value: string): string {
 }
 
 /**
- * Render the analysis as the Markdown the workflow shows as its summary.
+ * Render the analysis as the Markdown written to `summary.md` and printed.
  * @param analysis - one run's analysis.
  * @returns Markdown with the verdict, rubric, agents, board, and timeline.
  */

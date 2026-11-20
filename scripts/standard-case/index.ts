@@ -12,12 +12,14 @@
  * The output directory defaults to `.artifacts/standard-case/<UTC timestamp>`
  * and holds one directory per case: the workspace, the Harness home with
  * every Session log, `stdout.jsonl`, `stderr.log`, `run.json`,
- * `analysis.json`, and `summary.md`. Each summary is printed, and appended
- * to `GITHUB_STEP_SUMMARY` when set. `case.ts` says how to add a case.
+ * `analysis.json`, and `summary.md`. Each summary is printed. `case.ts` says
+ * how to add a case.
+ *
+ * A maintainer starts every run by hand; no CI workflow runs the cases.
  */
 
 import { spawnSync } from 'node:child_process'
-import { appendFileSync, writeFileSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { analyze, renderSummary } from './analyze.ts'
@@ -72,7 +74,6 @@ async function main(argv: string[]): Promise<number> {
     const summary = renderSummary(analysis)
     writeFileSync(join(directory, 'analysis.json'), `${JSON.stringify(analysis, null, 2)}\n`)
     writeFileSync(join(directory, 'summary.md'), summary)
-    if (process.env.GITHUB_STEP_SUMMARY !== undefined) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary}\n`)
     console.log(summary)
     if (analysis.score.passed < analysis.score.total) failed += 1
   }

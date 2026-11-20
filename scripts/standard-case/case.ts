@@ -82,8 +82,9 @@ export abstract class StandardCase {
   /** What the case expects of the Team. */
   abstract readonly expectations: TeamExpectations
   /**
-   * Which dispatch of the workflow runs the case: `default` cases run when a
-   * dispatch names no case, `named` cases only when a dispatch names them.
+   * Which group `--cadence` selects the case in: `default` for a case that
+   * runs on any machine, `named` for one that needs tools of its own and is
+   * usually run by name.
    */
   abstract readonly cadence: 'default' | 'named'
   /** Milliseconds the run may take: the settlement deadline, and the limit after which the run is stopped. */

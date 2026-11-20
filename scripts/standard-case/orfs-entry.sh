@@ -1,7 +1,7 @@
 #!/bin/bash
 # Inside the OpenROAD flow image: install what the image lacks, then run the
 # standard cases from a private copy of the checkout mounted at /src.
-# Started by in-orfs.sh; the workflow runs orfs-setup.sh and the command itself.
+# Started by in-orfs.sh.
 set -euo pipefail
 
 bash /src/scripts/standard-case/orfs-setup.sh
