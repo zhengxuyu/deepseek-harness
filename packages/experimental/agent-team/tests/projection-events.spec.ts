@@ -7,7 +7,7 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { teamProjectionDefinition } from '../src/projection.ts'
 import type { TeamProjectionState, TeamState } from '../src/projection.ts'
 import { TeamId, TeamMessageId, TeamTaskId } from '../src/types.ts'
-import type { TeamMemberSnapshot, TeamMessageSnapshot, TeamTaskSnapshot } from '../src/types.ts'
+import type { TeamMemberSnapshot, TeamMessageSnapshot, TeamTaskSnapshot, TeamTaskSnapshotV2 } from '../src/types.ts'
 
 const ROOT = SessionId('team-root')
 const TEAM = TeamId(ROOT)
@@ -60,7 +60,8 @@ function member(overrides: Partial<TeamMemberSnapshot> = {}): TeamMemberSnapshot
   }
 }
 
-function task(overrides: Partial<TeamTaskSnapshot> = {}): TeamTaskSnapshot {
+/** A version-2 task record, the form every pre-`lost` fixture in this file is written in. */
+function task(overrides: Partial<TeamTaskSnapshotV2> = {}): TeamTaskSnapshotV2 {
   return {
     id: TeamTaskId('task-1'),
     revision: 1,
@@ -71,6 +72,11 @@ function task(overrides: Partial<TeamTaskSnapshot> = {}): TeamTaskSnapshot {
     writeScopes: [],
     ...overrides,
   }
+}
+
+/** A version-3 task record, which may carry the `lost` status and its cause. */
+function taskV3(overrides: Partial<TeamTaskSnapshot> = {}): TeamTaskSnapshot {
+  return { ...task(), ...overrides }
 }
 
 function message(overrides: Partial<TeamMessageSnapshot> = {}): TeamMessageSnapshot {
@@ -176,6 +182,20 @@ describe('Agent Teams projection events', () => {
     }, SessionSeq(1))])).toThrow(/revision is not contiguous/)
   })
 
+  it('projects a lost task only at payload version 3, only with its cause, and never a cause without the status', () => {
+    const lost = taskV3({ status: 'lost', lostCause: 'run-ended', ownerId: SessionId('owner') })
+    expect(projectTeam(ROOT, [event('team/task', { version: 3, teamId: TEAM, task: lost }, SessionSeq(0))]).tasks[0])
+      .toMatchObject({ status: 'lost', lostCause: 'run-ended' })
+    // A version-2 record predates the status, so it can neither carry it nor its cause.
+    for (const invalid of [
+      event('team/task', { version: 2, teamId: TEAM, task: lost as never }, SessionSeq(0)),
+      event('team/task', { version: 3, teamId: TEAM, task: taskV3({ status: 'lost', ownerId: SessionId('owner') }) }, SessionSeq(0)),
+      event('team/task', { version: 3, teamId: TEAM, task: taskV3({ status: 'pending', lostCause: 'owner-failed' }) }, SessionSeq(0)),
+    ]) {
+      expect(() => projectTeam(ROOT, [invalid])).toThrow(/persisted Agent Teams team\/task payload is invalid/)
+    }
+  })
+
   it('rejects every invalid persisted task dependency relation', () => {
     const first = event('team/task', { version: 2, teamId: TEAM, task: task() }, SessionSeq(0))
     const second = event('team/task', {
@@ -205,8 +225,9 @@ describe('Agent Teams projection events', () => {
       },
       {
         records: [first, event('team/task', {
-          ...second.data,
-          task: { ...second.data.task, blockedBy: [TeamTaskId('task-1'), TeamTaskId('task-1')] },
+          version: 2,
+          teamId: TEAM,
+          task: task({ id: TeamTaskId('task-2'), blockedBy: [TeamTaskId('task-1'), TeamTaskId('task-1')] }),
         }, SessionSeq(1))],
         message: /repeats blocker/,
       },
@@ -396,6 +417,9 @@ describe('Agent Teams projection events', () => {
     const state = project(ROOT, [invalid, later])
     expect(state.failure).toMatch(/unsupported Agent Teams event version 1/)
     expect(isEmptyState(state)).toBe(true)
+    // Only team/task has a version 3; the other Team events stop at 2.
+    const memberV3 = event('team/member', { version: 3 as 2, teamId: TEAM, member: member() }, SessionSeq(0))
+    expect(project(ROOT, [memberV3]).failure).toMatch(/unsupported Agent Teams event version 3/)
   })
 
   it('isolates unsupported inherited Team records from the current Team', () => {

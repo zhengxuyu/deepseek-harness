@@ -359,6 +359,30 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the committed next task revision.',
       },
       {
+        signature: 'async beginTask(caller: Agent, request: Pick<CreateTeamTaskRequest, \'subject\' | \'description\'>): Promise<TeamTaskView>',
+        description: 'Record work the caller has already begun as an in-progress task it owns. Any member may be the caller; the harness uses it for work no member created a task for, such as the request a run was started with.',
+        parameters: [{ name: 'caller', description: 'exact live Team member that owns the work.' }, { name: 'request', description: 'subject and description of the work.' }],
+        returns: 'the revision-one task view, in progress and owned by the caller.',
+      },
+      {
+        signature: 'async markCompleted(caller: Agent, id: TeamTaskId): Promise<TeamTaskView>',
+        description: 'Complete one in-progress task on behalf of the harness, bypassing member authorization.',
+        parameters: [{ name: 'caller', description: 'exact live Team member whose board holds the task.' }, { name: 'id', description: 'task the harness observed finished.' }],
+        returns: 'the completed task view.',
+      },
+      {
+        signature: 'outstandingTasks(caller: Agent): OutstandingTeamTask[]',
+        description: 'List in-progress tasks on the caller\'s Team board with whether each owner is still running.',
+        parameters: [{ name: 'caller', description: 'exact live Team member reading the board.' }],
+        returns: 'outstanding rows in creation order; empty once every claimed task settled.',
+      },
+      {
+        signature: 'async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause): Promise<TeamTaskView>',
+        description: 'Mark one in-progress task `lost` on behalf of the harness; the owner stays recorded.',
+        parameters: [{ name: 'caller', description: 'exact live Team member whose board holds the task.' }, { name: 'id', description: 'task whose owner can no longer finish it.' }, { name: 'cause', description: 'why the harness gave up on the owner.' }],
+        returns: 'the lost task view.',
+      },
+      {
         signature: 'async waitForChange(caller: Agent, timeoutMs: number, signal: AbortSignal): Promise<TeamWaitResult>',
         description: 'Wait for the next Team-domain or member-status change.',
         parameters: [{ name: 'caller', description: 'exact live Team member waiting for activity.' }, { name: 'timeoutMs', description: 'bounded wait duration from ten seconds through one hour.' }, { name: 'signal', description: 'caller cancellation for the wait only.' }],
@@ -5648,6 +5672,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type OptionalSessionSeq = SessionSeq | null;',
   },
   {
+    name: 'OutstandingTeamTask',
+    declaration: 'export interface OutstandingTeamTask {\n    readonly id: TeamTaskId;\n    readonly subject: string;\n    readonly ownerName: string;\n    readonly live: boolean;\n}',
+  },
+  {
     name: 'PackageResult',
     declaration: 'export interface PackageResult {\n    exitCode: number;\n    output: string;\n    truncated: boolean;\n    logPath: string;\n    kind?: PluginInstallFailureKind;\n}',
   },
@@ -7096,12 +7124,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type TeamTaskId = Branded<\'TeamTaskId\'>;',
   },
   {
+    name: 'TeamTaskLostCause',
+    declaration: 'export type TeamTaskLostCause = \'owner-failed\' | \'run-ended\';',
+  },
+  {
     name: 'TeamTaskStatus',
-    declaration: 'export type TeamTaskStatus = \'pending\' | \'in_progress\' | \'completed\' | \'deleted\';',
+    declaration: 'export type TeamTaskStatus = \'pending\' | \'in_progress\' | \'completed\' | \'lost\' | \'deleted\';',
   },
   {
     name: 'TeamTaskView',
-    declaration: 'export interface TeamTaskView {\n    readonly id: TeamTaskId;\n    readonly revision: number;\n    readonly subject: string;\n    readonly description: string;\n    readonly status: TeamTaskStatus;\n    readonly blockedBy: TeamTaskId[];\n    readonly writeScopes: string[];\n    readonly ownerName?: string;\n    readonly ready: boolean;\n    readonly writeScopeWarnings: string[];\n}',
+    declaration: 'export interface TeamTaskView {\n    readonly id: TeamTaskId;\n    readonly revision: number;\n    readonly subject: string;\n    readonly description: string;\n    readonly status: TeamTaskStatus;\n    readonly blockedBy: TeamTaskId[];\n    readonly writeScopes: string[];\n    readonly ownerName?: string;\n    readonly lostCause?: TeamTaskLostCause;\n    readonly ready: boolean;\n    readonly writeScopeWarnings: string[];\n}',
   },
   {
     name: 'TeamView',

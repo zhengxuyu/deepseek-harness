@@ -567,9 +567,13 @@ describe('dsh-tool-team', () => {
     expect((await execute(ctx, lead, 'team_task_list', { cursor: -1 })).isError).toBe(true)
     expect((await execute(ctx, lead, 'team_task_list', { limit: 101 })).isError).toBe(true)
 
+    const released = await execute(ctx, lead, 'team_task_update', {
+      task_id: first.id, expected_revision: claim.revision, action: 'release',
+    })
+    const release = JSON.parse(text(released)) as { revision: number }
     const edited = await execute(ctx, lead, 'team_task_update', {
       task_id: first.id,
-      expected_revision: claim.revision,
+      expected_revision: release.revision,
       action: 'edit',
       subject: 'edited',
       description: 'edited description',

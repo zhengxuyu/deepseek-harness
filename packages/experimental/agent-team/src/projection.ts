@@ -11,6 +11,7 @@ import type {
   TeamMessageId,
   TeamMessageSnapshot,
   TeamTaskSnapshot,
+  TeamTaskSnapshotV2,
 } from './types.ts'
 import {
   TeamId as toTeamId,
@@ -70,7 +71,7 @@ const teamMemberSnapshotSchema = z.object({
   error: z.string().optional(),
 }).strict() as z.ZodType<TeamMemberSnapshot>
 
-const teamTaskSnapshotSchema = z.object({
+const teamTaskSnapshotV2Schema = z.object({
   id: teamTaskIdSchema,
   revision: positiveSafeInteger,
   subject: z.string(),
@@ -79,7 +80,22 @@ const teamTaskSnapshotSchema = z.object({
   ownerId: sessionIdSchema.optional(),
   blockedBy: z.array(teamTaskIdSchema),
   writeScopes: z.array(z.string()),
-}).strict() as z.ZodType<TeamTaskSnapshot>
+}).strict() as z.ZodType<TeamTaskSnapshotV2>
+
+const teamTaskSnapshotSchema = z.object({
+  id: teamTaskIdSchema,
+  revision: positiveSafeInteger,
+  subject: z.string(),
+  description: z.string(),
+  status: z.enum(['pending', 'in_progress', 'completed', 'lost', 'deleted']),
+  ownerId: sessionIdSchema.optional(),
+  lostCause: z.enum(['owner-failed', 'run-ended']).optional(),
+  blockedBy: z.array(teamTaskIdSchema),
+  writeScopes: z.array(z.string()),
+}).strict().refine(
+  task => (task.status === 'lost') === (task.lostCause !== undefined),
+  { message: 'lostCause must be present exactly while status is lost' },
+) as z.ZodType<TeamTaskSnapshot>
 
 const teamMessageSnapshotSchema = z.object({
   id: teamMessageIdSchema,
@@ -100,11 +116,18 @@ const teamMemberEventSchema = z.object({
   member: teamMemberSnapshotSchema,
 }).strict() as z.ZodType<SessionEventMap['team/member']>
 
-const teamTaskEventSchema = z.object({
-  version: z.literal(2),
-  teamId: teamIdSchema,
-  task: teamTaskSnapshotSchema,
-}).strict() as z.ZodType<SessionEventMap['team/task']>
+const teamTaskEventSchema = z.union([
+  z.object({
+    version: z.literal(2),
+    teamId: teamIdSchema,
+    task: teamTaskSnapshotV2Schema,
+  }).strict(),
+  z.object({
+    version: z.literal(3),
+    teamId: teamIdSchema,
+    task: teamTaskSnapshotSchema,
+  }).strict(),
+]) as z.ZodType<SessionEventMap['team/task']>
 
 const teamMessageQueuedEventSchema = z.object({
   version: z.literal(2),
@@ -220,7 +243,10 @@ function applyProjectionEvent(state: TeamProjectionState, event: SessionEvent): 
   try {
     const selector = parsePersisted(event.type, teamEventSelectorSchema, event.data)
     if (selector.teamId !== state.id) return
-    if (selector.version !== 2) {
+    // `team/task` gained version 3 with the `lost` status; every other Team
+    // event is still written at version 2.
+    const supported = event.type === 'team/task' ? selector.version === 2 || selector.version === 3 : selector.version === 2
+    if (!supported) {
       throw new Error(`unsupported Agent Teams event version ${String(selector.version)}`)
     }
     applyCurrentTeamEvent(state, parseCurrentTeamEvent(event))

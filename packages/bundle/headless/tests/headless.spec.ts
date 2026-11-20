@@ -421,6 +421,52 @@ describe('headless runner', () => {
     await test.ctx.fiber.dispose()
   })
 
+  it('hands the task to a settlement provider before submitting it, and fails the exit for what it could not settle', async () => {
+    const calls: string[] = []
+    const test = await bench({
+      afterPrompt(session, message) {
+        calls.push('prompt')
+        appendTurn(session, 1, message, 'first answer', true)
+      },
+    })
+    test.ctx.provide('headlessSettlement', {
+      begin: (root: Agent, task: string) => {
+        calls.push(`begin ${root.status} ${task}`)
+        return Promise.resolve({
+          settle: async () => {
+            // The provider, not the runner, waits for the root's turn.
+            await root.whenIdle()
+            calls.push('settle')
+            // A settling child wakes the root once more; the runner folds that turn too.
+            appendTurn(root.session, 2, {
+              role: 'user', content: [{ type: 'text', text: 'notice' }], source: { kind: 'user' }, id: brandString<MessageId>('notice'),
+            } satisfies UserMessage, 'answer after the notice', true)
+            return { unsettled: ['task-3 "subagent run via spawn" owned by child: still in progress'] }
+          },
+        })
+      },
+    })
+    expect(await test.run()).toEqual({
+      code: 1,
+      out: 'answer after the notice\n',
+      err: 'dsh: unsettled: task-3 "subagent run via spawn" owned by child: still in progress\n',
+      order: ['flush', 'exit'],
+    })
+    expect(calls).toEqual(['begin idle do the thing', 'prompt', 'settle'])
+    await test.ctx.fiber.dispose()
+  })
+
+  it('exits 0 when the settlement provider reports nothing outstanding', async () => {
+    const test = await bench({
+      afterPrompt(session, message) { appendTurn(session, 1, message, 'settled answer', true) },
+    })
+    test.ctx.provide('headlessSettlement', {
+      begin: (root: Agent) => Promise.resolve({ settle: async () => { await root.whenIdle(); return { unsettled: [] } } }),
+    })
+    expect(await test.run()).toMatchObject({ code: 0, out: 'settled answer\n', err: '' })
+    await test.ctx.fiber.dispose()
+  })
+
   it('exits 1 when the final turn does not complete', async () => {
     const test = await bench({
       afterPrompt(session, message) { appendTurn(session, 1, message, undefined, false) },

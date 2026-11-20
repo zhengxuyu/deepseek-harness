@@ -66,16 +66,92 @@ interface TeamTaskSnapshot {
   readonly description: string
   readonly status: TeamTaskStatus
   readonly ownerId?: SessionId
+  /** Present exactly while {@link status} is `lost`. */
+  readonly lostCause?: TeamTaskLostCause
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
 }
 ```
 
-`pending` is unstarted or released, `in_progress` carries an owner, `completed` satisfies blockers, and `deleted` is a retained tombstone. Views add owner name, readiness, and write-scope overlap warnings without changing the durable snapshot.
+`pending` is unstarted or released, `in_progress` carries an owner, `completed` satisfies blockers, `lost` is an in-progress task whose owner the harness gave up on (`lostCause` is `owner-failed` or `run-ended`; the owner stays recorded until `reopen`), and `deleted` is a retained tombstone. `in_progress` and `completed` tasks are frozen: their text, edges, and assignment do not change. Views add owner name, readiness, lost cause, and write-scope overlap warnings without changing the durable snapshot.
+
+<a id="task-status-transitions"></a>
+
+### Task status transitions
+
+Every task follows one state machine, whoever owns it: the Lead, a teammate, or a tracked subagent run. Members differ in the tools they hold, not in how their tasks move.
+
+```mermaid
+stateDiagram-v2
+  [*] --> pending: createTask
+  [*] --> in_progress: beginTask
+  pending --> in_progress: claim, reassign to a member
+  in_progress --> pending: release, reassign to nobody
+  in_progress --> completed: complete, markCompleted
+  in_progress --> lost: markLost
+  completed --> pending: reopen
+  lost --> pending: reopen
+  pending --> deleted: delete
+  lost --> deleted: delete
+```
+
+A transition has one of two origins. A member action goes through `updateTask`, which requires the caller to be the task's owner or the Lead and compares `expectedRevision`. A harness transition goes through `beginTask`, `markCompleted`, or `markLost`, which skip member authorization because no member acted.
+
+| Transition | From | To | Origin | Condition |
+|---|---|---|---|---|
+| `createTask` | none | `pending` | member | board below `maxTasks` |
+| `beginTask` | none | `in_progress` | harness | the caller becomes the owner |
+| `claim` | `pending` | `in_progress` | member | every blocker is `completed`; no other owner |
+| `reassign` to a member | `pending` | `in_progress` | Lead | every blocker is `completed` |
+| `release` | `in_progress` | `pending` | owner or Lead | clears the owner |
+| `reassign` to nobody | `pending`, `in_progress` | `pending` | Lead | clears the owner |
+| `complete` | `in_progress` | `completed` | owner or Lead | |
+| `markCompleted` | `in_progress` | `completed` | harness | |
+| `markLost` | `in_progress` | `lost` | harness | records `lostCause`; keeps the owner |
+| `reopen` | `completed`, `lost` | `pending` | owner or Lead | clears the owner and `lostCause` |
+| `delete` | `pending`, `lost` | `deleted` | owner or Lead | no remaining task names it in `blockedBy` |
+
+`lost` is never a member action and is not terminal. A lost task cannot be claimed or completed and keeps blocking its dependents; `reopen` is its only way back to `pending`. `edit`, `set_dependencies`, and `delete` apply only to `pending` and `lost` tasks, so the executed part of the graph stays as its owners ran it. A request outside the table is refused and leaves the task unchanged.
+
+<a id="headless-settlement"></a>
+
+## Headless settlement
+
+`agent-team-settlement` provides the headless runner's `ctx.headlessSettlement` over the task board. It decides when a one-shot run ends and records what the run did not collect. Without it the runner exits when the root's turn ends.
+
+The plugin adds no status of its own. It records the task the run was started with through `beginTask`, as an `in_progress` task the root owns, and then makes only the harness transitions `markCompleted` and `markLost`.
+
+```mermaid
+flowchart TD
+  begin["beginTask"] --> idle{"root idle?"}
+  idle -- deadline passed --> cancel["cancel root"] --> ended["run-ended"] --> report
+  idle -- idle --> others{"others open?"}
+  others -- no --> last{"turn done?"}
+  last -- yes --> done["markCompleted"] --> report
+  last -- no --> failed["owner-failed"] --> report
+  others -- yes --> wait["waitForChange"] --> stalled{"stalled?"}
+  stalled -- yes --> ended
+  stalled -- no --> idle
+  report["report"]
+```
+
+`run-ended` and `owner-failed` are `markLost` causes: the first marks every task still `in_progress`, the second only the run's task. "Others open" asks whether any task other than the run's is `in_progress`; "stalled" means the wait timed out while no owner was running.
+
+| Outcome | Condition | Board record | Reported as unsettled |
+|---|---|---|---|
+| Settled | no other task is `in_progress` and the root's latest turn completed | the run's task is `completed` | no |
+| Root failed | no other task is `in_progress` and the root's latest turn ended any other way, or no turn ran | the run's task is `lost`, `owner-failed` | yes |
+| Deadline | `deadlineMs` passed since the run began | the root's turn is cancelled; every `in_progress` task is `lost`, `run-ended` | yes |
+| Stall | no owner is running and no Team change arrived for `stallMs` | every `in_progress` task is `lost`, `run-ended` | yes |
+| Task moved | the root moved the run's task out of `in_progress` without completing it | unchanged | yes |
+
+While any owner is running, the wait lasts until the deadline, so a slow teammate is not a stall. A task that leaves `in_progress` between the listing and its `markLost` is neither marked nor reported. A `markLost` that fails for another reason is reported with that failure.
+
+The runner writes one `dsh: unsettled: <row>` line to stderr per reported row and exits 0 only when the root's turn completed and no row was reported.
 
 ## Replay
 
-`foldTeam()` replays one root Session into the roster, task board, and queued-minus-delivered mailbox that every Team operation reads. It selects records by `TeamId`, so events inherited by an ordinary fork retain the ancestor id and never enter the new root's state. Session event `seq` and `time` remain the ordering and timing record; Team snapshots do not duplicate them. Roster and task reads reach callers as views; pending mail stays internal to delivery and recovery. The package [README](../../packages/experimental/agent-team/README.md) owns operation, authorization, recovery, and limit behavior.
+`foldTeam()` replays one root Session into the roster, task board, and queued-minus-delivered mailbox that every Team operation reads. It selects records by `TeamId`, so events inherited by an ordinary fork retain the ancestor id and never enter the new root's state. Session event `seq` and `time` remain the ordering and timing record; Team snapshots do not duplicate them. Roster and task reads reach callers as views; pending mail stays internal to delivery and recovery. `team/task` payloads are written at version 3, which adds `lost` and `lostCause`; version 2 payloads remain readable. The package [README](../../packages/experimental/agent-team/README.md) owns operation, authorization, recovery, and limit behavior.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -152,6 +228,40 @@ listTasks(caller: Agent): TeamTaskView[]
  * @returns the committed next task revision.
  */
 async updateTask(caller: Agent, request: UpdateTeamTaskRequest): Promise<TeamTaskView>
+
+/**
+ * Record work the caller has already begun as an in-progress task it owns.
+ * Any member may be the caller; the harness uses it for work no member
+ * created a task for, such as the request a run was started with.
+ * @param caller - exact live Team member that owns the work.
+ * @param request - subject and description of the work.
+ * @returns the revision-one task view, in progress and owned by the caller.
+ */
+async beginTask(caller: Agent, request: Pick<CreateTeamTaskRequest, 'subject' | 'description'>): Promise<TeamTaskView>
+
+/**
+ * Complete one in-progress task on behalf of the harness, bypassing member authorization.
+ * @param caller - exact live Team member whose board holds the task.
+ * @param id - task the harness observed finished.
+ * @returns the completed task view.
+ */
+async markCompleted(caller: Agent, id: TeamTaskId): Promise<TeamTaskView>
+
+/**
+ * List in-progress tasks on the caller's Team board with whether each owner is still running.
+ * @param caller - exact live Team member reading the board.
+ * @returns outstanding rows in creation order; empty once every claimed task settled.
+ */
+outstandingTasks(caller: Agent): OutstandingTeamTask[]
+
+/**
+ * Mark one in-progress task `lost` on behalf of the harness; the owner stays recorded.
+ * @param caller - exact live Team member whose board holds the task.
+ * @param id - task whose owner can no longer finish it.
+ * @param cause - why the harness gave up on the owner.
+ * @returns the lost task view.
+ */
+async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause): Promise<TeamTaskView>
 
 /**
  * Wait for the next Team-domain or member-status change.
