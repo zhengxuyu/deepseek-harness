@@ -3,11 +3,11 @@ name: Agent Team standard case
 # One real-model `dsh --profile headless` run per standard case, each a fixed
 # Agent Team task, then an analysis of its trajectory and result
 # (`pnpm run standard-case`; scripts/standard-case/case.ts is the standard a
-# case implements). It runs
-# after every push to master, so the summary of consecutive runs shows how a
-# merge changed the Team's behavior. The run is an observation, not a gate: the
-# job fails only when the case could not be run or analyzed, never on the
-# rubric, since one model run varies.
+# case implements). It runs only when a maintainer dispatches it, on the ref
+# they choose, so comparing the summaries of two runs shows how the code
+# between them changed the Team's behavior. The run is an observation, not a
+# gate: the job fails only when a case could not be run or analyzed, never on
+# the rubric, since one model run varies.
 #
 # The model key is the repository secret OPENROUTER_API_KEY. Without it the job
 # reports that it was skipped. The model and reasoning effort are fixed in
@@ -15,13 +15,12 @@ name: Agent Team standard case
 # STANDARD_CASE_ROUTE, STANDARD_CASE_MODEL_SPEC, and STANDARD_CASE_DEADLINE_MS
 # override where the model is reached and the run's time limit.
 #
-# SECURITY: never add a `pull_request_target` trigger. This workflow runs the
-# checked-out code with the model key, so it may only run code already on
-# master or a ref a maintainer dispatches.
+# SECURITY: keep `workflow_dispatch` the only trigger. This workflow runs the
+# checked-out code with the model key, so it may only run a ref a maintainer
+# chose; a `pull_request` or `pull_request_target` trigger would run code the
+# maintainers have not accepted.
 on:
   workflow_dispatch:
-  push:
-    branches: [master]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
