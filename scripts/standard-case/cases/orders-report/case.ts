@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { StandardCase } from '../../case.ts'
-import type { RubricItem, TeamExpectations } from '../../case.ts'
+import type { RequiredTool, RubricItem, TeamExpectations } from '../../case.ts'
 import { expectedRegionTotals, expectedTopCustomers, ordersCsv } from './fixture.ts'
 
 function readText(path: string): string | undefined {
@@ -28,7 +28,7 @@ export class OrdersReportCase extends StandardCase {
   readonly expectations: TeamExpectations = { minTeammates: 2, minTeammatesCompletingTasks: 2 }
   readonly cadence = 'default'
   readonly timeLimitMs = 900_000
-  readonly requiredTools: readonly string[] = []
+  readonly requiredTools: readonly RequiredTool[] = []
   readonly toolsHint = ''
 
   prepare(workspace: string): void {

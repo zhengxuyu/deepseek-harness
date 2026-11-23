@@ -3,15 +3,17 @@
  * RTL coding and functional verification through logic synthesis to placement
  * and routing on the Nangate45 platform of the OpenROAD flow. The design is
  * problem `multi_pipe_8bit` of the RTLLM benchmark, as published in the
- * Hugging Face dataset `observerw/RTLLM` (revision 36a90436b38a); `dataset/`
- * holds its specification, testbench, and reference implementation unchanged
- * apart from trailing whitespace. The run sees only the specification.
+ * Hugging Face dataset `observerw/RTLLM` (revision 36a90436b38a). `spec.md`
+ * is its specification and `judge/dataset/` its testbench and reference
+ * implementation, all unchanged apart from trailing whitespace. The run is
+ * given only the specification; `case.ts` says where the rest is hidden from it.
  *
  * Every stage is judged by running the tools again on what the run left, not
  * by reading the run's own logs or reports. Function is judged with
- * `judge_tb.v`, which samples away from clock edges and assumes no latency;
- * the dataset's testbench changes inputs on clock edges, so its verdict is
- * reported as an item of its own and only for the RTL.
+ * `judge/judge_tb.v`, which samples away from clock edges and assumes no
+ * latency. The dataset's testbench changes inputs on clock edges, so its
+ * verdict depends on simulator event order; it is reported for the RTL only
+ * and left out of the score.
  */
 
 import { spawnSync } from 'node:child_process'
@@ -19,7 +21,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { StandardCase } from '../../case.ts'
-import type { RubricItem, TeamExpectations } from '../../case.ts'
+import type { RequiredTool, RubricItem, TeamExpectations } from '../../case.ts'
 
 const TOP = 'multi_pipe_8bit'
 const DATASET_PASSED = 'Your Design Passed'
@@ -49,7 +51,12 @@ export class RtlToLayoutCase extends StandardCase {
   readonly expectations: TeamExpectations = { minTeammates: 2, minTeammatesCompletingTasks: 2 }
   readonly cadence = 'named'
   readonly timeLimitMs = 3_600_000
-  readonly requiredTools: readonly string[] = ['iverilog', 'vvp', 'yosys', 'openroad']
+  readonly requiredTools: readonly RequiredTool[] = [
+    { command: 'iverilog', versionArgs: ['-V'] },
+    { command: 'vvp', versionArgs: ['-V'] },
+    { command: 'yosys', versionArgs: ['-V'] },
+    { command: 'openroad', versionArgs: ['-version'] },
+  ]
   readonly toolsHint = 'run inside the openroad/orfs image with iverilog installed and FLOW_HOME set; see scripts/standard-case/in-orfs.sh'
 
   /** The flow's home, which holds the platform files the judgment reads. */
@@ -63,7 +70,7 @@ export class RtlToLayoutCase extends StandardCase {
 
   prepare(workspace: string): void {
     mkdirSync(join(workspace, 'spec'), { recursive: true })
-    cpSync(join(this.directory, 'dataset/spec.md'), join(workspace, 'spec', `${TOP}.md`))
+    cpSync(join(this.directory, 'spec.md'), join(workspace, 'spec', `${TOP}.md`))
   }
 
   judgeOutputs(workspace: string): RubricItem[] {
@@ -84,7 +91,7 @@ export class RtlToLayoutCase extends StandardCase {
   /** Simulate a design under one testbench and look for the line that testbench prints on success. */
   private simulate(testbench: string, design: string, marker: string, scratch: string, label: string): ToolRun {
     const binary = join(scratch, `${label}.vvp`)
-    const compiled = tool('iverilog', ['-g2012', '-o', binary, join(this.directory, testbench), design], scratch)
+    const compiled = tool('iverilog', ['-g2012', '-o', binary, this.judgeFile(testbench), design], scratch)
     if (!compiled.ok) return { ok: false, output: `does not compile: ${lastLines(compiled.output)}` }
     const simulated = tool('vvp', [binary], scratch)
     return simulated.output.includes(marker)
@@ -99,14 +106,14 @@ export class RtlToLayoutCase extends StandardCase {
     if (!existsSync(rtl)) {
       return [
         { id: 'rtl', criterion: functional, passed: false, detail: `rtl/${TOP}.v is missing` },
-        { id: 'rtl-dataset', criterion: dataset, passed: false, detail: `rtl/${TOP}.v is missing` },
+        { id: 'rtl-dataset', criterion: dataset, passed: false, detail: `rtl/${TOP}.v is missing`, informational: true },
       ]
     }
     const own = this.simulate('judge_tb.v', rtl, JUDGE_PASSED, scratch, 'rtl')
     const theirs = this.simulate('dataset/testbench.v', rtl, DATASET_PASSED, scratch, 'rtl-dataset')
     return [
       { id: 'rtl', criterion: functional, passed: own.ok, detail: own.output },
-      { id: 'rtl-dataset', criterion: dataset, passed: theirs.ok, detail: theirs.output },
+      { id: 'rtl-dataset', criterion: dataset, passed: theirs.ok, detail: theirs.output, informational: true },
     ]
   }
 
@@ -123,7 +130,7 @@ export class RtlToLayoutCase extends StandardCase {
     }
     const good = run(rtl, 'tb-good')
     if (!good.ok) return { id: 'testbench', criterion, passed: false, detail: `it fails on the run's own RTL: ${lastLines(good.output)}` }
-    const bad = run(join(this.directory, 'broken.v'), 'tb-bad')
+    const bad = run(this.judgeFile('broken.v'), 'tb-bad')
     return bad.ok
       ? { id: 'testbench', criterion, passed: false, detail: 'it exits 0 on a design whose product is off by one, so it checks nothing' }
       : { id: 'testbench', criterion, passed: true, detail: 'passes on the run\'s RTL and rejects the wrong design' }
@@ -180,11 +187,11 @@ export class RtlToLayoutCase extends StandardCase {
       Object.entries(criteria).map(([id, criterion]) => ({ id, criterion, passed: false, detail }))
     const odb = join(workspace, 'layout/final.odb')
     if (!existsSync(odb)) return failAll('layout/final.odb is missing')
-    const run = tool('openroad', ['-no_init', '-exit', join(this.directory, 'judge.tcl')], workspace, {
+    const run = tool('openroad', ['-no_init', '-exit', this.judgeFile('judge.tcl')], workspace, {
       ...process.env,
       JUDGE_ODB: odb,
       JUDGE_LIB: this.liberty(),
-      JUDGE_SDC: join(this.directory, 'judge.sdc'),
+      JUDGE_SDC: this.judgeFile('judge.sdc'),
       JUDGE_RC: join(this.flowHome(), 'platforms/nangate45/setRC.tcl'),
       JUDGE_NETLIST: join(scratch, 'layout-netlist.v'),
     })

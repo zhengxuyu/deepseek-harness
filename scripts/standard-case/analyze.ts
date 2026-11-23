@@ -21,6 +21,8 @@ export interface LogEvent {
 /** One Session log read from disk. */
 export interface SessionLog {
   readonly id: string
+  /** The Session that created this one; undefined for the Session the run started with. */
+  readonly parent: string | undefined
   readonly events: readonly LogEvent[]
 }
 
@@ -40,6 +42,7 @@ export interface Analysis {
   readonly tasks: TaskOutcome[]
   readonly timeline: TimelineEntry[]
   readonly rubric: RubricItem[]
+  /** Counts the rubric items that are not informational. */
   readonly score: { readonly passed: number; readonly total: number }
 }
 
@@ -57,23 +60,27 @@ function count(value: unknown): number {
 
 /**
  * Parse one Session log's text into its identity and events.
- * @param source - newline-delimited JSON: one header line, then events.
+ * @param source - newline-delimited JSON: one header line, then events. A
+ * last line without its newline is the write a killed run did not finish, and is skipped.
  * @returns the log, or undefined when the text carries no Session header.
+ * @throws SyntaxError when a complete line is not JSON.
  */
 export function parseSessionLog(source: string): SessionLog | undefined {
   let id: string | undefined
+  let parent: string | undefined
   const events: LogEvent[] = []
-  for (const line of source.split('\n')) {
+  for (const line of source.split('\n').slice(0, -1)) {
     if (line.trim() === '') continue
     const row = record(JSON.parse(line))
     if (row.type === 'session' && id === undefined) {
       id = text(row.id)
+      parent = text(row.parentSession)
       continue
     }
     const type = text(row.type)
     if (type !== undefined) events.push({ type, time: count(row.time), data: record(row.data) })
   }
-  return id === undefined ? undefined : { id, events }
+  return id === undefined ? undefined : { id, parent, events }
 }
 
 /**
@@ -103,7 +110,10 @@ function measure(log: SessionLog, name: string, role: AgentMeasure['role']): Age
   const toolCalls: Record<string, number> = {}
   const turnEnds: string[] = []
   let modelRequests = 0
+  let failedRequests = 0
   let inputTokens = 0
+  let cacheReadTokens = 0
+  let cacheWriteTokens = 0
   let outputTokens = 0
   let toolErrors = 0
   for (const event of log.events) {
@@ -111,23 +121,29 @@ function measure(log: SessionLog, name: string, role: AgentMeasure['role']): Age
       modelRequests += 1
       const usage = record(event.data.usage)
       inputTokens += count(usage.inputTokens)
+      cacheReadTokens += count(usage.cacheReadTokens)
+      cacheWriteTokens += count(usage.cacheWriteTokens)
       outputTokens += count(usage.outputTokens)
+    } else if (event.type === 'assistant/attempt') {
+      failedRequests += 1
     } else if (event.type === 'tool/call') {
       const tool = text(event.data.name) ?? 'unknown'
       toolCalls[tool] = (toolCalls[tool] ?? 0) + 1
     } else if (event.type === 'tool/result') {
-      const content = record(event.data.message).content
-      if (Array.isArray(content) && content.some(block => record(block).isError === true)) toolErrors += 1
+      if (record(event.data.message).isError === true) toolErrors += 1
     } else if (event.type === 'turn/end') {
       turnEnds.push(text(record(event.data.reason).kind) ?? 'unknown')
     }
   }
-  return { id: log.id, name, role, turns: turnEnds.length, turnEnds, modelRequests, inputTokens, outputTokens, toolCalls, toolErrors }
+  return {
+    id: log.id, name, role, turns: turnEnds.length, turnEnds, modelRequests, failedRequests,
+    inputTokens, cacheReadTokens, cacheWriteTokens, outputTokens, toolCalls, toolErrors,
+  }
 }
 
-/** The Lead's log is the one that records the Team: its tasks and members. */
+/** The Lead's Session is the one the run started with: the only one no other Session created. */
 function leadOf(logs: readonly SessionLog[]): SessionLog | undefined {
-  return logs.find(log => log.events.some(event => event.type === 'team/task' || event.type === 'team/member'))
+  return logs.find(log => log.parent === undefined)
 }
 
 /**
@@ -193,7 +209,8 @@ function readText(path: string): string | undefined {
  */
 export function analyze(standardCase: StandardCase, out: string): Analysis {
   const runText = readText(join(out, 'run.json'))
-  const run = runText === undefined ? undefined : JSON.parse(runText) as RunRecord
+  // A record written before `dirty`, `environment`, and `tools` existed lacks them.
+  const run = runText === undefined ? undefined : { dirty: false, environment: undefined, tools: {}, ...JSON.parse(runText) } as RunRecord
   const unsettled = (readText(join(out, 'stderr.log')) ?? '').split('\n')
     .flatMap(line => line.startsWith('dsh: unsettled: ') ? [line.slice('dsh: unsettled: '.length)] : [])
   const logs = readSessionLogs(join(out, 'dsh-home'))
@@ -208,6 +225,7 @@ export function analyze(standardCase: StandardCase, out: string): Analysis {
     ...standardCase.judgeTrajectory({ exitCode: run?.exitCode, timedOut: run?.timedOut === true, unsettled, agents, tasks }),
     ...standardCase.judgeOutputs(join(out, 'workspace')),
   ]
+  const scored = rubric.filter(item => item.informational !== true)
   return {
     case: standardCase.name,
     description: standardCase.description,
@@ -217,7 +235,7 @@ export function analyze(standardCase: StandardCase, out: string): Analysis {
     tasks,
     timeline: team?.timeline ?? [],
     rubric,
-    score: { passed: rubric.filter(item => item.passed).length, total: rubric.length },
+    score: { passed: scored.filter(item => item.passed).length, total: scored.length },
   }
 }
 
@@ -241,18 +259,31 @@ export function renderSummary(analysis: Analysis): string {
     '',
   ]
   if (run !== undefined) {
+    const environment = [...run.environment === undefined ? [] : [run.environment], ...Object.entries(run.tools).map(([name, version]) => `${name} ${version}`)]
     lines.push(
-      `Revision \`${run.revision.slice(0, 10)}\`, model \`${run.settings.model}\` over \`${run.settings.provider}\`, effort \`${run.settings.effort}\`, `
+      `Revision \`${run.revision.slice(0, 10)}\`${run.dirty ? ' with uncommitted changes' : ''}, model \`${run.settings.model}\` over \`${run.settings.provider}\`, effort \`${run.settings.effort}\`, `
       + `settlement ${run.settlement ? 'mounted' : 'not shipped by this revision'}, ${Math.round(run.elapsedMs / 1000)} s, exit ${run.exitCode ?? run.signal ?? 'unknown'}.`,
       '',
     )
+    if (environment.length > 0) lines.push(`Environment: ${environment.join('; ')}.`, '')
   }
   lines.push('## Rubric', '', '| | Criterion | Detail |', '|---|---|---|')
-  for (const item of analysis.rubric) lines.push(`| ${item.passed ? '✅' : '❌'} | ${cell(item.criterion)} | ${cell(item.detail)} |`)
-  lines.push('', '## Agents', '', '| Agent | Role | Turns | Turn ends | Model requests | Input tokens | Output tokens | Tool calls | Tool errors |', '|---|---|---|---|---|---|---|---|---|')
+  for (const item of analysis.rubric) {
+    const criterion = item.informational === true ? `${item.criterion} (not scored)` : item.criterion
+    lines.push(`| ${item.passed ? '✅' : '❌'} | ${cell(criterion)} | ${cell(item.detail)} |`)
+  }
+  lines.push(
+    '',
+    '## Agents',
+    '',
+    'Input tokens are the three input columns added together; a failed request is one that ended in an error or was aborted.',
+    '',
+    '| Agent | Role | Turns | Turn ends | Model requests | Failed requests | Uncached input | Cache read | Cache write | Output tokens | Tool calls | Tool errors |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|',
+  )
   for (const agent of analysis.agents) {
     const tools = Object.entries(agent.toolCalls).toSorted((left, right) => right[1] - left[1]).map(([name, calls]) => `${name}×${calls}`).join(', ')
-    lines.push(`| ${cell(agent.name)} | ${agent.role} | ${agent.turns} | ${agent.turnEnds.join(', ')} | ${agent.modelRequests} | ${agent.inputTokens} | ${agent.outputTokens} | ${cell(tools)} | ${agent.toolErrors} |`)
+    lines.push(`| ${cell(agent.name)} | ${agent.role} | ${agent.turns} | ${agent.turnEnds.join(', ')} | ${agent.modelRequests} | ${agent.failedRequests} | ${agent.inputTokens} | ${agent.cacheReadTokens} | ${agent.cacheWriteTokens} | ${agent.outputTokens} | ${cell(tools)} | ${agent.toolErrors} |`)
   }
   lines.push('', '## Task board', '', '| Task | Status | Owner | Revisions | Subject |', '|---|---|---|---|---|')
   for (const task of analysis.tasks) {

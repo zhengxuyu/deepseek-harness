@@ -7,6 +7,11 @@
  * To add a case: create `cases/<name>/` with a `task.md` and a `case.ts` that
  * exports one subclass of {@link StandardCase}, then list an instance in
  * `cases/index.ts`. `cases.spec.ts` holds every listed case to this standard.
+ *
+ * Files that only the judgment reads, such as a reference solution or the
+ * judge's testbench, go in `cases/<name>/judge/`. `in-orfs.sh` keeps every
+ * such directory out of the container until the run has finished. A run on
+ * the host has full file access to the machine, so nothing hides them there.
  */
 
 import { readFileSync } from 'node:fs'
@@ -20,6 +25,15 @@ export interface RubricItem {
   readonly passed: boolean
   /** What was observed, so a failed item explains itself. */
   readonly detail: string
+  /** Set on an item that is reported but left out of the score, because its verdict varies for reasons other than the run. */
+  readonly informational?: true
+}
+
+/** One command a case needs on `PATH`. */
+export interface RequiredTool {
+  readonly command: string
+  /** Arguments that make the command print its version; the first output line is recorded in `run.json`. */
+  readonly versionArgs: readonly string[]
 }
 
 /** What one agent did, measured from its own Session log. */
@@ -29,8 +43,14 @@ export interface AgentMeasure {
   readonly role: 'lead' | 'teammate'
   readonly turns: number
   readonly turnEnds: string[]
+  /** Model requests that committed an assistant message. */
   readonly modelRequests: number
+  /** Model requests that ended in an error or were aborted, and committed no message. */
+  readonly failedRequests: number
+  /** Input tokens that were neither read from nor written to the prompt cache. */
   readonly inputTokens: number
+  readonly cacheReadTokens: number
+  readonly cacheWriteTokens: number
   readonly outputTokens: number
   readonly toolCalls: Record<string, number>
   readonly toolErrors: number
@@ -77,7 +97,7 @@ export abstract class StandardCase {
   abstract readonly name: string
   /** One sentence saying what behavior the case exercises. */
   abstract readonly description: string
-  /** The directory holding the subclass and its `task.md`; pass `import.meta.dirname`. */
+  /** The directory holding the subclass, its `task.md`, and its `judge/` directory; pass `import.meta.dirname`. */
   protected abstract readonly directory: string
   /** What the case expects of the Team. */
   abstract readonly expectations: TeamExpectations
@@ -93,7 +113,7 @@ export abstract class StandardCase {
    * Commands the run's agents and {@link judgeOutputs} need on `PATH`, beyond
    * what dsh itself needs. A case is refused before it starts when one is missing.
    */
-  abstract readonly requiredTools: readonly string[]
+  abstract readonly requiredTools: readonly RequiredTool[]
   /** Where {@link requiredTools} come from, shown when one is missing; empty when none is required. */
   abstract readonly toolsHint: string
 
@@ -106,11 +126,20 @@ export abstract class StandardCase {
 
   /**
    * Judge the files the task asks for. A workspace the run never touched must
-   * fail every item.
+   * fail every item. Read judge-only files through {@link judgeFile}.
    * @param workspace - the workspace after the run.
    * @returns at least one rubric item, with ids unique within the case.
    */
   abstract judgeOutputs(workspace: string): RubricItem[]
+
+  /**
+   * The path of one file in the case's `judge/` directory.
+   * @param name - the file's path below `judge/`.
+   * @returns the absolute path.
+   */
+  protected judgeFile(name: string): string {
+    return join(this.directory, 'judge', name)
+  }
 
   /**
    * The task text given to the Lead as the run's one message.

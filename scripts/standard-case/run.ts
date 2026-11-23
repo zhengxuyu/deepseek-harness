@@ -11,15 +11,21 @@
  * environment: `STANDARD_CASE_PROVIDER`, `STANDARD_CASE_API_KEY_ENV` (the name
  * of the variable holding the key), `STANDARD_CASE_ROUTE` and
  * `STANDARD_CASE_MODEL_SPEC` (JSON). The time limit is the case's own.
+ *
+ * `run.json` names the code and the tools the run used. A wrapper that runs
+ * the cases from a copy of the checkout, as `in-orfs.sh` does, states the
+ * checkout's revision in `STANDARD_CASE_REVISION`, whether it had uncommitted
+ * changes in `STANDARD_CASE_DIRTY` (`1` or `0`), and what it ran in, such as
+ * the image, in `STANDARD_CASE_ENVIRONMENT`.
  */
 
-import { execFileSync, spawn } from 'node:child_process'
-import { createWriteStream, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
+import { createWriteStream, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { finished } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
 import { dump } from 'js-yaml'
-import type { StandardCase } from './case.ts'
+import type { RequiredTool, StandardCase } from './case.ts'
 
 const root = resolve(import.meta.dirname, '../..')
 
@@ -39,7 +45,14 @@ export interface RunRecord {
   readonly settings: RunSettings
   /** Whether the revision ships `agent-team-settlement`, which the run then mounts. */
   readonly settlement: boolean
+  /** The commit of the dsh checkout the run executed. */
   readonly revision: string
+  /** Whether that checkout had uncommitted changes, so the commit alone does not name the code. */
+  readonly dirty: boolean
+  /** What the run executed in beyond the host, as its wrapper stated it; undefined for a run started directly. */
+  readonly environment: string | undefined
+  /** The version each tool reported: Node, then the case's required tools. */
+  readonly tools: Record<string, string>
   readonly exitCode: number | null
   readonly signal: string | null
   readonly timedOut: boolean
@@ -79,13 +92,11 @@ function jsonEnv(env: NodeJS.ProcessEnv, name: string, fallback: Record<string, 
  * @returns the settings; the key itself is read later, by name.
  */
 export function resolveSettings(env: NodeJS.ProcessEnv): RunSettings {
-  // An empty variable counts as unset.
-  const set = (name: string): string | undefined => (env[name] ?? '').trim() === '' ? undefined : env[name]
   return {
-    provider: set('STANDARD_CASE_PROVIDER') ?? 'openrouter',
+    provider: set(env, 'STANDARD_CASE_PROVIDER') ?? 'openrouter',
     model: MODEL,
     effort: EFFORT,
-    apiKeyEnv: set('STANDARD_CASE_API_KEY_ENV') ?? 'OPENROUTER_API_KEY',
+    apiKeyEnv: set(env, 'STANDARD_CASE_API_KEY_ENV') ?? 'OPENROUTER_API_KEY',
     route: jsonEnv(env, 'STANDARD_CASE_ROUTE', DEFAULT_ROUTE),
     modelSpec: jsonEnv(env, 'STANDARD_CASE_MODEL_SPEC', DEFAULT_MODEL_SPEC),
   }
@@ -152,8 +163,42 @@ export function patchLayer(settings: RunSettings, home: string, settlement: numb
   ], { lineWidth: -1 })
 }
 
-function revision(): string {
-  return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
+function set(env: NodeJS.ProcessEnv, name: string): string | undefined {
+  // An empty variable counts as unset.
+  return (env[name] ?? '').trim() === '' ? undefined : env[name]
+}
+
+/**
+ * Name the code a run executes: what its wrapper stated, otherwise what git reports for this checkout.
+ * @param env - the process environment.
+ * @returns the commit and whether the checkout had uncommitted changes.
+ * @throws Error when `STANDARD_CASE_REVISION` is set and `STANDARD_CASE_DIRTY` is not `1` or `0`.
+ */
+export function resolveRevision(env: NodeJS.ProcessEnv): { revision: string; dirty: boolean } {
+  const stated = set(env, 'STANDARD_CASE_REVISION')
+  if (stated === undefined) {
+    const git = (...args: string[]): string => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim()
+    return { revision: git('rev-parse', 'HEAD'), dirty: git('status', '--porcelain') !== '' }
+  }
+  const dirty = env.STANDARD_CASE_DIRTY
+  if (dirty !== '1' && dirty !== '0') throw new Error('STANDARD_CASE_DIRTY must be 1 or 0 when STANDARD_CASE_REVISION is set')
+  return { revision: stated, dirty: dirty === '1' }
+}
+
+/**
+ * Ask Node and each required tool for its version.
+ * @param tools - the case's required tools.
+ * @returns the first line each one printed, by command; `unknown` for one that printed nothing.
+ */
+export function toolVersions(tools: readonly RequiredTool[]): Record<string, string> {
+  const versions: Record<string, string> = { node: process.version }
+  for (const { command, versionArgs } of tools) {
+    const result = spawnSync(command, versionArgs, { encoding: 'utf8', timeout: 60_000 })
+    // A command that could not be started leaves both streams null.
+    const printed = [result.stdout, result.stderr].filter((stream): stream is string => typeof stream === 'string').join('')
+    versions[command] = printed.trim().split('\n')[0] || 'unknown'
+  }
+  return versions
 }
 
 /**
@@ -161,11 +206,14 @@ function revision(): string {
  * @param standardCase - the case to run.
  * @param out - absolute output directory; created when missing.
  * @returns the run record also written to `run.json`.
- * @throws Error when the configured key variable is unset.
+ * @throws Error when the configured key variable is unset, or when `out` already holds files, which the analysis would read as this run's.
  */
 export async function runCase(standardCase: StandardCase, out: string): Promise<RunRecord> {
   const settings = resolveSettings(process.env)
   if ((process.env[settings.apiKeyEnv] ?? '') === '') throw new Error(`${settings.apiKeyEnv} is not set`)
+  if (existsSync(out) && readdirSync(out).length > 0) throw new Error(`${out} is not empty; choose a new --out, or pass --analyze to analyze the run it holds`)
+  const code = resolveRevision(process.env)
+  const tools = toolVersions(standardCase.requiredTools)
   const workspace = join(out, 'workspace')
   const home = join(out, 'dsh-home')
   mkdirSync(workspace, { recursive: true })
@@ -215,7 +263,9 @@ export async function runCase(standardCase: StandardCase, out: string): Promise<
     case: standardCase.name,
     settings,
     settlement,
-    revision: revision(),
+    ...code,
+    environment: set(process.env, 'STANDARD_CASE_ENVIRONMENT'),
+    tools,
     exitCode,
     signal,
     timedOut,
