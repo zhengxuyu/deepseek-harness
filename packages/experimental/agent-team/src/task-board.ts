@@ -261,8 +261,10 @@ export class TeamTaskBoard {
             break
           }
           if (current.status !== 'pending') {
+            // An in-progress task returns to pending through its owner's release or the Lead's unassignment; reopen refuses it.
+            const first = current.status === 'in_progress' ? 'unassign it with reassign and no owner' : 'reopen it'
             throw new TeamError(
-              `only a pending task can be assigned; reopen team task "${current.id}" first`,
+              `team task "${current.id}" is ${current.status.replace('_', ' ')} and only a pending task can be assigned; ${first} first`,
               'TEAM_TASK_INVALID_TRANSITION',
             )
           }

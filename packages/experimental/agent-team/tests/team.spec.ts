@@ -771,7 +771,10 @@ describe('Team shared task DAG', () => {
       expectedRevision: complete.revision,
       action: 'reassign',
       owner: 'lead',
-    })).rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
+    })).rejects.toMatchObject({
+      code: 'TEAM_TASK_INVALID_TRANSITION',
+      message: `team task "${task.id}" is completed and only a pending task can be assigned; reopen it first`,
+    })
     const reopened = await ctx.agentTeams.updateTask(owner, {
       taskId: task.id,
       expectedRevision: complete.revision,
@@ -867,7 +870,10 @@ describe('Team shared task DAG', () => {
     })).rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
     await expect(ctx.agentTeams.updateTask(lead, {
       taskId: task.id, expectedRevision: assigned.revision, action: 'reassign', owner: 'lead',
-    })).rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
+    })).rejects.toMatchObject({
+      code: 'TEAM_TASK_INVALID_TRANSITION',
+      message: `team task "${task.id}" is in progress and only a pending task can be assigned; unassign it with reassign and no owner first`,
+    })
     const unassigned = await ctx.agentTeams.updateTask(lead, {
       taskId: task.id, expectedRevision: assigned.revision, action: 'reassign', owner: ' ',
     })
