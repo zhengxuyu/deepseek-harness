@@ -86,16 +86,17 @@ stateDiagram-v2
   [*] --> pending: create
   [*] --> in_progress: harness records a run
   pending --> in_progress: claim or assign
+  in_progress --> in_progress: assign to another member
   in_progress --> pending: release
   in_progress --> completed: complete
-  in_progress --> lost: harness gives up
+  in_progress --> lost: owner is gone
   completed --> pending: reopen
   lost --> pending: reopen
   pending --> deleted: delete
   lost --> deleted: delete
 ```
 
-harness 放弃了其 owner 的任务是 `lost`，owner 仍然记着；重新打开它才能再次 claim。任务一旦进行中或已完成，其文本与依赖不再改变，运行中的任务也不能转交给另一个成员。
+owner 已不在的任务是 `lost`，owner 仍然记着；重新打开它才能再次 claim。成员的 turn 没有完成就结束时（被 interrupt 的除外），它会失去进行中的任务。任务一旦进行中或已完成，其文本与依赖不再改变。Lead 仍然可以取消它的指派、一步转交给另一个成员，或把它标成完成；原来在做它的成员会收到通知并停下。
 
 ### 等待与中断
 
@@ -156,11 +157,11 @@ Lead 可以停止 teammate 的当前轮次，而不会删除其排队的消息�
 
 任务是完整版本化快照；每次变更都携带 `expectedRevision`，陈旧调用方会收到 `TEAM_TASK_STALE_REVISION`，而不会覆盖更新的值。数字 `task-<n>` id 的后缀必须是安全整数，id 空间耗尽时报告 `TEAM_TASK_LIMIT`，而不是复用最后一个 id。已删除任务作为 tombstone 保留以供回放与维持 id 稳定，但不占用 `maxTasks`，也不出现在 `listTasks()` 中。`writeScopes` 是规范化后的 workspace 相对前缀；视图会对与 in-progress 任务的重叠发出警告，但绝不阻止 claim 或授予写权限。
 
-图中已执行的部分是冻结的。`edit`、`set_dependencies` 与 `delete` 只接受 `pending` 或 `lost` 任务；`reassign` 给成员只接受 ready 的 `pending` 任务；不带 owner 的 `reassign`（Lead 侧的释放）接受 `pending` 或 `in_progress`。其余情况一律回答 `TEAM_TASK_INVALID_TRANSITION`，因此运行中的任务保持其 owner 开始时的文本与边，已完成的任务保持其结果所对应的记录。
+图中已执行的部分是冻结的。`edit`、`set_dependencies` 与 `delete` 只接受 `pending` 或 `lost` 任务；`reassign` 给成员接受 ready 的 `pending` 或 `in_progress` 任务；不带 owner 的 `reassign`（Lead 侧的释放）接受 `pending` 或 `in_progress`。其余情况一律回答 `TEAM_TASK_INVALID_TRANSITION`，因此运行中的任务保持其 owner 开始时的文本与边，已完成的任务保持其结果所对应的记录。只要 `completed` 任务所阻塞的某个任务处于进行中或已完成，对它的 `reopen` 就回答 `TEAM_TASK_HAS_DEPENDENTS`，因此 started 的任务不会有未完成的 blocker。`TeamTaskSnapshot` 按状态分成多个变体，每个变体写明该状态带有的 owner 与 cause 字段；表格见[子系统页面](../../../docs/subsystems/agent-team.zh.md#task-status-transitions)。`task-status.ts` 定义所有判断使用的状态分组：outstanding、open、started 和 uncollected。
 
-harness 记录和结算工作时不经过成员动作。`beginTask(caller, request)` 把调用成员已经开始的工作记录为它名下的 `in_progress` 任务，对任何成员都适用；`markCompleted(caller, id)` 完成一个 `in_progress` 任务。结算插件用这两个方法处理 headless 运行启动时的任务，该任务由 Lead 持有。`lost` 是 harness 的状态，绝不是成员动作：`markLost(caller, id, cause)` 把一个 `in_progress` 任务移入该状态并保留其 owner 记录；provisioning 失败的成员会丢失它在 provisioning 期间认领的一切（`owner-failed`）。lost 任务不能被 claim 或 complete；`reopen` 把它变回无 owner 的 `pending`，在此之前可以先用 `edit` 或 `set_dependencies` 修订它。它的依赖方保持阻塞，它的写范围不再产生警告。`outstandingTasks(caller)` 列出调用方任务板上的 `in_progress` 任务以及每个 owner 当前是否在运行（进程外 provider 承载的被跟踪运行在结束前都视为运行中），这正是一次性宿主在退出前等待的东西。
+harness 记录和结算工作时不经过成员动作。`beginTask(caller, request)` 把调用成员已经开始的工作记录为它名下的 `in_progress` 任务，对任何成员都适用；`markCompleted(caller, id)` 完成一个 `in_progress` 任务。结算插件用这两个方法处理 headless 运行启动时的任务，该任务由 Lead 持有。`lost` 是 harness 的状态，绝不是成员动作：`markLost(caller, id, cause)` 把一个 `in_progress` 任务移入该状态并保留其 owner 记录；provisioning 失败的成员会丢失它在 provisioning 期间认领的一切，turn 以 `completed`、`aborted` 之外的 stop reason 结束的成员会丢失它持有的每个任务（两者都是 `owner-failed`）。Lead 对其他成员正在做的任务取消指派、重新指派或标成完成时，`updateTask` 会向该成员排入一条 Team mailbox 消息，说明是哪个任务、发生了什么；没有其他进行中任务的成员，当前 turn 还会被中断。`interruptTeammates(caller)` 中断每个正在运行的 teammate，并在它们都空闲后返回，一次性宿主在 deadline 到期时调用它。lost 任务不能被 claim 或 complete；`reopen` 把它变回无 owner 的 `pending`，在此之前可以先用 `edit` 或 `set_dependencies` 修订它。它的依赖方保持阻塞，它的写范围不再产生警告。`outstandingTasks(caller)` 列出调用方任务板上的 `in_progress` 任务以及每个 owner 当前是否在运行（进程外 provider 承载的被跟踪运行在结束前都视为运行中），这正是一次性宿主在退出前等待的东西。
 
-`trackSubagentRuns` 会把 Team 之下的每一次 `subagent/start` 记录为该 Team Lead 任务板上一个有 owner 的 `in_progress` 任务，并根据配对的 `subagent/end` 结算：`completed` 完成该任务，其他任何 stop reason 都把它标记为 `lost`，原因为 `owner-failed`。Lead 通过沿委派 parent 的谱系向上查找最近的成员或 Root 得到；roster 成员自身的 epoch 不会被记录，因为 roster 已经拥有它们。
+`trackSubagentRuns` 会把 Team 之下的每一次 `subagent/start` 记录为该 Team Lead 任务板上一个有 owner 的 `in_progress` 任务，并根据配对的 `subagent/end` 结算：`completed` 完成该任务，其他任何 stop reason 都把它标记为 `lost`，原因为 `owner-failed`。Lead 通过沿委派 parent 的谱系向上查找最近的成员或 Root 得到。无论是否设置该选项，roster 成员自身的 turn 都会被跟踪，但不产生自己的任务行，这样失败的 turn 才能让该成员失去任务。
 
 ### 等待与中断
 
@@ -227,7 +228,7 @@ Peer 消息追加在 target 可复用历史前缀之后。冷恢复会先复用�
 - **单进程、共享 checkout**——成员共享 cwd，修改立即可见；本包不提供 worktree、远端成员、merge 或文件锁。
 - **write scope 仅作提示**——Bash、formatter、代码生成器与直接外部写入可以绕过文件版本检查；Lead 必须协调 owner 并检查最终 diff。
 - **扁平且不可变的 roster**——只有 Lead 可以创建直接 teammate；不支持嵌套 Team、重命名、删除或名字复用。
-- **不会自动释放 owner**——成员不活动、interrupt、进程退出与工作失败都不会释放任务 owner；放弃某个 owner 的一次性宿主会把任务标记为 `lost` 并保留 owner 记录，只有 `reopen` 会清除它。
+- **owner 只因有记录的事件而结束**——成员不活动、turn 正常完成、interrupt 与进程退出都不会释放任务 owner。成员的 turn 失败会把它的任务标记为 `lost`，放弃某个 owner 的一次性宿主也会这样做；owner 记录保留，只有 `reopen` 会清除它。
 - **被跟踪的运行不带契约**——通过 `trackSubagentRuns` 记录的运行只记下它的 provider 与子 Session，不记它收到的 prompt 或它应交付的产物；它的完成只是运行的 stop reason，不是对其产出的检查。
 - **mailbox 不保证跨进程 exactly-once**——不支持多个 harness 进程并发操作同一 Team。
 

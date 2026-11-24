@@ -354,7 +354,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'async updateTask(caller: Agent, request: UpdateTeamTaskRequest): Promise<TeamTaskView>',
-        description: 'Compare-and-set one authorized task transition.',
+        description: 'Compare-and-set one authorized task transition. When the Lead takes an in-progress task from a teammate, by unassigning it, reassigning it, or completing it, the teammate is told through its Team mailbox; a teammate that then holds no other in-progress task has its current turn interrupted.',
         parameters: [{ name: 'caller', description: 'exact live Team member authorizing the mutation.' }, { name: 'request', description: 'task identity, expected revision, action, and action fields.' }],
         returns: 'the committed next task revision.',
       },
@@ -393,6 +393,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Interrupt one live teammate turn without clearing its pending inbox.',
         parameters: [{ name: 'caller', description: 'exact live Lead Agent.' }, { name: 'targetName', description: 'durable teammate name.' }],
         returns: 'the target status sampled before cancellation.',
+      },
+      {
+        signature: 'async interruptTeammates(caller: Agent): Promise<string[]>',
+        description: 'Interrupt the current turn of every running teammate and wait until each is idle. Pending inboxes are kept. The harness uses it when a run ends with teammates still working.',
+        parameters: [{ name: 'caller', description: 'exact live Lead Agent.' }],
+        returns: 'the names of the teammates that were running, in roster order.',
       },
       {
         signature: 'tryMembership(agent: Agent): TeamMembership | undefined',

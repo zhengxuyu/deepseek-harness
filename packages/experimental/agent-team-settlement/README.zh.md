@@ -1,5 +1,5 @@
 ---
-description: "把 headless 运行的任务记录到 Team 任务板上，在它与委派的 Team 任务完成前保持运行存活，用 deadline 与停滞窗口限定整个运行，并把运行放弃的工作记录为 lost。"
+description: "把 headless 运行的任务记录到 Team 任务板上，在它与委派的 Team 任务完成前保持运行存活，用 deadline 与停滞窗口限定整个运行，在 deadline 停下队友，并报告运行没有收回的每个任务。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-当 `dsh --profile headless` 运行把工作委派给队友或子 Agent、且不能在这些工作结算前退出时，挂载本包。它在 Agent Teams 任务板之上提供运行器的 `ctx.headlessSettlement`：运行的任务被记录为根 Agent 名下的 `in_progress` 任务；只要根 Agent 处于回合中或有任务处于 `in_progress`，运行就继续；运行的任务随根 Agent 最后一个 completed 回合完成。到 deadline 时根 Agent 的回合被取消；此时或停滞后仍未完成的工作会被标记为 `lost`，并以非零退出报告。
+当 `dsh --profile headless` 运行把工作委派给队友或子 Agent、且不能在这些工作结算前退出时，挂载本包。它在 Agent Teams 任务板之上提供运行器的 `ctx.headlessSettlement`：运行的任务是根 Agent 名下的 `in_progress` 任务；只要根 Agent 处于回合中或有任务处于 `in_progress`，运行就继续。到 deadline 时根 Agent 被取消，正在运行的队友被中断；此时或停滞后仍在进行中的工作会被标记为 `lost`。运行创建或改动过、但没有完成的每个任务都会被报告，并以非零退出。
 
 ## 目录
 
@@ -44,12 +44,14 @@ kind: "package-reference"
       config:
         deadlineMs: 3600000
         stallMs: 120000
+        stopGraceMs: 30000
 ```
 
 | 字段 | 默认值 | 含义 |
 |---|---|---|
-| `deadlineMs` | 必填，1 到 2147483647 | 运行开始后经过多少毫秒，取消根 Agent 的回合并把所有仍在进行中的任务标记为 lost。 |
+| `deadlineMs` | 必填，1 到 2147483647 | 运行开始后经过多少毫秒，取消根 Agent 的回合、中断每个正在运行的队友，并把所有仍在进行中的任务标记为 lost。 |
 | `stallMs` | 必填，10000 到 3600000 | 在没有任务 owner 运行时，Team 多少毫秒没有任何变化后把剩余任务标记为 lost。 |
+| `stopGraceMs` | 必填，1 到 2147483647 | deadline 停下根 Agent 与队友之后，等待它们的回合结束的毫秒数；超过后不再等它们，直接报告。 |
 
 `agent-team` 上的 `trackSubagentRuns` 让普通的 `subagent` 委派出现在任务板上；没有它时只跟踪成员认领的任务。生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-experimental-agent-team-settlement)是所有可接受字段的完整来源。
 
@@ -61,7 +63,7 @@ kind: "package-reference"
 <details>
 <summary>实现内部 — 点击展开</summary>
 
-`begin(root, task)` 通过 `TeamService.beginTask` 把任务记录为根 Agent 自己的 `in_progress` 任务，首行作为 subject、全文作为 description，各自截断到任务板的长度上限，并开始计算 deadline。返回的运行的 `settle()` 循环执行：最多用剩余的 deadline 等待根 Agent idle，然后通过 `TeamService.outstandingTasks` 列出任务板上未结算的任务。只剩运行的任务时，按根 Agent 最近的 `turn/end` 结算它：`completed` 时通过 `TeamService.markCompleted` 完成它，其他原因或根本没有回合时以 `owner-failed` 标记为 `lost` 并报告；根 Agent 已自行完成的运行任务被接受，被它 release 或删除的则按其所处状态报告。否则循环等待下一次 Team 变化：有 owner 在运行时等到剩余的 deadline，没有时等 `stallMs`。deadline 到期时，仍处于回合中的根 Agent 被取消，取消原因是指明该 deadline 的 `hook`。停滞超时或 deadline 到期时，对每个剩余任务（包括运行的任务）调用 `TeamService.markLost(root, id, 'run-ended')`，并为每个标记的任务返回一行；期间被其 owner 完成的任务既不会被标记也不会被报告，而因其他原因标记失败的任务在任务板上保持 `in_progress`，并连同该失败原因一起报告。运行器把每一行打印为 `dsh: unsettled: <row>` 并以非零退出。lost 任务保留其 owner 记录；之后恢复的 Lead 通过 `reopen` 恢复它们。插件 dispose 会中止进行中的等待。
+`begin(root, task)` 先把所有已经处于 `in_progress` 的任务以 `run-ended` 标记为 `lost`，因为这个进程里还没有回合运行过，这些工作是更早的进程留下的；然后记下此时任务板上每个任务的 revision。它通过 `TeamService.beginTask` 把运行的任务记录为根 Agent 自己的 `in_progress` 任务，首行作为 subject、全文作为 description，各自截断到任务板的长度上限，并开始计算 deadline。返回的运行的 `settle()` 循环执行：最多用剩余的 deadline 等待根 Agent idle，然后通过 `TeamService.outstandingTasks` 列出任务板上未结算的任务。只剩运行的任务时，按根 Agent 最近的 `turn/end` 结算它：`completed` 时通过 `TeamService.markCompleted` 完成它，其他原因或根本没有回合时以 `owner-failed` 标记为 `lost`。否则循环等待下一次 Team 变化：有 owner 在运行时等到剩余的 deadline，没有时等 `stallMs`，但都不会超过 deadline。deadline 到期时，根 Agent 被取消，取消原因是指明该 deadline 的 `hook`；`TeamService.interruptTeammates` 中断每个正在运行的队友；插件最多等待 `stopGraceMs` 让它们都变为 idle。停滞或 deadline 到期时，对每个仍在进行中的任务（包括运行的任务）调用 `TeamService.markLost(root, id, 'run-ended')`。每条路径都以同一份报告结束：处于 `pending`、`in_progress` 或 `lost`，并且是本次运行在 `begin` 之后创建或改动过的每个任务各占一行，带有 id、subject、owner、状态和原因。没有人开始的任务、运行期间变为 `lost` 的任务、标记失败的任务都会成为一行；更早的运行留下、本次运行没有碰过的任务不会。运行器把每一行打印为 `dsh: unsettled: <id> "<subject>" owned by <owner>: <reason>`，在 `--json` 下把这些行放在 `final` 事件上，并以非零退出。lost 任务保留其 owner 记录；之后恢复的 Lead 通过 `reopen` 恢复它们。插件 dispose 会中止进行中的等待。
 
 | 文件 | 角色 |
 |---|---|

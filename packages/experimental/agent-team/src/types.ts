@@ -68,32 +68,77 @@ export interface TeamMemberView {
 }
 
 /**
- * Durable task lifecycle. `lost` is entered only by the harness, when an
- * in-progress task's owner can no longer finish it; the owner stays recorded
- * and only `reopen` clears it.
+ * Durable task lifecycle. `lost` means only that the owner is gone: the
+ * harness enters it when an in-progress task's owner can no longer finish the
+ * task, the owner stays recorded, and only `reopen` clears it. It says nothing
+ * about whether finished work was accepted.
  */
 export type TeamTaskStatus = 'pending' | 'in_progress' | 'completed' | 'lost' | 'deleted'
 
 /**
- * Why the harness marked a task `lost`: `owner-failed` when the owning member
- * or delegated run ended without completing it, `run-ended` when the process
- * settled the run before the task finished.
+ * Why the harness marked a task `lost`: `owner-failed` when the owning member's
+ * turn or the delegated run ended without completing it, `run-ended` when the
+ * process settled the run before the task finished.
  */
 export type TeamTaskLostCause = 'owner-failed' | 'run-ended'
 
-/** Whole durable task snapshot; every mutation increments {@link revision}. */
-export interface TeamTaskSnapshot {
+/** The fields every task snapshot carries in every status. */
+export interface TeamTaskFields {
   readonly id: TeamTaskId
+  /** Incremented by every mutation. */
   readonly revision: number
   readonly subject: string
   readonly description: string
-  readonly status: TeamTaskStatus
-  readonly ownerId?: SessionId
-  /** Present exactly while {@link status} is `lost`. */
-  readonly lostCause?: TeamTaskLostCause
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
 }
+
+/** A task nobody owns yet. */
+export interface PendingTeamTask extends TeamTaskFields {
+  readonly status: 'pending'
+  readonly ownerId?: never
+  readonly lostCause?: never
+}
+
+/** A task its owner is working on. */
+export interface InProgressTeamTask extends TeamTaskFields {
+  readonly status: 'in_progress'
+  readonly ownerId: SessionId
+  readonly lostCause?: never
+}
+
+/** A finished task; the owner that held it when it completed stays recorded. */
+export interface CompletedTeamTask extends TeamTaskFields {
+  readonly status: 'completed'
+  readonly ownerId: SessionId
+  readonly lostCause?: never
+}
+
+/** A task whose owner is gone; the owner and the cause stay recorded. */
+export interface LostTeamTask extends TeamTaskFields {
+  readonly status: 'lost'
+  readonly ownerId: SessionId
+  readonly lostCause: TeamTaskLostCause
+}
+
+/** A tombstone. A task deleted by a build that allowed deleting owned tasks keeps its owner. */
+export interface DeletedTeamTask extends TeamTaskFields {
+  readonly status: 'deleted'
+  readonly ownerId?: SessionId
+  readonly lostCause?: never
+}
+
+/**
+ * Whole durable task snapshot, one variant per status. The variants state
+ * which of `ownerId` and `lostCause` a status carries, so a snapshot with the
+ * wrong fields for its status does not compile and is refused when read.
+ */
+export type TeamTaskSnapshot =
+  | PendingTeamTask
+  | InProgressTeamTask
+  | CompletedTeamTask
+  | LostTeamTask
+  | DeletedTeamTask
 
 /**
  * Task snapshot as written by `team/task` payload version 2, before `lost`

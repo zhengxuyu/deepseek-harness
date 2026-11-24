@@ -86,16 +86,17 @@ stateDiagram-v2
   [*] --> pending: create
   [*] --> in_progress: harness records a run
   pending --> in_progress: claim or assign
+  in_progress --> in_progress: assign to another member
   in_progress --> pending: release
   in_progress --> completed: complete
-  in_progress --> lost: harness gives up
+  in_progress --> lost: owner is gone
   completed --> pending: reopen
   lost --> pending: reopen
   pending --> deleted: delete
   lost --> deleted: delete
 ```
 
-A task whose owner the harness gave up on is `lost`, with its owner still named; reopen it to make it claimable again. Once a task is in progress or completed, its text and dependencies no longer change, and a running task cannot be handed to another member.
+A task whose owner is gone is `lost`, with its owner still named; reopen it to make it claimable again. A member whose turn ends without completing, other than by an interrupt, loses its in-progress tasks. Once a task is in progress or completed, its text and dependencies no longer change. The Lead can still unassign it, hand it to another member in one step, or mark it completed; the member that was working on it is told and stops.
 
 ### Waiting and interruption
 
@@ -156,11 +157,11 @@ Lead delivery calls `Agent.steer()` directly. Teammate delivery uses the continu
 
 Tasks are complete versioned snapshots; every mutation carries `expectedRevision`, and a stale caller receives `TEAM_TASK_STALE_REVISION` instead of overwriting a newer value. Numeric `task-<n>` ids require a safe-integer suffix, and id-space exhaustion reports `TEAM_TASK_LIMIT` instead of reusing the final id. Deleted tasks remain tombstones for replay and id stability but do not consume `maxTasks` or appear in `listTasks()`. `writeScopes` are normalized workspace-relative prefixes; views warn on overlap with in-progress tasks but never block claim or authorize writes.
 
-The executed part of the graph is frozen. `edit`, `set_dependencies`, and `delete` are accepted only on `pending` or `lost` tasks; `reassign` to a member only on a ready `pending` task; `reassign` with no owner (a Lead-side release) on `pending` or `in_progress`. Everything else answers `TEAM_TASK_INVALID_TRANSITION`, so a running task keeps the text and edges its owner started from and a completed task keeps the record its result was produced for.
+The executed part of the graph is frozen. `edit`, `set_dependencies`, and `delete` are accepted only on `pending` or `lost` tasks; `reassign` to a member on a ready `pending` or `in_progress` task; `reassign` with no owner (a Lead-side release) on `pending` or `in_progress`. Everything else answers `TEAM_TASK_INVALID_TRANSITION`, so a running task keeps the text and edges its owner started from and a completed task keeps the record its result was produced for. `reopen` of a `completed` task answers `TEAM_TASK_HAS_DEPENDENTS` while a task it blocks is in progress or completed, so a started task never has a blocker that is not completed. `TeamTaskSnapshot` is one variant per status, each stating the owner and cause fields that status carries; the [subsystem page](../../../docs/subsystems/agent-team.md#task-status-transitions) has the table. `task-status.ts` defines the status groups every decision uses: outstanding, open, started, and uncollected.
 
-The harness records and settles work without a member action. `beginTask(caller, request)` records work the calling member has already begun as an `in_progress` task it owns, for any member, and `markCompleted(caller, id)` completes one `in_progress` task; the settlement plugin uses both for the task a headless run was started with, which the Lead owns. `lost` is the harness's status, never a member action: `markLost(caller, id, cause)` moves one `in_progress` task there and keeps its owner recorded, and a member that fails provisioning loses whatever it claimed while provisioning (`owner-failed`). A lost task cannot be claimed or completed; `reopen` returns it to `pending` with no owner, and `edit` or `set_dependencies` may revise it first. Its dependents stay blocked and its write scopes no longer warn. `outstandingTasks(caller)` lists the `in_progress` tasks on the caller's board with whether each owner is currently running (a tracked run behind an out-of-process provider counts as running until it ends), which is what a one-shot host waits on before it exits.
+The harness records and settles work without a member action. `beginTask(caller, request)` records work the calling member has already begun as an `in_progress` task it owns, for any member, and `markCompleted(caller, id)` completes one `in_progress` task; the settlement plugin uses both for the task a headless run was started with, which the Lead owns. `lost` is the harness's status, never a member action: `markLost(caller, id, cause)` moves one `in_progress` task there and keeps its owner recorded, a member that fails provisioning loses whatever it claimed while provisioning, and a member whose turn ends with a stop reason other than `completed` or `aborted` loses every task it owns (both `owner-failed`). When the Lead unassigns, reassigns, or completes a task another member is working on, `updateTask` queues a Team mailbox message to that member naming the task and what happened; a member left with no other in-progress task also has its current turn interrupted. `interruptTeammates(caller)` interrupts every running teammate and resolves once each is idle, which a one-shot host calls when its deadline passes. A lost task cannot be claimed or completed; `reopen` returns it to `pending` with no owner, and `edit` or `set_dependencies` may revise it first. Its dependents stay blocked and its write scopes no longer warn. `outstandingTasks(caller)` lists the `in_progress` tasks on the caller's board with whether each owner is currently running (a tracked run behind an out-of-process provider counts as running until it ends), which is what a one-shot host waits on before it exits.
 
-`trackSubagentRuns` records every `subagent/start` below a Team as an owned `in_progress` task on that Team's Lead board and settles it from the paired `subagent/end`: `completed` completes the task, every other stop reason marks it `lost` with cause `owner-failed`. The Lead is found by walking the delegating parent's lineage to the nearest member or root; roster members' own epochs are not recorded, because the roster already owns them.
+`trackSubagentRuns` records every `subagent/start` below a Team as an owned `in_progress` task on that Team's Lead board and settles it from the paired `subagent/end`: `completed` completes the task, every other stop reason marks it `lost` with cause `owner-failed`. The Lead is found by walking the delegating parent's lineage to the nearest member or root. A roster member's own turns are followed whether or not the option is set, without a row of their own, so that a turn that fails can lose the member's tasks.
 
 ### Waiting and interruption
 
@@ -227,7 +228,7 @@ These limits describe what a team cannot do yet or what needs special operationa
 - **One process and one shared checkout** — members share cwd and observe edits immediately; this package provides no worktree, remote member, merge, or filesystem lock.
 - **Advisory write scopes** — Bash, formatters, code generators, and direct external writers can bypass filesystem version checks; Leads must coordinate ownership and review the final diff.
 - **Flat immutable roster** — only the Lead creates direct teammates; there is no nested Team, rename, deletion, or name reuse.
-- **No automatic ownership release** — inactivity, interruption, process exit, and failed work do not release a task owner; a one-shot host that gives up on an owner marks the task `lost` with the owner still recorded, and only `reopen` clears it.
+- **Ownership ends only on a recorded event** — inactivity, a completed turn, an interrupt, and process exit do not release a task owner. A member turn that fails marks its tasks `lost`, and so does a one-shot host that gives up on an owner; the owner stays recorded, and only `reopen` clears it.
 - **Tracked runs carry no contract** — a run recorded through `trackSubagentRuns` names its provider and child Session, not the prompt it was given or the artifact it owes; its completion is the run's stop reason, not a check of what it produced.
 - **Mailbox is not cross-process exactly-once** — concurrent harness processes over one Team are unsupported.
 

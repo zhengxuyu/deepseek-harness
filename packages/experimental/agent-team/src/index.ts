@@ -18,6 +18,7 @@ import { teamProjectionDefinition } from './projection.ts'
 import { TeamRoster } from './roster.ts'
 import type { TeamMembership } from './roster.ts'
 import { TeamTaskBoard } from './task-board.ts'
+import type { DisplacedOwner } from './task-board.ts'
 import { TeamId, TeamTaskId } from './types.ts'
 import type {
   Config,
@@ -39,6 +40,7 @@ export type * from './types.ts'
 export type { TeamMembership } from './roster.ts'
 export { TeamId, TeamMessageId, TeamTaskId } from './types.ts'
 export { TeamError } from './error.ts'
+export { taskOpen, taskOutstanding, taskStarted, taskUncollected } from './task-status.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -52,13 +54,13 @@ const DEFAULT_MAX_PENDING_MESSAGES = 64
 const DEFAULT_MAX_MESSAGE_BYTES = 65_536
 const DEFAULT_DISPOSAL_TIMEOUT_MS = 5_000
 
-/** One delegated run recorded on a Lead board, keyed by its lifecycle run id. */
+/** One delegated run below a Lead, keyed by its lifecycle run id: a member's turn or a tracked plain run. */
 interface TrackedRun {
   readonly root: Agent
   readonly childId: SessionId
   readonly local: boolean
-  /** The board row, settled once the run's creation transaction commits. */
-  readonly task: Promise<TeamTaskView>
+  /** The board row of a tracked plain run, settled once its creation transaction commits; absent for a member's turn. */
+  readonly task?: Promise<TeamTaskView>
 }
 
 /** Validate one positive safe-integer deployment limit. */
@@ -84,7 +86,7 @@ export class TeamService extends TypertRemoteService {
 
   /** Validated deployment limits used by every Team operation. */
   private readonly config: Required<Config>
-  /** Delegated runs still in flight, present only while `trackSubagentRuns` is on. */
+  /** Member turns and, with `trackSubagentRuns`, plain delegated runs still in flight. */
   private readonly runs = new Map<SubagentRunId, TrackedRun>()
 
   private readonly activity: TeamActivity
@@ -134,14 +136,12 @@ export class TeamService extends TypertRemoteService {
       const membership = this.roster.tryMembership(agent)
       if (membership !== undefined) this.activity.notify(membership.id)
     })
-    if (this.config.trackSubagentRuns) {
-      const observeRunStart = (parent: Agent, info: SubagentRunInfo): void => { this.observeRunStart(parent, info) }
-      // The delegating parent travels as the scoped dispatch carrier, not in the payload.
-      ctx.on('subagent/start', function (this: Scoped<SubagentRuntime>, info: SubagentRunInfo) {
-        observeRunStart(carrierKeyOf(this) as Agent, info)
-      })
-      ctx.on('subagent/end', (info: SubagentRunEndInfo) => { this.observeRunEnd(info) })
-    }
+    const observeRunStart = (parent: Agent, info: SubagentRunInfo): void => { this.observeRunStart(parent, info) }
+    // The delegating parent travels as the scoped dispatch carrier, not in the payload.
+    ctx.on('subagent/start', function (this: Scoped<SubagentRuntime>, info: SubagentRunInfo) {
+      observeRunStart(carrierKeyOf(this) as Agent, info)
+    })
+    ctx.on('subagent/end', (info: SubagentRunEndInfo) => { this.observeRunEnd(info) })
     ctx.effect(() => {
       const disposeProjection = ctx.root.sessionProjections.register(teamProjectionDefinition)
       return async () => {
@@ -223,13 +223,18 @@ export class TeamService extends TypertRemoteService {
   }
 
   /**
-   * Compare-and-set one authorized task transition.
+   * Compare-and-set one authorized task transition. When the Lead takes an
+   * in-progress task from a teammate, by unassigning it, reassigning it, or
+   * completing it, the teammate is told through its Team mailbox; a teammate
+   * that then holds no other in-progress task has its current turn interrupted.
    * @param caller - exact live Team member authorizing the mutation.
    * @param request - task identity, expected revision, action, and action fields.
    * @returns the committed next task revision.
    */
   async updateTask(caller: Agent, request: UpdateTeamTaskRequest): Promise<TeamTaskView> {
-    return await this.tasks.update(caller, this.roster.membership(caller), request)
+    const { view, displaced } = await this.tasks.update(caller, this.roster.membership(caller), request)
+    if (displaced !== undefined) await this.tellDisplacedOwner(caller, view, displaced)
+    return view
   }
 
   /**
@@ -264,7 +269,7 @@ export class TeamService extends TypertRemoteService {
     const { root } = this.roster.membership(caller)
     const inFlight = new Set<SessionId>()
     for (const run of this.runs.values()) {
-      if (run.root === root && !run.local) inFlight.add(run.childId)
+      if (run.root === root && run.task !== undefined && !run.local) inFlight.add(run.childId)
     }
     return this.tasks.outstanding(root, ownerId =>
       inFlight.has(ownerId) || this.ctx.agents.get(ownerId)?.status === 'running')
@@ -304,6 +309,16 @@ export class TeamService extends TypertRemoteService {
   }
 
   /**
+   * Interrupt the current turn of every running teammate and wait until each is idle.
+   * Pending inboxes are kept. The harness uses it when a run ends with teammates still working.
+   * @param caller - exact live Lead Agent.
+   * @returns the names of the teammates that were running, in roster order.
+   */
+  async interruptTeammates(caller: Agent): Promise<string[]> {
+    return await this.roster.interruptRunning(caller)
+  }
+
+  /**
    * Resolve a caller without throwing, used by scoped-tool installation and observers.
    * @param agent - candidate exact live Agent.
    * @returns Team membership, or undefined for non-Team subagents and stale identities.
@@ -339,10 +354,35 @@ export class TeamService extends TypertRemoteService {
     })
   }
 
-  /** Record a delegated run on the nearest Team board above its parent, except roster epochs the roster already owns. */
+  /**
+   * Tell a teammate that the Lead took its in-progress task, and stop its turn
+   * when that was its only one. The task change is already committed, so a
+   * notice that cannot be queued is logged and does not fail the change.
+   */
+  private async tellDisplacedOwner(lead: Agent, task: TeamTaskView, displaced: DisplacedOwner): Promise<void> {
+    const owner = this.journal.state(lead).members.find(member => member.id === displaced.ownerId)
+    // A tracked plain run owns its row under a child Session id and has no mailbox.
+    if (owner === undefined || owner.phase !== 'active') return
+    const running = this.ctx.agents.get(owner.id)?.status === 'running'
+    const text = `Task ${task.id} "${task.subject}" is no longer yours: the Lead ${displaced.action}. `
+      + 'Stop working on it and do not change its files further.'
+    try {
+      await this.mailbox.send(lead, { target: owner.name, content: [{ type: 'text', text }], signal: this.lifecycle.signal })
+    } catch (error: unknown) {
+      this.ctx.logger.warn(`Agent Teams could not tell "${owner.name}" that it lost ${task.id}: ${errorMessage(error)}`)
+    }
+    if (running && displaced.idle) this.roster.interrupt(lead, owner.name)
+  }
+
+  /** Follow a member's turn for its outcome, or record a plain delegated run on the nearest Team board above its parent. */
   private observeRunStart(parent: Agent, info: SubagentRunInfo): void {
     const root = this.leadOf(parent)
-    if (root === undefined || this.journal.state(root).members.some(member => member.id === info.id)) return
+    if (root === undefined) return
+    if (this.journal.state(root).members.some(member => member.id === info.id)) {
+      this.runs.set(info.runId, { root, childId: info.id, local: info.local })
+      return
+    }
+    if (!this.config.trackSubagentRuns) return
     const task = this.tasks.trackRun(root, {
       subject: `subagent run via ${info.provider}`,
       description: `Delegated by ${parent.id} to provider ${info.provider}; child session ${info.id}.`,
@@ -354,11 +394,24 @@ export class TeamService extends TypertRemoteService {
     this.runs.set(info.runId, { root, childId: info.id, local: info.local, task })
   }
 
-  /** Settle the tracked row: a completed run completes it, any other stop reason loses it. */
+  /**
+   * Settle what the ended run held. A member's turn that ended any way other
+   * than `completed` or `aborted` loses the member's in-progress tasks: an
+   * aborted turn was interrupted on purpose and the member can continue, any
+   * other ending means it stopped without finishing. A tracked row completes
+   * when its run completed and is lost on any other stop reason.
+   */
   private observeRunEnd(info: SubagentRunEndInfo): void {
     const run = this.runs.get(info.runId)
     if (run === undefined) return
     this.runs.delete(info.runId)
+    if (run.task === undefined) {
+      if (info.stopReason === 'completed' || info.stopReason === 'aborted') return
+      void this.tasks.markOwnerLost(run.root, run.childId, 'owner-failed').catch((error: unknown) => {
+        this.ctx.logger.warn(`Agent Teams could not mark tasks of member "${run.childId}" lost after its turn ended ${info.stopReason}: ${errorMessage(error)}`)
+      })
+      return
+    }
     // A row that was never recorded was already reported at start.
     void run.task.then(
       view => info.stopReason === 'completed'

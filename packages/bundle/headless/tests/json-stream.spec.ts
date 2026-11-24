@@ -402,6 +402,16 @@ describe('--json projection', () => {
     expect(test.parsed().at(-1)).toEqual({ type: 'final', text: 'abcdefgh' })
   })
 
+  it('carries the settlement rows on the final event only when a provider followed the run', () => {
+    const settled = harness()
+    settled.projection.finish('done', [])
+    expect(settled.parsed().at(-1)).toEqual({ type: 'final', text: 'done', unsettled: [] })
+    const unsettled = harness()
+    const row = { id: 'task-2', subject: 'review', owner: 'worker', state: 'lost', reason: 'its owner stopped without completing it' }
+    unsettled.projection.finish('partial', [row])
+    expect(unsettled.parsed().at(-1)).toEqual({ type: 'final', text: 'partial', unsettled: [row] })
+  })
+
   it('ignores events from another Session and stops writing after dispose', () => {
     const test = harness()
     test.emitRawSession({}, assistantMessage([{ type: 'text', text: 'foreign' }]))

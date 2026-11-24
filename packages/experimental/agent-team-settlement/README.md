@@ -1,5 +1,5 @@
 ---
-description: "Record a headless run's task on the Team board, keep the run alive while it and delegated Team tasks finish, bound the whole run with a deadline and a stall window, and record what the run gave up on as lost."
+description: "Record a headless run's task on the Team board, keep the run alive while it and delegated Team tasks finish, bound the whole run with a deadline and a stall window, stop the teammates at the deadline, and report every task the run did not collect."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Mount this package when a `dsh --profile headless` run delegates work to teammates or subagents and must not exit before that work settles. It provides the runner's `ctx.headlessSettlement` over the Agent Teams board: the run's task is recorded as an `in_progress` task the root owns, the run continues while the root is in a turn or any task is `in_progress`, and the run's task completes with the root's last completed turn. At the deadline the root's turn is cancelled; work still open then or after a stall is marked `lost` and reported with a non-zero exit.
+Mount this package when a `dsh --profile headless` run delegates work to teammates or subagents and must not exit before that work settles. It provides the runner's `ctx.headlessSettlement` over the Agent Teams board: the run's task is an `in_progress` task the root owns, and the run continues while the root is in a turn or any task is `in_progress`. At the deadline the root is cancelled and running teammates are interrupted; work still in progress then, or after a stall, is marked `lost`. Every task the run created or changed and did not complete is reported, with a non-zero exit.
 
 ## Table of Contents
 
@@ -44,12 +44,14 @@ Choose it for unattended runs, such as benchmarks, where the root may end its tu
       config:
         deadlineMs: 3600000
         stallMs: 120000
+        stopGraceMs: 30000
 ```
 
 | Field | Default | Meaning |
 |---|---|---|
-| `deadlineMs` | required, 1 through 2147483647 | Milliseconds from the start of the run before the root's turn is cancelled and every task still in progress is marked lost. |
+| `deadlineMs` | required, 1 through 2147483647 | Milliseconds from the start of the run before the root's turn is cancelled, every running teammate is interrupted, and every task still in progress is marked lost. |
 | `stallMs` | required, 10000 through 3600000 | Milliseconds without any Team change, while no task owner is running, before the remaining tasks are marked lost. |
+| `stopGraceMs` | required, 1 through 2147483647 | Milliseconds to wait, after the deadline stopped the root and the teammates, for their turns to end before the run is reported without them. |
 
 `trackSubagentRuns` on `agent-team` makes plain `subagent` delegations appear on the board; without it only tasks members claimed are followed. The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-experimental-agent-team-settlement) is the exhaustive source for every accepted field.
 
@@ -61,7 +63,7 @@ Choose it for unattended runs, such as benchmarks, where the root may end its tu
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-`begin(root, task)` records the task through `TeamService.beginTask` as the root's own `in_progress` task, with the first line as subject and the text as description, each cut to the board's length limit, and starts the deadline. The returned run's `settle()` loops: wait for the root to be idle for at most the remaining deadline, then list the board's outstanding tasks through `TeamService.outstandingTasks`. When only the run's task remains, it is settled from the root's latest `turn/end`: `completed` completes it through `TeamService.markCompleted`, any other reason or no turn at all marks it `lost` with cause `owner-failed` and reports it, and a run's task the root already completed is accepted while one it released or deleted is reported as left in that status. Otherwise the loop waits for the next Team change: for the remaining deadline while some owner is running, for `stallMs` while none is. When the deadline passes, a root still in a turn is cancelled with a `hook` cause naming the deadline. A stall timeout or the deadline calls `TeamService.markLost(root, id, 'run-ended')` on each remaining task, the run's task included, and returns one row per task marked; a task whose owner completed it in the meantime is neither marked nor reported, while a task whose mark failed for any other reason stays `in_progress` on the board and is reported with that failure. The runner prints each row as `dsh: unsettled: <row>` and exits non-zero. Lost tasks keep their owner recorded; a later resumed Lead recovers them through `reopen`. Plugin disposal aborts a wait in progress.
+`begin(root, task)` first marks every task already `in_progress` as `lost` with cause `run-ended`, because no turn has run in this process and that work was left by an earlier one, and records the revision of every task then on the board. It records the run's task through `TeamService.beginTask` as the root's own `in_progress` task, with the first line as subject and the text as description, each cut to the board's length limit, and starts the deadline. The returned run's `settle()` loops: wait for the root to be idle for at most the remaining deadline, then list the board's outstanding tasks through `TeamService.outstandingTasks`. When only the run's task remains, it is settled from the root's latest `turn/end`: `completed` completes it through `TeamService.markCompleted`, and any other reason or no turn at all marks it `lost` with cause `owner-failed`. Otherwise the loop waits for the next Team change: for the remaining deadline while some owner is running, for `stallMs` while none is, and never past the deadline. When the deadline passes, the root is cancelled with a `hook` cause naming the deadline, `TeamService.interruptTeammates` interrupts every running teammate, and the plugin waits at most `stopGraceMs` for all of them to be idle. A stall or the deadline calls `TeamService.markLost(root, id, 'run-ended')` on each task still in progress, the run's task included. Every path ends with the same report: one row, with id, subject, owner, status, and reason, for each task that is `pending`, `in_progress`, or `lost` and that this run created or changed since `begin`. A task nobody started, a task that became `lost` during the run, and a task whose mark failed are all rows; a task from an earlier run that this run did not touch is not. The runner prints each row as `dsh: unsettled: <id> "<subject>" owned by <owner>: <reason>`, puts the rows on the `final` event under `--json`, and exits non-zero. Lost tasks keep their owner recorded; a later resumed Lead recovers them through `reopen`. Plugin disposal aborts a wait in progress.
 
 | File | Role |
 |---|---|

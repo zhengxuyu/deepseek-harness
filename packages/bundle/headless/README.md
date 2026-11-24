@@ -85,7 +85,7 @@ The patch rides over `dsh-base`: it inherits the projection cache and shared PTC
 
 ### Exit mapping
 
-A completed final `turn/end` with nothing unsettled exits 0; any other outcome — aborted, error, no turn in the owned interval, or a settlement report with rows — exits 1. An `error` reason also writes `dsh: <code>: <message>` to stderr, and each unsettled row is written as `dsh: unsettled: <row>`. A direct driver failure (for example, Agent creation or an unusable `--session-id`) writes `dsh: <message>` to stderr and exits 1, and in `--json` mode also emits an `error` event.
+A completed final `turn/end` with nothing unsettled exits 0; any other outcome — aborted, error, no turn in the owned interval, or a settlement report with rows — exits 1. An `error` reason also writes `dsh: <code>: <message>` to stderr, and each unsettled row is written as `dsh: unsettled: <id> "<subject>" owned by <owner>: <reason>`, without the `owned by` part when the row has no owner. In `--json` mode the `final` event carries the same rows as `unsettled`, an array of `{ id, subject, owner?, state, reason }`, whenever a settlement provider followed the run; the field is absent without one. A direct driver failure (for example, Agent creation or an unusable `--session-id`) writes `dsh: <message>` to stderr and exits 1, and in `--json` mode also emits an `error` event.
 
 ### Source map
 

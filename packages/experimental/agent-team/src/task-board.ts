@@ -8,11 +8,17 @@ import type { TeamJournal } from './journal.ts'
 import type { TeamState } from './projection.ts'
 import { resolveActiveMember } from './roster.ts'
 import { assertTaskGraphCandidate, TeamTaskGraphError } from './task-graph.ts'
+import { isOutstanding, taskOpen, taskStarted } from './task-status.ts'
 import type { TeamTaskGraphViolation } from './task-graph.ts'
 import { TeamId, TeamTaskId } from './types.ts'
 import type {
   CreateTeamTaskRequest,
+  DeletedTeamTask,
+  InProgressTeamTask,
+  LostTeamTask,
   OutstandingTeamTask,
+  PendingTeamTask,
+  TeamTaskFields,
   TeamTaskLostCause,
   TeamTaskSnapshot,
   TeamTaskView,
@@ -38,10 +44,54 @@ export interface TrackedRunRequest {
   readonly ownerId: SessionId
 }
 
-/** Whether a task is on the open part of the graph, where its text and edges may still change. */
-function editable(task: TeamTaskSnapshot): boolean {
-  return task.status === 'pending' || task.status === 'lost'
+/** The fields a transition carries over unchanged, with the status, owner, and cause removed. */
+function fields(task: TeamTaskSnapshot): TeamTaskFields {
+  const { status: _status, ownerId: _ownerId, lostCause: _lostCause, ...rest } = task
+  return rest
 }
+
+/** The task returned to `pending`, with no owner and no cause. */
+function pending(task: TeamTaskSnapshot): PendingTeamTask {
+  return { ...fields(task), status: 'pending' }
+}
+
+/** The task in progress under one owner. */
+function inProgress(task: TeamTaskSnapshot, ownerId: SessionId): InProgressTeamTask {
+  return { ...fields(task), status: 'in_progress', ownerId }
+}
+
+/** The in-progress task marked `lost`; its owner stays recorded. */
+function lost(task: InProgressTeamTask, lostCause: TeamTaskLostCause): LostTeamTask {
+  return { ...fields(task), status: 'lost', ownerId: task.ownerId, lostCause }
+}
+
+/** The tombstone of a pending or lost task; a lost task's owner stays recorded and its cause does not. */
+function deleted(task: TeamTaskSnapshot): DeletedTeamTask {
+  return { ...fields(task), status: 'deleted', ...task.ownerId === undefined ? {} : { ownerId: task.ownerId } }
+}
+
+/**
+ * A task that left its owner through another member's action: the previous
+ * owner and what happened, for the notice the owner receives.
+ */
+export interface DisplacedOwner {
+  readonly ownerId: SessionId
+  /** Whether the owner holds no other in-progress task after the change. */
+  readonly idle: boolean
+  /** What the acting member did, completing the sentence "the Lead ...". */
+  readonly action: string
+}
+
+/** One committed member transition and, when it took the task from its owner, whom to tell. */
+export interface TeamTaskUpdate {
+  readonly view: TeamTaskView
+  readonly displaced?: DisplacedOwner
+}
+
+/** What a new task adds to its id, revision, and text: the pending or the in-progress variant's remaining fields. */
+type NewTaskRest =
+  | Omit<PendingTeamTask, 'id' | 'revision' | 'subject' | 'description'>
+  | Omit<InProgressTeamTask, 'id' | 'revision' | 'subject' | 'description'>
 
 /** Owns Team task limits, authorization, transitions, and derived views. */
 export class TeamTaskBoard {
@@ -90,7 +140,7 @@ export class TeamTaskBoard {
    * @returns the completed task view.
    */
   async completeRun(root: Agent, id: TeamTaskId): Promise<TeamTaskView> {
-    return this.transition(root, id, current => ({ ...current, status: 'completed' }))
+    return this.transition(root, id, current => ({ ...fields(current), status: 'completed', ownerId: current.ownerId }))
   }
 
   /**
@@ -101,7 +151,7 @@ export class TeamTaskBoard {
    * @returns the lost task view.
    */
   async markLost(root: Agent, id: TeamTaskId, cause: TeamTaskLostCause): Promise<TeamTaskView> {
-    return this.transition(root, id, current => ({ ...current, status: 'lost', lostCause: cause }))
+    return this.transition(root, id, current => lost(current, cause))
   }
 
   /**
@@ -115,8 +165,8 @@ export class TeamTaskBoard {
     return this.journal.transact(root.id, async () => {
       const marked: TeamTaskId[] = []
       for (const current of [...this.journal.state(root).tasks]) {
-        if (current.status !== 'in_progress' || current.ownerId !== ownerId) continue
-        const task: TeamTaskSnapshot = { ...current, status: 'lost', lostCause: cause, revision: current.revision + 1 }
+        if (!isOutstanding(current) || current.ownerId !== ownerId) continue
+        const task: TeamTaskSnapshot = { ...lost(current, cause), revision: current.revision + 1 }
         await this.journal.appendAndFlush(root, 'team/task', { version: 3, teamId: TeamId(root.id), task })
         marked.push(task.id)
       }
@@ -134,11 +184,9 @@ export class TeamTaskBoard {
     const state = this.journal.state(root)
     const rows: OutstandingTeamTask[] = []
     for (const task of state.tasks) {
-      if (task.status !== 'in_progress') continue
-      // An in-progress task always carries the owner that claimed it.
-      const ownerId = task.ownerId as SessionId
-      const ownerName = this.ownerName(root, state, ownerId)
-      rows.push({ id: task.id, subject: task.subject, ownerName, live: live(ownerId) })
+      if (!isOutstanding(task)) continue
+      const ownerName = this.ownerName(root, state, task.ownerId)
+      rows.push({ id: task.id, subject: task.subject, ownerName, live: live(task.ownerId) })
     }
     return rows
   }
@@ -175,13 +223,13 @@ export class TeamTaskBoard {
    * @param caller - exact live Team member authorizing the mutation.
    * @param membership - caller role and exact live Lead.
    * @param request - task identity, expected revision, action, and action fields.
-   * @returns the committed next task revision.
+   * @returns the committed next task revision and, when the change took the task from its owner, that owner.
    */
   async update(
     caller: Agent,
     membership: TeamMembership,
     request: UpdateTeamTaskRequest,
-  ): Promise<TeamTaskView> {
+  ): Promise<TeamTaskUpdate> {
     const root = membership.root
     return this.journal.transact(root.id, async () => {
       const state = this.journal.state(root)
@@ -200,20 +248,18 @@ export class TeamTaskBoard {
         if (!lead && !owner) throw new TeamError('task mutation requires its owner or Team Lead', 'TEAM_TASK_UNAUTHORIZED')
       }
       let next: TeamTaskSnapshot
+      // What the caller did to a task another member was working on.
+      let action: string | undefined
       switch (request.action) {
         case 'claim':
-          if (current.ownerId !== undefined && current.ownerId !== caller.id) {
-            throw new TeamError(`team task "${current.id}" is owned by another member`, 'TEAM_TASK_ALREADY_CLAIMED')
-          }
-          if (current.status !== 'pending' || !this.taskReady(state, current)) {
-            throw new TeamError(`team task "${current.id}" is not ready to claim`, 'TEAM_TASK_BLOCKED')
-          }
-          next = { ...current, status: 'in_progress', ownerId: caller.id }
+          this.assertClaimable(state, current, caller)
+          next = inProgress(current, caller.id)
           break
         case 'release':
           authorizeOwner()
-          if (current.status !== 'in_progress') throw new TeamError('only an in-progress task can be released', 'TEAM_TASK_INVALID_TRANSITION')
-          next = this.withoutOwner({ ...current, status: 'pending' })
+          if (!isOutstanding(current)) throw new TeamError('only an in-progress task can be released', 'TEAM_TASK_INVALID_TRANSITION')
+          next = pending(current)
+          action = 'unassigned it'
           break
         case 'edit':
           authorizeOwner()
@@ -238,39 +284,38 @@ export class TeamTaskBoard {
           break
         case 'complete':
           authorizeOwner()
-          if (current.status !== 'in_progress') throw new TeamError('only an in-progress task can complete', 'TEAM_TASK_INVALID_TRANSITION')
-          next = { ...current, status: 'completed' }
+          if (!isOutstanding(current)) throw new TeamError('only an in-progress task can complete', 'TEAM_TASK_INVALID_TRANSITION')
+          next = { ...fields(current), status: 'completed', ownerId: current.ownerId }
+          action = 'marked it completed'
           break
         case 'reopen':
           authorizeOwner()
           if (current.status !== 'completed' && current.status !== 'lost') {
             throw new TeamError('only a completed or lost task can reopen', 'TEAM_TASK_INVALID_TRANSITION')
           }
-          next = this.withoutOwner({ ...current, status: 'pending' })
+          this.assertNoStartedDependent(state, current)
+          next = pending(current)
           break
         case 'reassign': {
           if (!lead) throw new TeamError('only the Team Lead can reassign tasks', 'TEAM_LEAD_REQUIRED')
-          if (request.owner === undefined || request.owner.trim().length === 0) {
-            if (current.status !== 'pending' && current.status !== 'in_progress') {
-              throw new TeamError(
-                'only a pending or in-progress task can be unassigned',
-                'TEAM_TASK_INVALID_TRANSITION',
-              )
-            }
-            next = this.withoutOwner({ ...current, status: 'pending' })
-            break
-          }
-          if (current.status !== 'pending') {
-            // An in-progress task returns to pending through its owner's release or the Lead's unassignment; reopen refuses it.
-            const first = current.status === 'in_progress' ? 'unassign it with reassign and no owner' : 'reopen it'
+          if (current.status !== 'pending' && !isOutstanding(current)) {
             throw new TeamError(
-              `team task "${current.id}" is ${current.status.replace('_', ' ')} and only a pending task can be assigned; ${first} first`,
+              `team task "${current.id}" is ${current.status} and only a pending or in-progress task can be reassigned; reopen it first`,
               'TEAM_TASK_INVALID_TRANSITION',
             )
           }
+          if (request.owner === undefined || request.owner.trim().length === 0) {
+            next = pending(current)
+            action = 'unassigned it'
+            break
+          }
           if (!this.taskReady(state, current)) throw new TeamError(`team task "${current.id}" is blocked`, 'TEAM_TASK_BLOCKED')
           const assignee = resolveActiveMember(root, state, request.owner)
-          next = { ...current, status: 'in_progress', ownerId: assignee.id }
+          if (assignee.id === current.ownerId) {
+            throw new TeamError(`team task "${current.id}" is already owned by "${assignee.name}"`, 'TEAM_INVALID_ARGUMENT')
+          }
+          next = inProgress(current, assignee.id)
+          action = `reassigned it to ${assignee.name}`
           break
         }
         case 'delete': {
@@ -281,7 +326,7 @@ export class TeamTaskBoard {
           if (dependent !== undefined) {
             throw new TeamError(`team task "${current.id}" still blocks "${dependent.id}"`, 'TEAM_TASK_HAS_DEPENDENTS')
           }
-          next = { ...current, status: 'deleted' }
+          next = deleted(current)
           break
         }
         /* v8 ignore next 2 -- TeamTaskAction is closed and every member is handled above. */
@@ -294,7 +339,11 @@ export class TeamTaskBoard {
       }
       this.assertTaskGraph(state, task)
       await this.journal.appendAndFlush(root, 'team/task', { version: 3, teamId: TeamId(root.id), task })
-      return this.taskView(root, state, task)
+      const view = this.taskView(root, state, task)
+      if (action === undefined || !isOutstanding(current) || owner) return { view }
+      const ownerId = current.ownerId
+      const idle = !state.tasks.some(other => other.id !== current.id && isOutstanding(other) && other.ownerId === ownerId)
+      return { view, displaced: { ownerId, idle, action } }
     })
   }
 
@@ -302,13 +351,13 @@ export class TeamTaskBoard {
   private async transition(
     root: Agent,
     id: TeamTaskId,
-    next: (current: TeamTaskSnapshot) => TeamTaskSnapshot,
+    next: (current: InProgressTeamTask) => TeamTaskSnapshot,
   ): Promise<TeamTaskView> {
     return this.journal.transact(root.id, async () => {
       const state = this.journal.state(root)
       const current = state.tasks.find(task => task.id === id)
       if (current === undefined) throw new TeamError(`team task "${id}" not found`, 'TEAM_TASK_NOT_FOUND')
-      if (current.status !== 'in_progress') {
+      if (!isOutstanding(current)) {
         throw new TeamError(`team task "${id}" is ${current.status}, not in progress`, 'TEAM_TASK_INVALID_TRANSITION')
       }
       const task: TeamTaskSnapshot = { ...next(current), revision: current.revision + 1 }
@@ -321,7 +370,7 @@ export class TeamTaskBoard {
   private async record(
     root: Agent,
     text: { readonly subject: string; readonly description: string },
-    rest: (state: TeamState) => Omit<TeamTaskSnapshot, 'id' | 'revision' | 'subject' | 'description'>,
+    rest: (state: TeamState) => NewTaskRest,
   ): Promise<TeamTaskView> {
     return this.journal.transact(root.id, async () => {
       const state = this.journal.state(root)
@@ -353,7 +402,7 @@ export class TeamTaskBoard {
 
   /** Refuse to change the executed part of the graph: in-progress and completed tasks are frozen. */
   private assertEditable(task: TeamTaskSnapshot, verb: string): void {
-    if (!editable(task)) {
+    if (!taskOpen(task.status)) {
       throw new TeamError(
         `team task "${task.id}" is ${task.status.replace('_', ' ')} and cannot be ${verb}; only pending or lost tasks can`,
         'TEAM_TASK_INVALID_TRANSITION',
@@ -403,10 +452,56 @@ export class TeamTaskBoard {
     return task.blockedBy.every(id => state.tasks.find(candidate => candidate.id === id)?.status === 'completed')
   }
 
-  /** Remove the optional owner and lost-cause fields under exactOptionalPropertyTypes. */
-  private withoutOwner(task: TeamTaskSnapshot): TeamTaskSnapshot {
-    const { ownerId: _ownerId, lostCause: _lostCause, ...without } = task
-    return without
+  /**
+   * Refuse a claim with the reason that applies to the task's status. Only a
+   * ready `pending` task can be claimed.
+   */
+  private assertClaimable(state: TeamState, task: TeamTaskSnapshot, caller: Agent): void {
+    switch (task.status) {
+      case 'pending': {
+        const blocker = task.blockedBy.find(id => state.tasks.find(candidate => candidate.id === id)?.status !== 'completed')
+        if (blocker === undefined) return
+        throw new TeamError(
+          `team task "${task.id}" is not ready to claim: its blocker "${blocker}" is not completed`,
+          'TEAM_TASK_BLOCKED',
+        )
+      }
+      case 'in_progress':
+        if (task.ownerId === caller.id) {
+          throw new TeamError(`team task "${task.id}" is already in progress under you`, 'TEAM_TASK_INVALID_TRANSITION')
+        }
+        throw new TeamError(`team task "${task.id}" is owned by another member`, 'TEAM_TASK_ALREADY_CLAIMED')
+      case 'lost':
+        throw new TeamError(
+          `team task "${task.id}" is lost (${task.lostCause}): its owner is gone; reopen it before it can be claimed`,
+          'TEAM_TASK_INVALID_TRANSITION',
+        )
+      case 'completed':
+        throw new TeamError(
+          `team task "${task.id}" is completed; reopen it before it can be claimed`,
+          'TEAM_TASK_INVALID_TRANSITION',
+        )
+      /* v8 ignore next 2 -- update refuses a deleted task before any action runs. */
+      case 'deleted':
+        throw new TeamError(`team task "${task.id}" is deleted`, 'TEAM_TASK_DELETED')
+    }
+  }
+
+  /**
+   * Refuse to reopen a completed task that started work depends on: a task in
+   * progress or completed keeps every blocker completed. A lost task was never
+   * completed, so nothing that depends on it has started.
+   */
+  private assertNoStartedDependent(state: TeamState, task: TeamTaskSnapshot): void {
+    if (task.status !== 'completed') return
+    const dependent = state.tasks.find(other =>
+      taskStarted(other.status) && other.blockedBy.includes(task.id))
+    if (dependent === undefined) return
+    const first = dependent.status === 'in_progress' ? 'release or unassign' : 'reopen'
+    throw new TeamError(
+      `team task "${task.id}" is a completed blocker of "${dependent.id}", which is ${dependent.status.replace('_', ' ')}; ${first} "${dependent.id}" first`,
+      'TEAM_TASK_HAS_DEPENDENTS',
+    )
   }
 
   /** Model-facing owner name: the Lead, a roster name, or the child Session id of a tracked run. */
@@ -425,7 +520,7 @@ export class TeamTaskBoard {
     const ownerName = task.ownerId === undefined ? undefined : this.ownerName(root, state, task.ownerId)
     const warnings = new Set<string>()
     for (const other of state.tasks) {
-      if (other.id === task.id || other.status !== 'in_progress') continue
+      if (other.id === task.id || !isOutstanding(other)) continue
       if (task.writeScopes.some(left => other.writeScopes.some(right => scopesOverlap(left, right)))) {
         warnings.add(`write scopes overlap with ${other.id}`)
       }

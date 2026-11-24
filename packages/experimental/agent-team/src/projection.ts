@@ -82,20 +82,26 @@ const teamTaskSnapshotV2Schema = z.object({
   writeScopes: z.array(z.string()),
 }).strict() as z.ZodType<TeamTaskSnapshotV2>
 
-const teamTaskSnapshotSchema = z.object({
+const teamTaskFields = {
   id: teamTaskIdSchema,
   revision: positiveSafeInteger,
   subject: z.string(),
   description: z.string(),
-  status: z.enum(['pending', 'in_progress', 'completed', 'lost', 'deleted']),
-  ownerId: sessionIdSchema.optional(),
-  lostCause: z.enum(['owner-failed', 'run-ended']).optional(),
   blockedBy: z.array(teamTaskIdSchema),
   writeScopes: z.array(z.string()),
-}).strict().refine(
-  task => (task.status === 'lost') === (task.lostCause !== undefined),
-  { message: 'lostCause must be present exactly while status is lost' },
-) as z.ZodType<TeamTaskSnapshot>
+}
+
+const lostCauseSchema = z.enum(['owner-failed', 'run-ended'])
+
+// One strict member per status: each names exactly the owner and cause fields
+// that status carries, so a record with the fields of another status is refused.
+const teamTaskSnapshotSchema = z.discriminatedUnion('status', [
+  z.object({ ...teamTaskFields, status: z.literal('pending') }).strict(),
+  z.object({ ...teamTaskFields, status: z.literal('in_progress'), ownerId: sessionIdSchema }).strict(),
+  z.object({ ...teamTaskFields, status: z.literal('completed'), ownerId: sessionIdSchema }).strict(),
+  z.object({ ...teamTaskFields, status: z.literal('lost'), ownerId: sessionIdSchema, lostCause: lostCauseSchema }).strict(),
+  z.object({ ...teamTaskFields, status: z.literal('deleted'), ownerId: sessionIdSchema.optional() }).strict(),
+]) as z.ZodType<TeamTaskSnapshot>
 
 const teamMessageSnapshotSchema = z.object({
   id: teamMessageIdSchema,
@@ -256,6 +262,19 @@ function applyProjectionEvent(state: TeamProjectionState, event: SessionEvent): 
   }
 }
 
+/**
+ * Read a version 2 task record as a current snapshot. Version 2 did not
+ * validate the owner per status; the builds that wrote it always recorded an
+ * owner on an in-progress or completed task and none on a pending one.
+ */
+function taskFromV2(task: TeamTaskSnapshotV2): TeamTaskSnapshot {
+  const { status, ownerId, ...fields } = task
+  if (status === 'pending') return { ...fields, status }
+  if (status === 'deleted') return { ...fields, status, ...ownerId === undefined ? {} : { ownerId } }
+  if (ownerId === undefined) throw new Error(`team task "${task.id}" is ${status} without an owner`)
+  return { ...fields, status, ownerId }
+}
+
 function applyCurrentTeamEvent(state: TeamState, event: TeamSessionEvent): void {
   switch (event.type) {
     case 'team/member': {
@@ -281,7 +300,7 @@ function applyCurrentTeamEvent(state: TeamState, event: TeamSessionEvent): void 
       break
     }
     case 'team/task': {
-      const task = event.data.task
+      const task = event.data.version === 2 ? taskFromV2(event.data.task) : event.data.task
       const index = state.tasks.findIndex(candidate => candidate.id === task.id)
       const prior = state.tasks[index]
       if (prior === undefined && task.revision !== 1) {

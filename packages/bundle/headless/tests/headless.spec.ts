@@ -441,7 +441,12 @@ describe('headless runner', () => {
             appendTurn(root.session, 2, {
               role: 'user', content: [{ type: 'text', text: 'notice' }], source: { kind: 'user' }, id: brandString<MessageId>('notice'),
             } satisfies UserMessage, 'answer after the notice', true)
-            return { unsettled: ['task-3 "subagent run via spawn" owned by child: still in progress'] }
+            return {
+              unsettled: [
+                { id: 'task-3', subject: 'subagent run via spawn', owner: 'child', state: 'lost', reason: 'still in progress' },
+                { id: 'task-4', subject: 'never started', state: 'pending', reason: 'nobody is working on it' },
+              ],
+            }
           },
         })
       },
@@ -449,7 +454,8 @@ describe('headless runner', () => {
     expect(await test.run()).toEqual({
       code: 1,
       out: 'answer after the notice\n',
-      err: 'dsh: unsettled: task-3 "subagent run via spawn" owned by child: still in progress\n',
+      err: 'dsh: unsettled: task-3 "subagent run via spawn" owned by child: still in progress\n'
+        + 'dsh: unsettled: task-4 "never started": nobody is working on it\n',
       order: ['flush', 'exit'],
     })
     expect(calls).toEqual(['begin idle do the thing', 'prompt', 'settle'])

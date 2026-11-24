@@ -74,9 +74,12 @@ function task(overrides: Partial<TeamTaskSnapshotV2> = {}): TeamTaskSnapshotV2 {
   }
 }
 
-/** A version-3 task record, which may carry the `lost` status and its cause. */
-function taskV3(overrides: Partial<TeamTaskSnapshot> = {}): TeamTaskSnapshot {
-  return { ...task(), ...overrides }
+/**
+ * A version-3 task record, which may carry the `lost` status and its cause.
+ * The overrides are untyped so a fixture can state fields its status does not allow.
+ */
+function taskV3(overrides: Record<string, unknown> = {}): TeamTaskSnapshot {
+  return { ...task(), ...overrides } as TeamTaskSnapshot
 }
 
 function message(overrides: Partial<TeamMessageSnapshot> = {}): TeamMessageSnapshot {
@@ -194,6 +197,45 @@ describe('Agent Teams projection events', () => {
     ]) {
       expect(() => projectTeam(ROOT, [invalid])).toThrow(/persisted Agent Teams team\/task payload is invalid/)
     }
+  })
+
+  it('accepts at version 3 only the owner and cause fields the status carries', () => {
+    const owner = SessionId('owner')
+    for (const valid of [
+      taskV3({ status: 'pending' }),
+      taskV3({ status: 'in_progress', ownerId: owner }),
+      taskV3({ status: 'completed', ownerId: owner }),
+      taskV3({ status: 'deleted' }),
+      taskV3({ status: 'deleted', ownerId: owner }),
+    ]) {
+      expect(projectTeam(ROOT, [event('team/task', { version: 3, teamId: TEAM, task: valid }, SessionSeq(0))]).tasks)
+        .toEqual([valid])
+    }
+    for (const invalid of [
+      taskV3({ status: 'pending', ownerId: owner }),
+      taskV3({ status: 'in_progress' }),
+      taskV3({ status: 'completed' }),
+      taskV3({ status: 'completed', ownerId: owner, lostCause: 'run-ended' }),
+      taskV3({ status: 'lost', lostCause: 'run-ended' }),
+      taskV3({ status: 'deleted', ownerId: owner, lostCause: 'run-ended' }),
+    ]) {
+      expect(() => projectTeam(ROOT, [event('team/task', { version: 3, teamId: TEAM, task: invalid }, SessionSeq(0))]))
+        .toThrow(/persisted Agent Teams team\/task payload is invalid/)
+    }
+  })
+
+  it('reads a version 2 record with the owner its status carries', () => {
+    const owner = SessionId('owner')
+    const read = (record: TeamTaskSnapshotV2) =>
+      projectTeam(ROOT, [event('team/task', { version: 2, teamId: TEAM, task: record }, SessionSeq(0))]).tasks[0]
+    // Version 2 did not validate the owner; an owner on a pending record is dropped.
+    expect(read(task({ status: 'pending', ownerId: owner }))).toEqual(task({ status: 'pending' }))
+    expect(read(task({ status: 'in_progress', ownerId: owner }))).toEqual(task({ status: 'in_progress', ownerId: owner }))
+    expect(read(task({ status: 'completed', ownerId: owner }))).toEqual(task({ status: 'completed', ownerId: owner }))
+    expect(read(task({ status: 'deleted', ownerId: owner }))).toEqual(task({ status: 'deleted', ownerId: owner }))
+    expect(read(task({ status: 'deleted' }))).toEqual(task({ status: 'deleted' }))
+    expect(() => read(task({ status: 'in_progress' }))).toThrow('team task "task-1" is in_progress without an owner')
+    expect(() => read(task({ status: 'completed' }))).toThrow('team task "task-1" is completed without an owner')
   })
 
   it('rejects every invalid persisted task dependency relation', () => {

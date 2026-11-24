@@ -11,6 +11,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { lastAssistantStreamChunk } from '@deepseek-ai/dsh-llm/assistant-stream'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { HeadlessUnsettledWork } from './index.ts'
 
 /** Default per-string and per-key cap applied to every bounded projected payload. */
 export const MAX_STRING_BYTES = 8 * 1024
@@ -37,8 +38,12 @@ export interface JsonProjectionOptions {
 
 /** The live handle of one `--json` projection. */
 export interface JsonProjection {
-  /** Write the terminal `final` event carrying the run's answer text. */
-  finish(text: string): void
+  /**
+   * Write the terminal `final` event carrying the run's answer text.
+   * @param text - the run's answer.
+   * @param unsettled - the settlement provider's rows; omitted when no provider followed the run.
+   */
+  finish(text: string, unsettled?: readonly HeadlessUnsettledWork[]): void
   /** Stop observing the Session. */
   dispose(): void
 }
@@ -319,10 +324,10 @@ export function projectJsonRun(
   const stopSession = ctx.on('session/event', onSessionEvent)
 
   return {
-    finish(text: string): void {
+    finish(text: string, unsettled?: readonly HeadlessUnsettledWork[]): void {
       // The answer is the lossless terminal contract, so it is not truncated.
       if (disposed) return
-      sink.write(`${JSON.stringify({ type: 'final', text })}\n`)
+      sink.write(`${JSON.stringify({ type: 'final', text, ...unsettled === undefined ? {} : { unsettled } })}\n`)
     },
     dispose(): void {
       disposed = true

@@ -754,7 +754,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/experimental/agent-team/src/types.ts:170`](../packages/experimental/agent-team/src/types.ts)
+Source: [`packages/experimental/agent-team/src/types.ts:215`](../packages/experimental/agent-team/src/types.ts)
 
 <a id="deepseek-aidsh-experimental-agent-team-settlement"></a>
 
@@ -766,9 +766,9 @@ Requires: `agentTeams`
 /** Deployment limits for how long a one-shot run follows delegated work. */
 export interface Config {
   /**
-   * Milliseconds from the start of the run before the root's turn is cancelled
-   * and every task still in progress is marked lost. At most 2147483647, the
-   * longest delay a timer accepts.
+   * Milliseconds from the start of the run before the root's turn is cancelled,
+   * every running teammate is interrupted, and every task still in progress is
+   * marked lost. At most 2147483647, the longest delay a timer accepts.
    */
   readonly deadlineMs: number
   /**
@@ -776,10 +776,16 @@ export interface Config {
    * the remaining tasks are marked lost. At least ten seconds, at most one hour.
    */
   readonly stallMs: number
+  /**
+   * Milliseconds to wait, after the deadline stopped the root and the
+   * teammates, for their turns to end. When it passes the run is reported
+   * without them, so the run ends at most this long after the deadline.
+   */
+  readonly stopGraceMs: number
 }
 ```
 
-Source: [`packages/experimental/agent-team-settlement/src/index.ts:30`](../packages/experimental/agent-team-settlement/src/index.ts)
+Source: [`packages/experimental/agent-team-settlement/src/index.ts:33`](../packages/experimental/agent-team-settlement/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-api-speech-to-text"></a>
 
