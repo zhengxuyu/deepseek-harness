@@ -87,6 +87,7 @@ describe('standard case settings', () => {
     expect(load(patch)).toContainEqual({ id: 'session-persistence-jsonl', config: { root: join('/home', 'sessions'), compression: 'none' } })
     expect(patch).toContain('id: agent-team-settlement')
     expect(patch).toContain('deadlineMs: 900000')
+    expect(patch).toContain('stopGraceMs: 60000')
     expect(patch).toContain('trackSubagentRuns: true')
     const without = patchLayer(resolveSettings({}), '/home', undefined)
     expect(without).toContain('id: tool-agent-team')

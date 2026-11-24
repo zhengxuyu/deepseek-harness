@@ -155,7 +155,8 @@ export function patchLayer(settings: RunSettings, home: string, settlement: numb
           ? [{
             id: 'agent-team-settlement',
             name: '@deepseek-ai/dsh-experimental-agent-team-settlement',
-            config: { deadlineMs: settlement, stallMs: 120_000 },
+            // The stop window stays inside the outer limit the runner adds to the case's time limit.
+            config: { deadlineMs: settlement, stallMs: 120_000, stopGraceMs: 60_000 },
           }]
           : [],
       ],
