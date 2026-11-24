@@ -82,6 +82,26 @@ export type TeamTaskStatus = 'pending' | 'in_progress' | 'completed' | 'lost' | 
  */
 export type TeamTaskLostCause = 'owner-failed' | 'run-ended'
 
+/**
+ * How one earlier ownership of a task ended: `released` when the owner or the
+ * Lead returned the task to `pending`, `reassigned` when the Lead moved it to
+ * another member, `completed` or `lost` when the task was reopened from that
+ * status.
+ */
+export type TeamTaskAttemptEnd = 'released' | 'reassigned' | 'completed' | 'lost'
+
+/** One earlier ownership of a task, recorded when the task left that owner. */
+export interface TeamTaskAttempt {
+  readonly ownerId: SessionId
+  readonly ended: TeamTaskAttemptEnd
+  /** Present exactly when {@link ended} is `lost`. */
+  readonly lostCause?: TeamTaskLostCause
+  /** Why the acting member took the task back or reopened it, when it said so. */
+  readonly reason?: string
+  /** The task's {@link TeamTaskFields.goalRevision} while this owner held it; absent when the goal was never edited. */
+  readonly goalRevision?: number
+}
+
 /** The fields every task snapshot carries in every status. */
 export interface TeamTaskFields {
   readonly id: TeamTaskId
@@ -91,6 +111,14 @@ export interface TeamTaskFields {
   readonly description: string
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
+  /**
+   * The revision that last changed `subject` or `description`; absent while
+   * the task still has the text it was created with. Two attempts with the
+   * same value worked toward the same goal.
+   */
+  readonly goalRevision?: number
+  /** Earlier ownerships in the order they ended; absent while there are none. */
+  readonly attempts?: TeamTaskAttempt[]
 }
 
 /** A task nobody owns yet. */
@@ -167,8 +195,22 @@ export interface TeamTaskView {
   readonly writeScopes: string[]
   readonly ownerName?: string
   readonly lostCause?: TeamTaskLostCause
+  /** The revision that last changed the subject or description; absent while the creation text stands. */
+  readonly goalRevision?: number
+  /** Earlier ownerships in the order they ended; absent while there are none. */
+  readonly attempts?: TeamTaskAttemptView[]
   readonly ready: boolean
   readonly writeScopeWarnings: string[]
+}
+
+/** One earlier ownership as shown to tools and hosts, with the owner's model-facing name. */
+export interface TeamTaskAttemptView {
+  /** The Lead, a roster name, or the child Session id of a tracked run. */
+  readonly ownerName: string
+  readonly ended: TeamTaskAttemptEnd
+  readonly lostCause?: TeamTaskLostCause
+  readonly reason?: string
+  readonly goalRevision?: number
 }
 
 /** One in-progress task that a settling run is still waiting on. */
@@ -288,6 +330,12 @@ export interface UpdateTeamTaskRequest {
   readonly blockedBy?: readonly TeamTaskId[]
   readonly writeScopes?: readonly string[]
   readonly owner?: string
+  /**
+   * Why the task is taken from its owner or reopened; accepted on `release`,
+   * `reassign`, and `reopen`, and recorded on the attempt that the action ends.
+   * It leaves the subject and description unchanged; `edit` changes those.
+   */
+  readonly reason?: string
 }
 
 /** Result of waiting for Team activity. */

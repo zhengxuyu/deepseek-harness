@@ -224,6 +224,28 @@ describe('Agent Teams projection events', () => {
     }
   })
 
+  it('accepts attempts whose cause matches how they ended', () => {
+    const owner = SessionId('owner')
+    const withAttempts = taskV3({
+      goalRevision: 1,
+      attempts: [
+        { ownerId: owner, ended: 'released' },
+        { ownerId: owner, ended: 'lost', lostCause: 'owner-failed', reason: 'retry', goalRevision: 1 },
+      ],
+    })
+    expect(projectTeam(ROOT, [event('team/task', { version: 3, teamId: TEAM, task: withAttempts }, SessionSeq(0))]).tasks)
+      .toEqual([withAttempts])
+    for (const attempts of [
+      [],
+      [{ ownerId: owner, ended: 'lost' }],
+      [{ ownerId: owner, ended: 'completed', lostCause: 'run-ended' }],
+      [{ ownerId: owner, ended: 'released', reason: '' }],
+    ]) {
+      expect(() => projectTeam(ROOT, [event('team/task', { version: 3, teamId: TEAM, task: taskV3({ attempts }) }, SessionSeq(0))]))
+        .toThrow(/persisted Agent Teams team\/task payload is invalid/)
+    }
+  })
+
   it('reads a version 2 record with the owner its status carries', () => {
     const owner = SessionId('owner')
     const read = (record: TeamTaskSnapshotV2) =>

@@ -2274,6 +2274,10 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
     "owner": {
       "type": "string",
       "description": "Member target from spawn_teammate or list_agents for Lead-only reassign; omit to unassign."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Why the task is taken from its owner or reopened, for release, reassign, and reopen. Recorded on the task's attempts and shown to the previous owner; it does not change the subject or description."
     }
   },
   "required": [

@@ -82,6 +82,19 @@ const teamTaskSnapshotV2Schema = z.object({
   writeScopes: z.array(z.string()),
 }).strict() as z.ZodType<TeamTaskSnapshotV2>
 
+const lostCauseSchema = z.enum(['owner-failed', 'run-ended'])
+
+const teamTaskAttemptSchema = z.object({
+  ownerId: sessionIdSchema,
+  ended: z.enum(['released', 'reassigned', 'completed', 'lost']),
+  lostCause: lostCauseSchema.optional(),
+  reason: z.string().min(1).optional(),
+  goalRevision: positiveSafeInteger.optional(),
+}).strict().refine(
+  attempt => (attempt.ended === 'lost') === (attempt.lostCause !== undefined),
+  { message: 'an attempt carries lostCause exactly when it ended lost' },
+)
+
 const teamTaskFields = {
   id: teamTaskIdSchema,
   revision: positiveSafeInteger,
@@ -89,9 +102,9 @@ const teamTaskFields = {
   description: z.string(),
   blockedBy: z.array(teamTaskIdSchema),
   writeScopes: z.array(z.string()),
+  goalRevision: positiveSafeInteger.optional(),
+  attempts: z.array(teamTaskAttemptSchema).min(1).optional(),
 }
-
-const lostCauseSchema = z.enum(['owner-failed', 'run-ended'])
 
 // One strict member per status: each names exactly the owner and cause fields
 // that status carries, so a record with the fields of another status is refused.

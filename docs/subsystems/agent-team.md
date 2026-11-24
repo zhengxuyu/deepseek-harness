@@ -71,7 +71,7 @@ type TeamTaskSnapshot =
   | DeletedTeamTask
 ```
 
-Every variant carries `id`, `revision`, `subject`, `description`, `blockedBy`, and `writeScopes`. The status decides the other two fields, and the `team/task` version 3 validation refuses a record that breaks a row of this table.
+Every variant carries `id`, `revision`, `subject`, `description`, `blockedBy`, and `writeScopes`, and may carry `goalRevision` and `attempts`. The status decides the other two fields, and the `team/task` version 3 validation refuses a record that breaks a row of this table.
 
 | Status | Meaning | `ownerId` | `lostCause` |
 |---|---|---|---|
@@ -82,6 +82,8 @@ Every variant carries `id`, `revision`, `subject`, `description`, `blockedBy`, a
 | `deleted` | retained tombstone | optional: kept from a `lost` task | absent |
 
 `lost` means only that the owner is gone. `owner-failed` records that the owning member's turn, or the owning tracked run, ended without completing the task; `run-ended` records that a run ended before the task finished. `lost` says nothing about whether finished work was accepted, so a later acceptance check needs its own record.
+
+**Attempts and the goal.** A task records its earlier ownerships in `attempts`, in the order they ended. An attempt names the owner and how the ownership ended: `released` when the owner or the Lead returned the task to `pending`, `reassigned` when the Lead moved it to another member, and `completed` or `lost` when the task was reopened from that status, with the `lostCause` it had. `release`, `reassign`, and `reopen` accept a `reason`, which is recorded on the attempt the action ends and included in the message the previous owner receives. A reason is feedback on the work: it leaves `subject` and `description` unchanged. `edit` changes the goal, and an edit of `subject` or `description` sets `goalRevision` to the new revision; each attempt records the `goalRevision` it worked toward, so a reader can tell a second attempt at the same goal from an attempt at a changed one. Both fields are absent until they have something to record.
 
 Three groups of statuses are defined once, in `task-status.ts`, and every decision uses them. A task is *outstanding* while it is `in_progress`: a run that follows the board waits only on outstanding tasks. A task is *open* while it is `pending` or `lost`: its text, edges, and existence may change. A task is *started* while it is `in_progress` or `completed`: it is frozen, and every task in its `blockedBy` is `completed`. Views add owner name, readiness, lost cause, and write-scope overlap warnings without changing the durable snapshot.
 

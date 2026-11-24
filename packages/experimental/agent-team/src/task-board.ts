@@ -18,6 +18,8 @@ import type {
   LostTeamTask,
   OutstandingTeamTask,
   PendingTeamTask,
+  TeamTaskAttempt,
+  TeamTaskAttemptEnd,
   TeamTaskFields,
   TeamTaskLostCause,
   TeamTaskSnapshot,
@@ -50,14 +52,31 @@ function fields(task: TeamTaskSnapshot): TeamTaskFields {
   return rest
 }
 
-/** The task returned to `pending`, with no owner and no cause. */
-function pending(task: TeamTaskSnapshot): PendingTeamTask {
-  return { ...fields(task), status: 'pending' }
+/**
+ * The carried-over fields with the current ownership closed as one more
+ * attempt. A task with no owner has no ownership to close.
+ */
+function closed(task: TeamTaskSnapshot, ended: TeamTaskAttemptEnd, reason: string | undefined): TeamTaskFields {
+  const rest = fields(task)
+  if (task.ownerId === undefined) return rest
+  const attempt: TeamTaskAttempt = {
+    ownerId: task.ownerId,
+    ended,
+    ...task.lostCause === undefined ? {} : { lostCause: task.lostCause },
+    ...reason === undefined ? {} : { reason },
+    ...task.goalRevision === undefined ? {} : { goalRevision: task.goalRevision },
+  }
+  return { ...rest, attempts: [...task.attempts ?? [], attempt] }
 }
 
-/** The task in progress under one owner. */
-function inProgress(task: TeamTaskSnapshot, ownerId: SessionId): InProgressTeamTask {
-  return { ...fields(task), status: 'in_progress', ownerId }
+/** The task returned to `pending`, with no owner and no cause; its ownership, if any, becomes an attempt. */
+function pending(task: TeamTaskSnapshot, ended: TeamTaskAttemptEnd, reason: string | undefined): PendingTeamTask {
+  return { ...closed(task, ended, reason), status: 'pending' }
+}
+
+/** The task in progress under one owner; a previous owner's ownership becomes an attempt. */
+function inProgress(task: TeamTaskSnapshot, ownerId: SessionId, reason?: string): InProgressTeamTask {
+  return { ...closed(task, 'reassigned', reason), status: 'in_progress', ownerId }
 }
 
 /** The in-progress task marked `lost`; its owner stays recorded. */
@@ -80,6 +99,8 @@ export interface DisplacedOwner {
   readonly idle: boolean
   /** What the acting member did, completing the sentence "the Lead ...". */
   readonly action: string
+  /** The reason the acting member gave, when it gave one. */
+  readonly reason?: string
 }
 
 /** One committed member transition and, when it took the task from its owner, whom to tell. */
@@ -247,6 +268,7 @@ export class TeamTaskBoard {
       const authorizeOwner = (): void => {
         if (!lead && !owner) throw new TeamError('task mutation requires its owner or Team Lead', 'TEAM_TASK_UNAUTHORIZED')
       }
+      const reason = this.reason(request)
       let next: TeamTaskSnapshot
       // What the caller did to a task another member was working on.
       let action: string | undefined
@@ -258,7 +280,7 @@ export class TeamTaskBoard {
         case 'release':
           authorizeOwner()
           if (!isOutstanding(current)) throw new TeamError('only an in-progress task can be released', 'TEAM_TASK_INVALID_TRANSITION')
-          next = pending(current)
+          next = pending(current, 'released', reason)
           action = 'unassigned it'
           break
         case 'edit':
@@ -274,6 +296,8 @@ export class TeamTaskBoard {
               ? {}
               : { description: requiredText(request.description, 'description', 16_384) },
             ...request.writeScopes === undefined ? {} : { writeScopes: this.writeScopes(request.writeScopes) },
+            // A new subject or description is a new goal; later attempts are recorded against it.
+            ...request.subject === undefined && request.description === undefined ? {} : { goalRevision: current.revision + 1 },
           }
           break
         case 'set_dependencies':
@@ -294,7 +318,7 @@ export class TeamTaskBoard {
             throw new TeamError('only a completed or lost task can reopen', 'TEAM_TASK_INVALID_TRANSITION')
           }
           this.assertNoStartedDependent(state, current)
-          next = pending(current)
+          next = pending(current, current.status, reason)
           break
         case 'reassign': {
           if (!lead) throw new TeamError('only the Team Lead can reassign tasks', 'TEAM_LEAD_REQUIRED')
@@ -305,7 +329,7 @@ export class TeamTaskBoard {
             )
           }
           if (request.owner === undefined || request.owner.trim().length === 0) {
-            next = pending(current)
+            next = pending(current, 'released', reason)
             action = 'unassigned it'
             break
           }
@@ -314,7 +338,7 @@ export class TeamTaskBoard {
           if (assignee.id === current.ownerId) {
             throw new TeamError(`team task "${current.id}" is already owned by "${assignee.name}"`, 'TEAM_INVALID_ARGUMENT')
           }
-          next = inProgress(current, assignee.id)
+          next = inProgress(current, assignee.id, reason)
           action = `reassigned it to ${assignee.name}`
           break
         }
@@ -343,7 +367,7 @@ export class TeamTaskBoard {
       if (action === undefined || !isOutstanding(current) || owner) return { view }
       const ownerId = current.ownerId
       const idle = !state.tasks.some(other => other.id !== current.id && isOutstanding(other) && other.ownerId === ownerId)
-      return { view, displaced: { ownerId, idle, action } }
+      return { view, displaced: { ownerId, idle, action, ...reason === undefined ? {} : { reason } } }
     })
   }
 
@@ -453,6 +477,18 @@ export class TeamTaskBoard {
   }
 
   /**
+   * The normalized reason of a request, accepted only on the actions that can
+   * end an ownership: `release`, `reassign`, and `reopen`.
+   */
+  private reason(request: UpdateTeamTaskRequest): string | undefined {
+    if (request.reason === undefined) return undefined
+    if (request.action !== 'release' && request.action !== 'reassign' && request.action !== 'reopen') {
+      throw new TeamError(`reason is accepted only on release, reassign, and reopen, not ${request.action}`, 'TEAM_INVALID_ARGUMENT')
+    }
+    return requiredText(request.reason, 'reason', 2_000)
+  }
+
+  /**
    * Refuse a claim with the reason that applies to the task's status. Only a
    * ready `pending` task can be claimed.
    */
@@ -535,6 +571,10 @@ export class TeamTaskBoard {
       writeScopes: structuredClone(task.writeScopes),
       ...ownerName === undefined ? {} : { ownerName },
       ...task.lostCause === undefined ? {} : { lostCause: task.lostCause },
+      ...task.goalRevision === undefined ? {} : { goalRevision: task.goalRevision },
+      ...task.attempts === undefined
+        ? {}
+        : { attempts: task.attempts.map(({ ownerId, ...attempt }) => ({ ownerName: this.ownerName(root, state, ownerId), ...attempt })) },
       ready: task.status === 'pending' && this.taskReady(state, task),
       writeScopeWarnings: [...warnings],
     }

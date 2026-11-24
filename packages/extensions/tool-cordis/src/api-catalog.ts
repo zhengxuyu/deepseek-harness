@@ -7126,6 +7126,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type TeamTaskAction = \'claim\' | \'release\' | \'edit\' | \'set_dependencies\' | \'complete\' | \'reopen\' | \'reassign\' | \'delete\';',
   },
   {
+    name: 'TeamTaskAttemptEnd',
+    declaration: 'export type TeamTaskAttemptEnd = \'released\' | \'reassigned\' | \'completed\' | \'lost\';',
+  },
+  {
+    name: 'TeamTaskAttemptView',
+    declaration: 'export interface TeamTaskAttemptView {\n    readonly ownerName: string;\n    readonly ended: TeamTaskAttemptEnd;\n    readonly lostCause?: TeamTaskLostCause;\n    readonly reason?: string;\n    readonly goalRevision?: number;\n}',
+  },
+  {
     name: 'TeamTaskId',
     declaration: 'export type TeamTaskId = Branded<\'TeamTaskId\'>;',
   },
@@ -7139,7 +7147,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TeamTaskView',
-    declaration: 'export interface TeamTaskView {\n    readonly id: TeamTaskId;\n    readonly revision: number;\n    readonly subject: string;\n    readonly description: string;\n    readonly status: TeamTaskStatus;\n    readonly blockedBy: TeamTaskId[];\n    readonly writeScopes: string[];\n    readonly ownerName?: string;\n    readonly lostCause?: TeamTaskLostCause;\n    readonly ready: boolean;\n    readonly writeScopeWarnings: string[];\n}',
+    declaration: 'export interface TeamTaskView {\n    readonly id: TeamTaskId;\n    readonly revision: number;\n    readonly subject: string;\n    readonly description: string;\n    readonly status: TeamTaskStatus;\n    readonly blockedBy: TeamTaskId[];\n    readonly writeScopes: string[];\n    readonly ownerName?: string;\n    readonly lostCause?: TeamTaskLostCause;\n    readonly goalRevision?: number;\n    readonly attempts?: TeamTaskAttemptView[];\n    readonly ready: boolean;\n    readonly writeScopeWarnings: string[];\n}',
   },
   {
     name: 'TeamView',
@@ -7515,7 +7523,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'UpdateTeamTaskRequest',
-    declaration: 'export interface UpdateTeamTaskRequest {\n    readonly taskId: TeamTaskId;\n    readonly expectedRevision: number;\n    readonly action: TeamTaskAction;\n    readonly subject?: string;\n    readonly description?: string;\n    readonly blockedBy?: readonly TeamTaskId[];\n    readonly writeScopes?: readonly string[];\n    readonly owner?: string;\n}',
+    declaration: 'export interface UpdateTeamTaskRequest {\n    readonly taskId: TeamTaskId;\n    readonly expectedRevision: number;\n    readonly action: TeamTaskAction;\n    readonly subject?: string;\n    readonly description?: string;\n    readonly blockedBy?: readonly TeamTaskId[];\n    readonly writeScopes?: readonly string[];\n    readonly owner?: string;\n    readonly reason?: string;\n}',
   },
   {
     name: 'UserMessage',

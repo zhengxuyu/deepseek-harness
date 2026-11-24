@@ -364,7 +364,8 @@ export class TeamService extends TypertRemoteService {
     // A tracked plain run owns its row under a child Session id and has no mailbox.
     if (owner === undefined || owner.phase !== 'active') return
     const running = this.ctx.agents.get(owner.id)?.status === 'running'
-    const text = `Task ${task.id} "${task.subject}" is no longer yours: the Lead ${displaced.action}. `
+    const why = displaced.reason === undefined ? '' : ` (reason: ${displaced.reason})`
+    const text = `Task ${task.id} "${task.subject}" is no longer yours: the Lead ${displaced.action}${why}. `
       + 'Stop working on it and do not change its files further.'
     try {
       await this.mailbox.send(lead, { target: owner.name, content: [{ type: 'text', text }], signal: this.lifecycle.signal })

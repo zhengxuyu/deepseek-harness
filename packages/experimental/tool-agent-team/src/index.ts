@@ -34,7 +34,7 @@ The Team Lead and all teammates share the same working directory and filesystem.
 
 Prefer read/edit/write for file changes. If a file operation returns FS_STALE_VERSION, read the current file, rebase your intended change onto the new content, and retry. Bash, formatters, code generators, and scripts are not fully protected by the filesystem version guard; coordinate them explicitly and have the Lead review the final diff and run tests.
 
-Use the target returned by spawn_teammate or list_agents for send_message and interrupt_agent, or as owner when assigning or filtering shared tasks. send_message steers a running target at its nearest step boundary and starts or resumes an inactive target. inactive means no turn is executing; it does not describe task completion, success, failure, or waiting for other agents. provisioning means member creation is in progress; failed means member creation failed. A delivered peer item starts with its stable message id and sender name. A successful send is already durable even when its result says queued; do not resend it. Shared-task workflow is list, get, claim with the current revision, perform the work, then complete. Task readiness never starts an owner. A lost task's owner is gone and can no longer finish it: reopen it, then claim or reassign it. A member whose turn ends any way other than completed or interrupted loses its in-progress tasks. The Lead can reassign an in-progress task to another member in one action; when the Lead unassigns, reassigns, or completes a task another member is working on, that member receives a notice and must stop working on the task. In-progress and completed tasks cannot be edited, rewired, or deleted. A completed task can be reopened only after every in-progress or completed task it blocks is released or reopened. Before wait_agent, use list_agents and make sure another required member is running or provisioning; use send_message first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Re-list after wakeup or timeout. The Lead must wait for required teammates before giving the final answer.`
+Use the target returned by spawn_teammate or list_agents for send_message and interrupt_agent, or as owner when assigning or filtering shared tasks. send_message steers a running target at its nearest step boundary and starts or resumes an inactive target. inactive means no turn is executing; it does not describe task completion, success, failure, or waiting for other agents. provisioning means member creation is in progress; failed means member creation failed. A delivered peer item starts with its stable message id and sender name. A successful send is already durable even when its result says queued; do not resend it. Shared-task workflow is list, get, claim with the current revision, perform the work, then complete. Task readiness never starts an owner. A lost task's owner is gone and can no longer finish it: reopen it, then claim or reassign it. A member whose turn ends any way other than completed or interrupted loses its in-progress tasks. The Lead can reassign an in-progress task to another member in one action; when the Lead unassigns, reassigns, or completes a task another member is working on, that member receives a notice and must stop working on the task. In-progress and completed tasks cannot be edited, rewired, or deleted. A completed task can be reopened only after every in-progress or completed task it blocks is released or reopened. A task's attempts list its earlier owners and how each ownership ended. To return work with feedback, reopen it with a reason and leave its subject and description as they are; edit them only to change the goal. Before wait_agent, use list_agents and make sure another required member is running or provisioning; use send_message first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Re-list after wakeup or timeout. The Lead must wait for required teammates before giving the final answer.`
 
 const ACTIVE_WAIT_STATUSES: ReadonlySet<TeamMemberView['status']> = new Set(['running', 'provisioning'])
 const NO_ACTIVE_PEER_MESSAGE = 'No other Team member is running or provisioning. wait_agent cannot make progress or wake inactive teammates. Re-list with list_agents and team_task_list, then use send_message to wake each required inactive teammate before waiting again.'
@@ -77,6 +77,21 @@ const TASK_VIEW_SCHEMA = {
     status: { type: 'string', required: true, enum: ['pending', 'in_progress', 'completed', 'lost', 'deleted'] },
     ownerName: { type: 'string' },
     lostCause: { type: 'string', enum: ['owner-failed', 'run-ended'] },
+    goalRevision: { type: 'integer' },
+    attempts: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ownerName: { type: 'string', required: true },
+          ended: { type: 'string', required: true, enum: ['released', 'reassigned', 'completed', 'lost'] },
+          lostCause: { type: 'string', enum: ['owner-failed', 'run-ended'] },
+          reason: { type: 'string' },
+          goalRevision: { type: 'integer' },
+        },
+      },
+    },
     blockedBy: { type: 'array', required: true, items: { type: 'string' } },
     writeScopes: { type: 'array', required: true, items: { type: 'string' } },
     ready: { type: 'boolean', required: true },
@@ -367,6 +382,7 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
         blocked_by: { type: 'array', items: { type: 'string' }, description: 'Complete blocker list for set_dependencies.' },
         write_scopes: { type: 'array', items: { type: 'string' }, description: 'Replacement advisory write scopes for edit.' },
         owner: { type: 'string', description: 'Member target from spawn_teammate or list_agents for Lead-only reassign; omit to unassign.' },
+        reason: { type: 'string', description: 'Why the task is taken from its owner or reopened, for release, reassign, and reopen. Recorded on the task\'s attempts and shown to the previous owner; it does not change the subject or description.' },
       },
       output: jsonOutput(TASK_VIEW_SCHEMA),
       async execute(args, exec) {
@@ -379,6 +395,7 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
           ...args.blocked_by === undefined ? {} : { blockedBy: args.blocked_by.map(TeamTaskId) },
           ...args.write_scopes === undefined ? {} : { writeScopes: args.write_scopes },
           ...args.owner === undefined ? {} : { owner: args.owner },
+          ...args.reason === undefined ? {} : { reason: args.reason },
         })
       },
     })))

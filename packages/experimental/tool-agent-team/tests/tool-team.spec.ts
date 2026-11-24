@@ -568,9 +568,11 @@ describe('dsh-tool-team', () => {
     expect((await execute(ctx, lead, 'team_task_list', { limit: 101 })).isError).toBe(true)
 
     const released = await execute(ctx, lead, 'team_task_update', {
-      task_id: first.id, expected_revision: claim.revision, action: 'release',
+      task_id: first.id, expected_revision: claim.revision, action: 'release', reason: 'paused for the review',
     })
-    const release = JSON.parse(text(released)) as { revision: number }
+    const release = JSON.parse(text(released)) as { revision: number; attempts: unknown[] }
+    // The tool returns the recorded attempt, so its declared output schema admits the field.
+    expect(release.attempts).toEqual([{ ownerName: 'lead', ended: 'released', reason: 'paused for the review' }])
     const edited = await execute(ctx, lead, 'team_task_update', {
       task_id: first.id,
       expected_revision: release.revision,

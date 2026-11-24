@@ -2375,3 +2375,83 @@ describe('Task statuses and their fields', () => {
     expect(ctx.agentTeams.getTask(lead, downstream.id)).toMatchObject({ status: 'pending', ready: false })
   })
 })
+
+describe('Task attempts and reasons', () => {
+  it('records each ended ownership with how it ended, why, and the goal it worked toward', async () => {
+    const { ctx, lead } = await setup(['hang', 'hang'])
+    vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    const first = await waitRunning(ctx, (await spawn(ctx, lead, 'first')).member.id)
+    const second = await waitRunning(ctx, (await spawn(ctx, lead, 'second')).member.id)
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
+    expect('attempts' in task || 'goalRevision' in task).toBe(false)
+    const update = (caller: Agent, request: Omit<Parameters<typeof ctx.agentTeams.updateTask>[1], 'taskId' | 'expectedRevision'>) =>
+      ctx.agentTeams.updateTask(caller, {
+        taskId: task.id, expectedRevision: ctx.agentTeams.getTask(lead, task.id).revision, ...request,
+      })
+
+    await update(first, { action: 'claim' })
+    // The owner gives the task back without a reason.
+    await update(first, { action: 'release' })
+    await update(first, { action: 'claim' })
+    // The Lead moves it; the previous owner reads why.
+    const moved = await update(lead, { action: 'reassign', owner: 'second', reason: '  first is busy  ' })
+    expect(moved.attempts).toEqual([
+      { ownerName: 'first', ended: 'released' },
+      { ownerName: 'first', ended: 'reassigned', reason: 'first is busy' },
+    ])
+    await vi.waitFor(() => {
+      expect(waitingNotices(first)).toEqual([expect.stringContaining('the Lead reassigned it to second (reason: first is busy). Stop working on it')])
+    })
+    await update(lead, { action: 'reassign', reason: 'not needed yet' })
+    await update(second, { action: 'claim' })
+    await update(second, { action: 'complete' })
+    // Feedback goes in the reopen reason and leaves the goal text as it is.
+    const returned = await update(lead, { action: 'reopen', reason: 'the test still fails' })
+    expect(returned).toMatchObject({ status: 'pending', subject: 'work', description: 'work' })
+    expect('goalRevision' in returned).toBe(false)
+    // A new description is a new goal.
+    const edited = await update(lead, { action: 'edit', description: 'work, and add the missing test' })
+    expect(edited.goalRevision).toBe(edited.revision)
+    await update(lead, { action: 'edit', writeScopes: ['src'] })
+    expect(ctx.agentTeams.getTask(lead, task.id).goalRevision).toBe(edited.revision)
+    await update(lead, { action: 'claim' })
+    await ctx.agentTeams.markLost(lead, task.id, 'run-ended')
+    const reopened = await update(lead, { action: 'reopen' })
+    expect(reopened.attempts).toEqual([
+      { ownerName: 'first', ended: 'released' },
+      { ownerName: 'first', ended: 'reassigned', reason: 'first is busy' },
+      { ownerName: 'second', ended: 'released', reason: 'not needed yet' },
+      { ownerName: 'second', ended: 'completed', reason: 'the test still fails' },
+      { ownerName: 'lead', ended: 'lost', lostCause: 'run-ended', goalRevision: edited.revision },
+    ])
+    // The durable record names owners by Session id and survives deletion.
+    const deleted = await update(lead, { action: 'delete' })
+    expect(deleted.attempts).toHaveLength(5)
+    expect(durable(lead).tasks[0]).toMatchObject({
+      status: 'deleted', goalRevision: edited.revision, attempts: [{ ownerId: first.id }, { ownerId: first.id }, { ownerId: second.id }, { ownerId: second.id }, { ownerId: lead.id }],
+    })
+    first.cancel({ kind: 'parent' })
+    second.cancel({ kind: 'parent' })
+    await waitNoAgent(ctx, first.id)
+    await waitNoAgent(ctx, second.id)
+  })
+
+  it('accepts a reason only on the actions that can end an ownership', async () => {
+    const { ctx, lead } = await setup([])
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
+    for (const action of ['claim', 'edit', 'set_dependencies', 'complete', 'delete'] as const) {
+      await expect(ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action, reason: 'why' }))
+        .rejects.toMatchObject({
+          code: 'TEAM_INVALID_ARGUMENT',
+          message: `reason is accepted only on release, reassign, and reopen, not ${action}`,
+        })
+    }
+    await expect(ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action: 'reassign', reason: ' ' }))
+      .rejects.toMatchObject({ code: 'TEAM_INVALID_ARGUMENT', message: 'reason must be non-empty' })
+    // Unassigning a task nobody owns ends no ownership, so it records no attempt.
+    const unassigned = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: task.revision, action: 'reassign', reason: 'still unowned',
+    })
+    expect('attempts' in unassigned).toBe(false)
+  })
+})

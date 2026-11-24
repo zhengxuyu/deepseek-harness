@@ -71,7 +71,7 @@ type TeamTaskSnapshot =
   | DeletedTeamTask
 ```
 
-每个变体都带有 `id`、`revision`、`subject`、`description`、`blockedBy` 和 `writeScopes`。其余两个字段由状态决定，`team/task` 版本 3 的校验会拒绝违反下表任何一行的记录。
+每个变体都带有 `id`、`revision`、`subject`、`description`、`blockedBy` 和 `writeScopes`，并可以带有 `goalRevision` 和 `attempts`。其余两个字段由状态决定，`team/task` 版本 3 的校验会拒绝违反下表任何一行的记录。
 
 | 状态 | 含义 | `ownerId` | `lostCause` |
 |---|---|---|---|
@@ -82,6 +82,8 @@ type TeamTaskSnapshot =
 | `deleted` | 保留的 tombstone | 可选：由 `lost` 任务保留下来 | 没有 |
 
 `lost` 只表示 owner 已不在。`owner-failed` 记录的是持有任务的成员的 turn，或持有任务的被跟踪运行，没有完成任务就结束了；`run-ended` 记录的是运行在任务完成之前结束。`lost` 不说明已完成的工作是否被接受，因此以后的验收检查需要自己的记录。
+
+**尝试记录与目标。** 任务在 `attempts` 里按结束的先后记录它之前的每一次持有。每条记录写明 owner 和这次持有如何结束：owner 或 Lead 把任务退回 `pending` 时是 `released`，Lead 把它转给另一个成员时是 `reassigned`，任务从 `completed` 或 `lost` 被 reopen 时是对应的状态，并带上当时的 `lostCause`。`release`、`reassign` 与 `reopen` 接受一个 `reason`，它记录在该动作结束的那次尝试上，也写进原 owner 收到的消息里。reason 是对工作的反馈：它不改变 `subject` 与 `description`。`edit` 改变的是目标，对 `subject` 或 `description` 的编辑会把 `goalRevision` 设为新的 revision；每次尝试记录它当时对应的 `goalRevision`，因此读者能分清"对同一个目标的第二次尝试"和"对改过的目标的尝试"。这两个字段在没有内容可记之前都不出现。
 
 三组状态在 `task-status.ts` 里只定义一次，所有判断都使用它们。任务处于 `in_progress` 时是 *outstanding*：跟随任务板的运行只等待 outstanding 任务。任务处于 `pending` 或 `lost` 时是 *open*：它的文本、边和存在与否都还可以改变。任务处于 `in_progress` 或 `completed` 时是 *started*：它被冻结，并且它的 `blockedBy` 中每个任务都是 `completed`。view 会添加 owner name、readiness、lost cause 和 write-scope 重叠警告，但不会改变持久快照。
 
