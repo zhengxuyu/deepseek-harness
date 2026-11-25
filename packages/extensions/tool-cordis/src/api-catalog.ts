@@ -365,9 +365,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the revision-one task view, in progress and owned by the caller.',
       },
       {
-        signature: 'async markCompleted(caller: Agent, id: TeamTaskId): Promise<TeamTaskView>',
+        signature: 'async markCompleted(caller: Agent, id: TeamTaskId, ownerId: SessionId): Promise<TeamTaskView>',
         description: 'Complete one in-progress task on behalf of the harness, bypassing member authorization.',
-        parameters: [{ name: 'caller', description: 'exact live Team member whose board holds the task.' }, { name: 'id', description: 'task the harness observed finished.' }],
+        parameters: [{ name: 'caller', description: 'exact live Team member whose board holds the task.' }, { name: 'id', description: 'task the harness observed finished.' }, { name: 'ownerId', description: 'the owner the harness observed finishing it. A task another owner holds is refused with `TEAM_TASK_INVALID_TRANSITION`.' }],
         returns: 'the completed task view.',
       },
       {
@@ -377,9 +377,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'outstanding rows in creation order; empty once every claimed task settled.',
       },
       {
-        signature: 'async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause): Promise<TeamTaskView>',
+        signature: 'async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause, ownerId?: SessionId): Promise<TeamTaskView>',
         description: 'Mark one in-progress task `lost` on behalf of the harness; the owner stays recorded.',
-        parameters: [{ name: 'caller', description: 'exact live Team member whose board holds the task.' }, { name: 'id', description: 'task whose owner can no longer finish it.' }, { name: 'cause', description: 'why the harness gave up on the owner.' }],
+        parameters: [{ name: 'caller', description: 'exact live Team member whose board holds the task.' }, { name: 'id', description: 'task whose owner can no longer finish it.' }, { name: 'cause', description: 'why the harness gave up on the owner.' }, { name: 'ownerId', description: 'the owner the harness gave up on. A task another owner holds is refused with `TEAM_TASK_INVALID_TRANSITION`. Omit it when the run itself ended, which loses the task whoever holds it.' }],
         returns: 'the lost task view.',
       },
       {
@@ -5679,7 +5679,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OutstandingTeamTask',
-    declaration: 'export interface OutstandingTeamTask {\n    readonly id: TeamTaskId;\n    readonly subject: string;\n    readonly ownerName: string;\n    readonly live: boolean;\n}',
+    declaration: 'export interface OutstandingTeamTask {\n    readonly id: TeamTaskId;\n    readonly subject: string;\n    readonly ownerId: SessionId;\n    readonly ownerName: string;\n    readonly live: boolean;\n}',
   },
   {
     name: 'PackageResult',

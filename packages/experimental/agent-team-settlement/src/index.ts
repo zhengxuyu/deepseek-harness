@@ -177,20 +177,28 @@ async function abandon(teams: TeamService, root: Agent, run: FollowedRun, why: s
  * Settle the run's own task once nothing else is outstanding: complete it when
  * the root's latest turn completed, lose it when that turn ended any other way,
  * and record why when the root moved it out of progress without completing it.
+ * The root's turn says how the task ended only while the root holds it.
+ * @returns false when the root gave the task to another member in the meantime, so the run has to keep waiting.
  */
-async function close(teams: TeamService, root: Agent, run: FollowedRun): Promise<void> {
+async function close(teams: TeamService, root: Agent, run: FollowedRun): Promise<boolean> {
   const task = teams.getTask(root, run.task)
-  if (task.status === 'completed' || task.status === 'deleted') return
+  if (task.status === 'completed' || task.status === 'deleted') return true
   if (task.status !== 'in_progress') {
     run.reasons.set(task.id, `the run's task was left ${task.status}`)
-    return
+    return true
   }
-  if (run.lastTurnEnd === 'completed') {
-    await teams.markCompleted(root, task.id)
-    return
+  try {
+    if (run.lastTurnEnd === 'completed') {
+      await teams.markCompleted(root, task.id, root.id)
+      return true
+    }
+    await teams.markLost(root, task.id, 'owner-failed', root.id)
+  } catch (error) {
+    if (error instanceof TeamError && error.code === 'TEAM_TASK_INVALID_TRANSITION') return false
+    throw error
   }
-  await teams.markLost(root, task.id, 'owner-failed')
   run.reasons.set(task.id, run.lastTurnEnd === undefined ? 'no turn ran' : `the turn ended ${run.lastTurnEnd}`)
+  return true
 }
 
 /**
@@ -224,10 +232,12 @@ async function settle(
       await abandon(teams, root, run, `still in progress at the ${config.deadlineMs} ms deadline${late}`)
       return report(teams, root, run)
     }
-    const others = teams.outstandingTasks(root).filter(task => task.id !== run.task)
+    // The run's task is the root's own work only while the root holds it; once
+    // the root gave it to a teammate it is waited on like any other task.
+    const others = teams.outstandingTasks(root).filter(task => task.id !== run.task || task.ownerId !== root.id)
     if (others.length === 0) {
-      await close(teams, root, run)
-      return report(teams, root, run)
+      if (await close(teams, root, run)) return report(teams, root, run)
+      continue
     }
     const live = others.some(task => task.live)
     const left = Math.max(1, run.deadline - Date.now())

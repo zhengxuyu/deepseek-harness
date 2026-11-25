@@ -98,7 +98,11 @@ export interface TeamTaskAttempt {
   readonly lostCause?: TeamTaskLostCause
   /** Why the acting member took the task back or reopened it, when it said so. */
   readonly reason?: string
-  /** The task's {@link TeamTaskFields.goalRevision} while this owner held it; absent when the goal was never edited. */
+  /**
+   * The revision of the subject and description this owner worked toward. Absent,
+   * or 1, for the text the task was created with. An edit made after the owner
+   * was lost does not change it.
+   */
   readonly goalRevision?: number
 }
 
@@ -126,6 +130,7 @@ export interface PendingTeamTask extends TeamTaskFields {
   readonly status: 'pending'
   readonly ownerId?: never
   readonly lostCause?: never
+  readonly ownerGoalRevision?: never
 }
 
 /** A task its owner is working on. */
@@ -133,6 +138,7 @@ export interface InProgressTeamTask extends TeamTaskFields {
   readonly status: 'in_progress'
   readonly ownerId: SessionId
   readonly lostCause?: never
+  readonly ownerGoalRevision?: never
 }
 
 /** A finished task; the owner that held it when it completed stays recorded. */
@@ -140,6 +146,7 @@ export interface CompletedTeamTask extends TeamTaskFields {
   readonly status: 'completed'
   readonly ownerId: SessionId
   readonly lostCause?: never
+  readonly ownerGoalRevision?: never
 }
 
 /** A task whose owner is gone; the owner and the cause stay recorded. */
@@ -147,6 +154,12 @@ export interface LostTeamTask extends TeamTaskFields {
   readonly status: 'lost'
   readonly ownerId: SessionId
   readonly lostCause: TeamTaskLostCause
+  /**
+   * The goal revision the lost owner worked toward, recorded when the subject
+   * or description is edited while the task is lost; 1 is the text the task was
+   * created with. Absent while the goal is the one the owner had.
+   */
+  readonly ownerGoalRevision?: number
 }
 
 /** A tombstone. A task deleted by a build that allowed deleting owned tasks keeps its owner. */
@@ -154,12 +167,14 @@ export interface DeletedTeamTask extends TeamTaskFields {
   readonly status: 'deleted'
   readonly ownerId?: SessionId
   readonly lostCause?: never
+  readonly ownerGoalRevision?: never
 }
 
 /**
  * Whole durable task snapshot, one variant per status. The variants state
- * which of `ownerId` and `lostCause` a status carries, so a snapshot with the
- * wrong fields for its status does not compile and is refused when read.
+ * which of `ownerId`, `lostCause`, and `ownerGoalRevision` a status carries,
+ * so a snapshot with the wrong fields for its status does not compile and is
+ * refused when read.
  */
 export type TeamTaskSnapshot =
   | PendingTeamTask
@@ -217,6 +232,8 @@ export interface TeamTaskAttemptView {
 export interface OutstandingTeamTask {
   readonly id: TeamTaskId
   readonly subject: string
+  /** The member, or the child Session of a tracked run, that holds the task. */
+  readonly ownerId: SessionId
   /** The Lead, a roster name, or the child Session id of a tracked run. */
   readonly ownerName: string
   /** Whether the owner is currently running, so the task can still make progress on its own. */

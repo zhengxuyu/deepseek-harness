@@ -754,7 +754,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/experimental/agent-team/src/types.ts:257`](../packages/experimental/agent-team/src/types.ts)
+Source: [`packages/experimental/agent-team/src/types.ts:274`](../packages/experimental/agent-team/src/types.ts)
 
 <a id="deepseek-aidsh-experimental-agent-team-settlement"></a>
 

@@ -144,7 +144,6 @@ export function patchLayer(settings: RunSettings, home: string, settlement: numb
         {
           id: 'agent-team',
           name: '@deepseek-ai/dsh-experimental-agent-team',
-          ...settlement === undefined ? {} : { config: { trackSubagentRuns: true } },
         },
         {
           id: 'tool-agent-team',

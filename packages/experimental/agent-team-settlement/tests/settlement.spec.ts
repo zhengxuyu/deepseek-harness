@@ -312,6 +312,56 @@ describe('agent-team-settlement', () => {
     expect(ctx.agentTeams.getTask(lead, own!.id)).toMatchObject({ status: 'lost', lostCause: 'run-ended' })
   })
 
+  it('waits for the teammate the root gave the run\'s task to, and does not complete it from the root\'s turn', async () => {
+    const { ctx, lead, begin } = await setup(['hang', textResponse('done')])
+    const run = await begin(lead)
+    const [own] = ctx.agentTeams.listTasks(lead)
+    const mate = await spawnTeammate(ctx, lead, 'mate')
+    const given = await ctx.agentTeams.updateTask(lead, { taskId: own!.id, expectedRevision: own!.revision, action: 'reassign', owner: 'mate' })
+    lead.followup(prompt('the request'))
+    const settled = run.settle()
+    let done = false
+    void settled.then(() => { done = true })
+    await vi.waitFor(() => { expect(lead.status).toBe('idle') })
+    await new Promise(resolve => setTimeout(resolve, 100))
+    // The root's turn completed, but the task is the teammate's now and the teammate is still working.
+    expect(done).toBe(false)
+    expect(ctx.agentTeams.getTask(lead, own!.id)).toMatchObject({ status: 'in_progress', ownerName: 'mate', revision: given.revision })
+    await ctx.agentTeams.updateTask(mate, { taskId: own!.id, expectedRevision: given.revision, action: 'complete' })
+    await expect(settled).resolves.toEqual({ unsettled: [] })
+    ctx.agentTeams.interrupt(lead, 'mate')
+    await vi.waitFor(() => { expect(ctx.agents.get(mate.id)).toBeUndefined() }, { timeout: 5_000 })
+  })
+
+  it('keeps waiting when the root gives the run\'s task away while it is being closed', async () => {
+    const { ctx, lead, begin } = await setup(['hang', textResponse('done')], { deadlineMs: 1_500 })
+    const run = await begin(lead)
+    const [own] = ctx.agentTeams.listTasks(lead)
+    const mate = await spawnTeammate(ctx, lead, 'mate')
+    const markCompleted = ctx.agentTeams.markCompleted.bind(ctx.agentTeams)
+    const closing = vi.spyOn(ctx.agentTeams, 'markCompleted').mockImplementationOnce(async (caller, id, ownerId) => {
+      await ctx.agentTeams.updateTask(lead, { taskId: id, expectedRevision: own!.revision, action: 'reassign', owner: 'mate' })
+      return await markCompleted(caller, id, ownerId)
+    })
+    lead.followup(prompt('the request'))
+    await expect(run.settle()).resolves.toEqual({
+      unsettled: [{
+        id: own!.id, subject: 'the request', owner: 'mate', state: 'lost', reason: 'still in progress at the 1500 ms deadline',
+      }],
+    })
+    expect(closing).toHaveBeenCalledTimes(1)
+    expect(mate.status).not.toBe('running')
+    await vi.waitFor(() => { expect(ctx.agents.get(mate.id)).toBeUndefined() }, { timeout: 5_000 })
+  })
+
+  it('fails the settlement when the run\'s task cannot be recorded as completed', async () => {
+    const { ctx, lead, begin } = await setup([textResponse('done')])
+    const run = await begin(lead)
+    vi.spyOn(ctx.agentTeams, 'markCompleted').mockRejectedValue(new Error('the log is not writable'))
+    lead.followup(prompt('the request'))
+    await expect(run.settle()).rejects.toThrow('the log is not writable')
+  })
+
   it('reports a task by the state its owner left it in while it was being abandoned', async () => {
     const { ctx, lead, begin } = await setup([], { deadlineMs: 1 })
     const run = await begin(lead)
@@ -326,7 +376,7 @@ describe('agent-team-settlement', () => {
     const refused = new TeamError('left in progress first', 'TEAM_TASK_INVALID_TRANSITION')
     vi.spyOn(ctx.agentTeams, 'markLost').mockImplementation(async (caller, id, cause) => {
       if (id === completed!.id) {
-        await ctx.agentTeams.markCompleted(caller, id)
+        await ctx.agentTeams.markCompleted(caller, id, caller.id)
         throw refused
       }
       if (id === released!.id) {

@@ -106,13 +106,13 @@ const teamTaskFields = {
   attempts: z.array(teamTaskAttemptSchema).min(1).optional(),
 }
 
-// One strict member per status: each names exactly the owner and cause fields
+// One strict member per status: each names exactly the owner, cause, and owner-goal fields
 // that status carries, so a record with the fields of another status is refused.
 const teamTaskSnapshotSchema = z.discriminatedUnion('status', [
   z.object({ ...teamTaskFields, status: z.literal('pending') }).strict(),
   z.object({ ...teamTaskFields, status: z.literal('in_progress'), ownerId: sessionIdSchema }).strict(),
   z.object({ ...teamTaskFields, status: z.literal('completed'), ownerId: sessionIdSchema }).strict(),
-  z.object({ ...teamTaskFields, status: z.literal('lost'), ownerId: sessionIdSchema, lostCause: lostCauseSchema }).strict(),
+  z.object({ ...teamTaskFields, status: z.literal('lost'), ownerId: sessionIdSchema, lostCause: lostCauseSchema, ownerGoalRevision: positiveSafeInteger.optional() }).strict(),
   z.object({ ...teamTaskFields, status: z.literal('deleted'), ownerId: sessionIdSchema.optional() }).strict(),
 ]) as z.ZodType<TeamTaskSnapshot>
 

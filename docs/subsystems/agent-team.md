@@ -60,8 +60,9 @@ Every task event stores a complete snapshot. `revision` is the compare-and-set v
 ```ts type-equiv
 /**
  * Whole durable task snapshot, one variant per status. The variants state
- * which of `ownerId` and `lostCause` a status carries, so a snapshot with the
- * wrong fields for its status does not compile and is refused when read.
+ * which of `ownerId`, `lostCause`, and `ownerGoalRevision` a status carries,
+ * so a snapshot with the wrong fields for its status does not compile and is
+ * refused when read.
  */
 type TeamTaskSnapshot =
   | PendingTeamTask
@@ -71,7 +72,7 @@ type TeamTaskSnapshot =
   | DeletedTeamTask
 ```
 
-Every variant carries `id`, `revision`, `subject`, `description`, `blockedBy`, and `writeScopes`, and may carry `goalRevision` and `attempts`. The status decides the other two fields, and the `team/task` version 3 validation refuses a record that breaks a row of this table.
+Every variant carries `id`, `revision`, `subject`, `description`, `blockedBy`, and `writeScopes`, and may carry `goalRevision` and `attempts`. The status decides the owner and cause fields, and the `team/task` version 3 validation refuses a record that breaks a row of this table.
 
 | Status | Meaning | `ownerId` | `lostCause` |
 |---|---|---|---|
@@ -81,9 +82,9 @@ Every variant carries `id`, `revision`, `subject`, `description`, `blockedBy`, a
 | `lost` | its owner is gone | required: the owner that held it | required: `owner-failed` or `run-ended` |
 | `deleted` | retained tombstone | optional: kept from a `lost` task | absent |
 
-`lost` means only that the owner is gone. `owner-failed` records that the owning member's turn, or the owning tracked run, ended without completing the task; `run-ended` records that a run ended before the task finished. `lost` says nothing about whether finished work was accepted, so a later acceptance check needs its own record.
+`lost` means only that the owner is gone. `owner-failed` records that the owning member's turn, or the owning tracked run, ended without completing the task; `run-ended` records that a run ended before the task finished. `lost` says nothing about whether finished work was accepted, so a later acceptance check needs its own record. A `lost` task may also carry `ownerGoalRevision`, described below; no other status does.
 
-**Attempts and the goal.** A task records its earlier ownerships in `attempts`, in the order they ended. An attempt names the owner and how the ownership ended: `released` when the owner or the Lead returned the task to `pending`, `reassigned` when the Lead moved it to another member, and `completed` or `lost` when the task was reopened from that status, with the `lostCause` it had. `release`, `reassign`, and `reopen` accept a `reason`, which is recorded on the attempt the action ends and included in the message the previous owner receives. A reason is feedback on the work: it leaves `subject` and `description` unchanged. `edit` changes the goal, and an edit of `subject` or `description` sets `goalRevision` to the new revision; each attempt records the `goalRevision` it worked toward, so a reader can tell a second attempt at the same goal from an attempt at a changed one. Both fields are absent until they have something to record.
+**Attempts and the goal.** A task records its earlier ownerships in `attempts`, in the order they ended. An attempt names the owner and how the ownership ended: `released` when the owner or the Lead returned the task to `pending`, `reassigned` when the Lead moved it to another member, and `completed` or `lost` when the task was reopened from that status, with the `lostCause` it had. `release`, `reassign`, and `reopen` accept a `reason`, which is recorded on the attempt the action ends and included in the message the previous owner receives. A reason is feedback on the work: it leaves `subject` and `description` unchanged. `edit` changes the goal, and an edit of `subject` or `description` sets `goalRevision` to the new revision; each attempt records the `goalRevision` its owner worked toward, so a reader can tell a second attempt at the same goal from an attempt at a changed one. An attempt with no `goalRevision`, or with 1, worked toward the text the task was created with. A `lost` task can be edited before it is reopened, and its owner never saw that edit: the first such edit stores the goal the owner had as `ownerGoalRevision` on the lost task, and `reopen` records that value on the attempt. `attempts` and `goalRevision` are absent until they have something to record.
 
 Three groups of statuses are defined once, in `task-status.ts`, and every decision uses them. A task is *outstanding* while it is `in_progress`: a run that follows the board waits only on outstanding tasks. A task is *open* while it is `pending` or `lost`: its text, edges, and existence may change. A task is *started* while it is `in_progress` or `completed`: it is frozen, and every task in its `blockedBy` is `completed`. Views add owner name, readiness, lost cause, and write-scope overlap warnings without changing the durable snapshot.
 
@@ -116,12 +117,12 @@ A transition has one of two origins. A member action goes through `updateTask`, 
 | `createTask` | none | `pending` | member | board below `maxTasks` |
 | `beginTask` | none | `in_progress` | harness | the owner is the calling member; a tracked run's row is owned by the run's child Session |
 | `claim` | `pending` | `in_progress` | member | every blocker is `completed` |
-| `reassign` to a member | `pending`, `in_progress` | `in_progress` | Lead | every blocker is `completed`; the new owner is an active member other than the current owner |
-| `release` | `in_progress` | `pending` | owner or Lead | clears the owner |
-| `reassign` to nobody | `pending`, `in_progress` | `pending` | Lead | clears the owner; on a `pending` task it only increments the revision |
-| `complete` | `in_progress` | `completed` | owner or Lead | |
-| `markCompleted` | `in_progress` | `completed` | harness | |
-| `markLost` | `in_progress` | `lost` | harness | records `lostCause`; keeps the owner |
+| `reassign` to a member | `pending`, `in_progress` | `in_progress` | Lead | every blocker is `completed`; the new owner is an active member other than the current owner; the owner of an `in_progress` task is a member |
+| `release` | `in_progress` | `pending` | owner or Lead | clears the owner; the owner is a member |
+| `reassign` to nobody | `pending`, `in_progress` | `pending` | Lead | clears the owner; on a `pending` task it only increments the revision; the owner of an `in_progress` task is a member |
+| `complete` | `in_progress` | `completed` | owner or Lead | the owner is a member |
+| `markCompleted` | `in_progress` | `completed` | harness | the task is still held by the owner the harness names |
+| `markLost` | `in_progress` | `lost` | harness | records `lostCause`; keeps the owner; with `owner-failed`, the task is still held by the owner the harness names |
 | owner's turn failed | `in_progress` | `lost` | harness | a member's turn ended any way other than `completed` or `aborted`; every task it owns is lost as `owner-failed` |
 | `reopen` | `completed`, `lost` | `pending` | owner or Lead | clears the owner and `lostCause`; a `completed` task has no started dependent |
 | `edit`, `set_dependencies` | `pending`, `lost` | unchanged | Lead; also the owner of a `lost` task | |
@@ -131,7 +132,11 @@ A `pending` task has no owner, so only the Lead passes the "owner or Lead" check
 
 **Reopening a completed task.** `reopen` is refused with `TEAM_TASK_HAS_DEPENDENTS` while a task that names it in `blockedBy` is started. The dependent is released, unassigned, or reopened first, so a started task never has a blocker that is not completed. A `lost` task was never completed, so nothing that depends on it has started.
 
-**Taking a task from its owner.** The Lead can unassign, reassign, or complete a task another member is working on. Reassignment to another member is one transition, so the task is never `pending` between the two owners and no third member can claim it. After any of the three, the previous owner receives a Team mailbox message from the Lead that names the task and what happened and tells it to stop. A previous owner that holds no other in-progress task has its current turn interrupted, and reads the message when it next runs; one that holds another task is steered at its next step and keeps its turn. A tracked run has no mailbox and receives nothing. A message that cannot be queued is logged and does not undo the task change.
+**Taking a task from its owner.** The Lead can unassign, reassign, or complete a task another member is working on. Reassignment to another member is one transition, so the task is never `pending` between the two owners and no third member can claim it. After any of the three, the previous owner receives a Team mailbox message from the Lead that names the task and what happened and tells it to stop. A previous owner that holds no other in-progress task has its current turn interrupted, and reads the message when it next runs; one that holds another task is steered at its next step and keeps its turn. A message that cannot be queued is logged and does not undo the task change.
+
+**Harness transitions name the owner.** `markCompleted`, and `markLost` for an owner that failed, state which owner the harness observed. The transition is refused with `TEAM_TASK_INVALID_TRANSITION` when the task has since moved to another owner, so the end of one owner's turn or run never settles a task another member holds. `markLost` with `run-ended` names no owner: the end of the run loses the task whoever holds it.
+
+**The row of a tracked run.** A row recorded through `trackSubagentRuns` is owned by the run's child Session, which is not a member and has no mailbox. `release`, `reassign`, and `complete` on it are refused with `TEAM_TASK_INVALID_TRANSITION`; the row settles when the run ends. Once it is `lost`, the Lead can reopen it as an ordinary `pending` task.
 
 **A member turn that fails.** When an active member's turn ends with a stop reason other than `completed` or `aborted`, the tasks it owns become `lost` with `owner-failed`. A completed turn leaves them in progress, because a member may end a turn while it waits for a message. An aborted turn was interrupted on purpose and the member can continue.
 
@@ -157,16 +162,16 @@ flowchart TD
   report["report"]
 ```
 
-`run-ended` and `owner-failed` are `markLost` causes: the first marks every task still `in_progress`, the second only the run's task. "Others open" asks whether any task other than the run's is `in_progress`; "stalled" means a full `stallMs` passed with no Team change while no owner was running.
+`run-ended` and `owner-failed` are `markLost` causes: the first marks every task still `in_progress`, the second only the run's task. "Others open" asks whether any task is `in_progress` other than the run's task held by the root; "stalled" means a full `stallMs` passed with no Team change while no owner was running.
 
 | Outcome | Condition | Board record |
 |---|---|---|
-| Settled | no other task is `in_progress` and the root's latest turn completed | the run's task is `completed` |
+| Settled | no other task is `in_progress`, the root holds the run's task, and the root's latest turn completed | the run's task is `completed` |
 | Root failed | no other task is `in_progress` and the root's latest turn ended any other way, or no turn ran | the run's task is `lost`, `owner-failed` |
 | Deadline | `deadlineMs` passed since the run began | the root's turn is cancelled and every running teammate's turn is interrupted; every `in_progress` task is `lost`, `run-ended` |
 | Stall | no owner is running and no Team change arrived for `stallMs` | every `in_progress` task is `lost`, `run-ended` |
 
-While any owner is running, the wait lasts until the deadline, so a slow teammate is not a stall. When less than `stallMs` remains before the deadline, the wait ends at the deadline and the outcome is Deadline, not Stall. After the deadline the plugin waits at most `stopGraceMs` for the root and the interrupted teammates to become idle, then reports without them, so a run ends at most `deadlineMs + stopGraceMs` after it began.
+The root's turn settles the run's task only while the root holds it. When the root reassigned that task to a teammate, it is waited on like any other task and the teammate completes it. While any owner is running, the wait lasts until the deadline, so a slow teammate is not a stall. When less than `stallMs` remains before the deadline, the wait ends at the deadline and the outcome is Deadline, not Stall. After the deadline the plugin waits at most `stopGraceMs` for the root and the interrupted teammates to become idle, then reports without them, so a run ends at most `deadlineMs + stopGraceMs` after it began.
 
 **What is reported.** Every outcome ends with the same report: each task that this run created or changed and that is not `completed` or `deleted` when the run ends. That covers a task still `in_progress` because its `markLost` failed, a task that became `lost` during the run for any cause, and a `pending` task nobody started. A task that was on the board before the run began and still has the revision it had then is not reported; it belongs to an earlier run. Each row carries the task id, subject, owner, status, and reason. A task that leaves `in_progress` between the listing and its `markLost` keeps the status its owner gave it and is reported by that status.
 
@@ -269,9 +274,11 @@ async beginTask(caller: Agent, request: Pick<CreateTeamTaskRequest, 'subject' | 
  * Complete one in-progress task on behalf of the harness, bypassing member authorization.
  * @param caller - exact live Team member whose board holds the task.
  * @param id - task the harness observed finished.
+ * @param ownerId - the owner the harness observed finishing it. A task another owner holds is
+ *   refused with `TEAM_TASK_INVALID_TRANSITION`.
  * @returns the completed task view.
  */
-async markCompleted(caller: Agent, id: TeamTaskId): Promise<TeamTaskView>
+async markCompleted(caller: Agent, id: TeamTaskId, ownerId: SessionId): Promise<TeamTaskView>
 
 /**
  * List in-progress tasks on the caller's Team board with whether each owner is still running.
@@ -285,9 +292,11 @@ outstandingTasks(caller: Agent): OutstandingTeamTask[]
  * @param caller - exact live Team member whose board holds the task.
  * @param id - task whose owner can no longer finish it.
  * @param cause - why the harness gave up on the owner.
+ * @param ownerId - the owner the harness gave up on. A task another owner holds is refused with
+ *   `TEAM_TASK_INVALID_TRANSITION`. Omit it when the run itself ended, which loses the task whoever holds it.
  * @returns the lost task view.
  */
-async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause): Promise<TeamTaskView>
+async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause, ownerId?: SessionId): Promise<TeamTaskView>
 
 /**
  * Wait for the next Team-domain or member-status change.
@@ -329,7 +338,7 @@ tryMembership(agent: Agent): TeamMembership | undefined
 @Remote('view') remoteView(agent: Agent): TeamView
 ```
 
-Types: [Agent](core.md)
+Types: [Agent](core.md) · [SessionId](core.md)
 
 Source: [`packages/experimental/agent-team/src/index.ts`](../../packages/experimental/agent-team/src/index.ts)
 <!-- END GENERATED cordis-surface -->

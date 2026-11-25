@@ -756,7 +756,7 @@ export interface Config {
 }
 ```
 
-来源： [`packages/experimental/agent-team/src/types.ts:257`](../packages/experimental/agent-team/src/types.ts)
+来源： [`packages/experimental/agent-team/src/types.ts:274`](../packages/experimental/agent-team/src/types.ts)
 
 <a id="deepseek-aidsh-experimental-agent-team-settlement"></a>
 

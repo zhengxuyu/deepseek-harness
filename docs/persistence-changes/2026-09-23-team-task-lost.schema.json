@@ -6,7 +6,7 @@
       "kind": "event",
       "event": "team/task",
       "surface": false,
-      "digest": "13a93782792d1c77a95a3659e0fe98d56549e4d6dea3ab5ecb53c4fd6fd07388",
+      "digest": "b6c6715a42d588ef94092fa06603b51e146d4d1fe8402b0af9fdb4cebad1c0c5",
       "schema": {
         "root": 0,
         "nodes": [
@@ -397,6 +397,11 @@
                 "name": "lostCause",
                 "type": 22,
                 "optional": false
+              },
+              {
+                "name": "ownerGoalRevision",
+                "type": 6,
+                "optional": true
               },
               {
                 "name": "ownerId",

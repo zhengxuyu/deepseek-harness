@@ -60,8 +60,9 @@ interface TeamMessageSource {
 ```ts type-equiv
 /**
  * Whole durable task snapshot, one variant per status. The variants state
- * which of `ownerId` and `lostCause` a status carries, so a snapshot with the
- * wrong fields for its status does not compile and is refused when read.
+ * which of `ownerId`, `lostCause`, and `ownerGoalRevision` a status carries,
+ * so a snapshot with the wrong fields for its status does not compile and is
+ * refused when read.
  */
 type TeamTaskSnapshot =
   | PendingTeamTask
@@ -71,7 +72,7 @@ type TeamTaskSnapshot =
   | DeletedTeamTask
 ```
 
-每个变体都带有 `id`、`revision`、`subject`、`description`、`blockedBy` 和 `writeScopes`，并可以带有 `goalRevision` 和 `attempts`。其余两个字段由状态决定，`team/task` 版本 3 的校验会拒绝违反下表任何一行的记录。
+每个变体都带有 `id`、`revision`、`subject`、`description`、`blockedBy` 和 `writeScopes`，并可以带有 `goalRevision` 和 `attempts`。owner 与 cause 字段由状态决定，`team/task` 版本 3 的校验会拒绝违反下表任何一行的记录。
 
 | 状态 | 含义 | `ownerId` | `lostCause` |
 |---|---|---|---|
@@ -81,9 +82,9 @@ type TeamTaskSnapshot =
 | `lost` | owner 已不在 | 必有：当时持有它的 owner | 必有：`owner-failed` 或 `run-ended` |
 | `deleted` | 保留的 tombstone | 可选：由 `lost` 任务保留下来 | 没有 |
 
-`lost` 只表示 owner 已不在。`owner-failed` 记录的是持有任务的成员的 turn，或持有任务的被跟踪运行，没有完成任务就结束了；`run-ended` 记录的是运行在任务完成之前结束。`lost` 不说明已完成的工作是否被接受，因此以后的验收检查需要自己的记录。
+`lost` 只表示 owner 已不在。`owner-failed` 记录的是持有任务的成员的 turn，或持有任务的被跟踪运行，没有完成任务就结束了；`run-ended` 记录的是运行在任务完成之前结束。`lost` 不说明已完成的工作是否被接受，因此以后的验收检查需要自己的记录。`lost` 任务还可以带有下文说明的 `ownerGoalRevision`，其他状态都不带。
 
-**尝试记录与目标。** 任务在 `attempts` 里按结束的先后记录它之前的每一次持有。每条记录写明 owner 和这次持有如何结束：owner 或 Lead 把任务退回 `pending` 时是 `released`，Lead 把它转给另一个成员时是 `reassigned`，任务从 `completed` 或 `lost` 被 reopen 时是对应的状态，并带上当时的 `lostCause`。`release`、`reassign` 与 `reopen` 接受一个 `reason`，它记录在该动作结束的那次尝试上，也写进原 owner 收到的消息里。reason 是对工作的反馈：它不改变 `subject` 与 `description`。`edit` 改变的是目标，对 `subject` 或 `description` 的编辑会把 `goalRevision` 设为新的 revision；每次尝试记录它当时对应的 `goalRevision`，因此读者能分清"对同一个目标的第二次尝试"和"对改过的目标的尝试"。这两个字段在没有内容可记之前都不出现。
+**尝试记录与目标。** 任务在 `attempts` 里按结束的先后记录它之前的每一次持有。每条记录写明 owner 和这次持有如何结束：owner 或 Lead 把任务退回 `pending` 时是 `released`，Lead 把它转给另一个成员时是 `reassigned`，任务从 `completed` 或 `lost` 被 reopen 时是对应的状态，并带上当时的 `lostCause`。`release`、`reassign` 与 `reopen` 接受一个 `reason`，它记录在该动作结束的那次尝试上，也写进原 owner 收到的消息里。reason 是对工作的反馈：它不改变 `subject` 与 `description`。`edit` 改变的是目标，对 `subject` 或 `description` 的编辑会把 `goalRevision` 设为新的 revision；每次尝试记录它的 owner 当时对应的 `goalRevision`，因此读者能分清"对同一个目标的第二次尝试"和"对改过的目标的尝试"。没有 `goalRevision` 或值为 1 的尝试，对应的是任务创建时的文本。`lost` 任务可以在 reopen 之前被编辑，而它的 owner 从未见过这次编辑：第一次这样的编辑会把 owner 当时的目标存为 lost 任务上的 `ownerGoalRevision`，`reopen` 把这个值记到尝试上。`attempts` 与 `goalRevision` 在没有内容可记之前都不出现。
 
 三组状态在 `task-status.ts` 里只定义一次，所有判断都使用它们。任务处于 `in_progress` 时是 *outstanding*：跟随任务板的运行只等待 outstanding 任务。任务处于 `pending` 或 `lost` 时是 *open*：它的文本、边和存在与否都还可以改变。任务处于 `in_progress` 或 `completed` 时是 *started*：它被冻结，并且它的 `blockedBy` 中每个任务都是 `completed`。view 会添加 owner name、readiness、lost cause 和 write-scope 重叠警告，但不会改变持久快照。
 
@@ -116,12 +117,12 @@ stateDiagram-v2
 | `createTask` | 无 | `pending` | 成员 | 任务板未达到 `maxTasks` |
 | `beginTask` | 无 | `in_progress` | harness | owner 是调用它的成员；被跟踪运行的行由该运行的子 Session 持有 |
 | `claim` | `pending` | `in_progress` | 成员 | 每个 blocker 都是 `completed` |
-| `reassign` 给成员 | `pending`、`in_progress` | `in_progress` | Lead | 每个 blocker 都是 `completed`；新 owner 是 active 成员，且不是当前 owner |
-| `release` | `in_progress` | `pending` | owner 或 Lead | 清除 owner |
-| `reassign` 给无人 | `pending`、`in_progress` | `pending` | Lead | 清除 owner；对 `pending` 任务只递增 revision |
-| `complete` | `in_progress` | `completed` | owner 或 Lead | |
-| `markCompleted` | `in_progress` | `completed` | harness | |
-| `markLost` | `in_progress` | `lost` | harness | 记录 `lostCause`；保留 owner |
+| `reassign` 给成员 | `pending`、`in_progress` | `in_progress` | Lead | 每个 blocker 都是 `completed`；新 owner 是 active 成员，且不是当前 owner；`in_progress` 任务的 owner 是成员 |
+| `release` | `in_progress` | `pending` | owner 或 Lead | 清除 owner；owner 是成员 |
+| `reassign` 给无人 | `pending`、`in_progress` | `pending` | Lead | 清除 owner；对 `pending` 任务只递增 revision；`in_progress` 任务的 owner 是成员 |
+| `complete` | `in_progress` | `completed` | owner 或 Lead | owner 是成员 |
+| `markCompleted` | `in_progress` | `completed` | harness | 任务仍由 harness 指明的 owner 持有 |
+| `markLost` | `in_progress` | `lost` | harness | 记录 `lostCause`；保留 owner；原因为 `owner-failed` 时，任务仍由 harness 指明的 owner 持有 |
 | owner 的 turn 失败 | `in_progress` | `lost` | harness | 成员的 turn 以 `completed`、`aborted` 之外的方式结束；它持有的每个任务都以 `owner-failed` 变为 lost |
 | `reopen` | `completed`、`lost` | `pending` | owner 或 Lead | 清除 owner 与 `lostCause`；`completed` 任务没有 started 的依赖任务 |
 | `edit`、`set_dependencies` | `pending`、`lost` | 不变 | Lead；`lost` 任务的 owner 也可以 | |
@@ -131,7 +132,11 @@ stateDiagram-v2
 
 **重新打开已完成的任务。** 只要有在 `blockedBy` 中引用它的任务处于 started，`reopen` 就会以 `TEAM_TASK_HAS_DEPENDENTS` 被拒绝。要先释放、取消指派或重新打开那个依赖任务，这样 started 的任务就不会有未完成的 blocker。`lost` 任务从未完成，所以依赖它的任务都没有开始。
 
-**从 owner 手里收走任务。** Lead 可以对其他成员正在做的任务取消指派、重新指派或标成完成。重新指派给另一个成员是一次转换，任务在两个 owner 之间不会处于 `pending`，第三个成员无法在中间 claim 它。这三种操作之后，原 owner 都会收到一条来自 Lead 的 Team mailbox 消息，说明是哪个任务、发生了什么，并要求它停下。原 owner 如果没有其他进行中的任务，当前 turn 会被中断，它下次运行时读到这条消息；如果还持有其他任务，消息会在它的下一个 step 送达，turn 继续。被跟踪的运行没有 mailbox，不会收到消息。消息无法入队时只记录日志，不会撤销任务变更。
+**从 owner 手里收走任务。** Lead 可以对其他成员正在做的任务取消指派、重新指派或标成完成。重新指派给另一个成员是一次转换，任务在两个 owner 之间不会处于 `pending`，第三个成员无法在中间 claim 它。这三种操作之后，原 owner 都会收到一条来自 Lead 的 Team mailbox 消息，说明是哪个任务、发生了什么，并要求它停下。原 owner 如果没有其他进行中的任务，当前 turn 会被中断，它下次运行时读到这条消息；如果还持有其他任务，消息会在它的下一个 step 送达，turn 继续。消息无法入队时只记录日志，不会撤销任务变更。
+
+**harness 转换要指明 owner。** `markCompleted`，以及针对失败 owner 的 `markLost`，都要写明 harness 观察到的是哪个 owner。任务此后已经转给另一个 owner 时，转换以 `TEAM_TASK_INVALID_TRANSITION` 被拒绝，因此一个 owner 的 turn 或运行结束，不会结算另一个成员持有的任务。原因为 `run-ended` 的 `markLost` 不指明 owner：运行结束时，不论任务由谁持有都会丢失。
+
+**被跟踪运行的任务行。** 通过 `trackSubagentRuns` 记录的任务行由该运行的子 Session 持有，它不是成员，也没有 mailbox。对它的 `release`、`reassign` 与 `complete` 以 `TEAM_TASK_INVALID_TRANSITION` 被拒绝；这一行在运行结束时结算。它变为 `lost` 之后，Lead 可以把它 reopen 成普通的 `pending` 任务。
 
 **成员的 turn 失败。** active 成员的 turn 以 `completed`、`aborted` 之外的 stop reason 结束时，它持有的任务以 `owner-failed` 变为 `lost`。completed 的 turn 不改变这些任务，因为成员可能在等待消息时结束 turn。aborted 的 turn 是被有意中断的，成员可以继续。
 
@@ -157,16 +162,16 @@ flowchart TD
   report["report"]
 ```
 
-`run-ended` 与 `owner-failed` 是 `markLost` 的原因：前者标记所有仍处于 `in_progress` 的任务，后者只标记运行的任务。“others open”问的是除运行的任务外是否还有任务处于 `in_progress`；“stalled”表示在没有 owner 运行的情况下，完整的 `stallMs` 内没有 Team 变化。
+`run-ended` 与 `owner-failed` 是 `markLost` 的原因：前者标记所有仍处于 `in_progress` 的任务，后者只标记运行的任务。“others open”问的是除 Root 持有的运行任务外是否还有任务处于 `in_progress`；“stalled”表示在没有 owner 运行的情况下，完整的 `stallMs` 内没有 Team 变化。
 
 | 结果 | 条件 | 任务板记录 |
 |---|---|---|
-| 已结算 | 没有其他任务处于 `in_progress`，且 Root 最近的 turn 已完成 | 运行的任务为 `completed` |
+| 已结算 | 没有其他任务处于 `in_progress`，Root 持有运行的任务，且 Root 最近的 turn 已完成 | 运行的任务为 `completed` |
 | Root 失败 | 没有其他任务处于 `in_progress`，且 Root 最近的 turn 以其他方式结束，或没有 turn 运行过 | 运行的任务为 `lost`，`owner-failed` |
 | 截止时间 | 运行开始后已过 `deadlineMs` | Root 的 turn 被取消，每个正在运行的 teammate 的 turn 被中断；每个 `in_progress` 任务为 `lost`，`run-ended` |
 | 停滞 | 没有 owner 在运行，且 `stallMs` 内没有 Team 变化 | 每个 `in_progress` 任务为 `lost`，`run-ended` |
 
-只要有 owner 在运行，等待就持续到截止时间，因此较慢的 teammate 不算停滞。离截止时间不足 `stallMs` 时，等待在截止时间结束，结果是“截止时间”而不是“停滞”。截止时间之后，插件最多等待 `stopGraceMs` 让 Root 和被中断的 teammate 变为空闲，然后不再等它们直接报告，因此一次运行最晚在开始后 `deadlineMs + stopGraceMs` 结束。
+只有 Root 仍持有运行的任务时，才由 Root 的 turn 结算它。Root 把这个任务重新指派给 teammate 之后，它和其他任务一样被等待，由该 teammate 完成。只要有 owner 在运行，等待就持续到截止时间，因此较慢的 teammate 不算停滞。离截止时间不足 `stallMs` 时，等待在截止时间结束，结果是“截止时间”而不是“停滞”。截止时间之后，插件最多等待 `stopGraceMs` 让 Root 和被中断的 teammate 变为空闲，然后不再等它们直接报告，因此一次运行最晚在开始后 `deadlineMs + stopGraceMs` 结束。
 
 **报告的内容。** 每种结果都以同一份报告结束：本次运行创建或改动过、且运行结束时既不是 `completed` 也不是 `deleted` 的每个任务。这包括因 `markLost` 失败而仍处于 `in_progress` 的任务、运行期间因任何原因变为 `lost` 的任务，以及没有人开始的 `pending` 任务。运行开始前就在任务板上、且 revision 与当时相同的任务不报告；它属于更早的运行。每一行带有任务 id、subject、owner、状态和原因。在列出与 `markLost` 之间离开 `in_progress` 的任务保持 owner 给它的状态，并按那个状态报告。
 
@@ -269,9 +274,11 @@ async beginTask(caller: Agent, request: Pick<CreateTeamTaskRequest, 'subject' | 
  * Complete one in-progress task on behalf of the harness, bypassing member authorization.
  * @param caller - exact live Team member whose board holds the task.
  * @param id - task the harness observed finished.
+ * @param ownerId - the owner the harness observed finishing it. A task another owner holds is
+ *   refused with `TEAM_TASK_INVALID_TRANSITION`.
  * @returns the completed task view.
  */
-async markCompleted(caller: Agent, id: TeamTaskId): Promise<TeamTaskView>
+async markCompleted(caller: Agent, id: TeamTaskId, ownerId: SessionId): Promise<TeamTaskView>
 
 /**
  * List in-progress tasks on the caller's Team board with whether each owner is still running.
@@ -285,9 +292,11 @@ outstandingTasks(caller: Agent): OutstandingTeamTask[]
  * @param caller - exact live Team member whose board holds the task.
  * @param id - task whose owner can no longer finish it.
  * @param cause - why the harness gave up on the owner.
+ * @param ownerId - the owner the harness gave up on. A task another owner holds is refused with
+ *   `TEAM_TASK_INVALID_TRANSITION`. Omit it when the run itself ended, which loses the task whoever holds it.
  * @returns the lost task view.
  */
-async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause): Promise<TeamTaskView>
+async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause, ownerId?: SessionId): Promise<TeamTaskView>
 
 /**
  * Wait for the next Team-domain or member-status change.
@@ -329,7 +338,7 @@ tryMembership(agent: Agent): TeamMembership | undefined
 @Remote('view') remoteView(agent: Agent): TeamView
 ```
 
-Types: [Agent](core.zh.md)
+Types: [Agent](core.zh.md) · [SessionId](core.zh.md)
 
 Source: [`packages/experimental/agent-team/src/index.ts`](../../packages/experimental/agent-team/src/index.ts)
 <!-- END GENERATED cordis-surface -->

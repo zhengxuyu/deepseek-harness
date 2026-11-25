@@ -88,11 +88,10 @@ describe('standard case settings', () => {
     expect(patch).toContain('id: agent-team-settlement')
     expect(patch).toContain('deadlineMs: 900000')
     expect(patch).toContain('stopGraceMs: 60000')
-    expect(patch).toContain('trackSubagentRuns: true')
+    expect(patch).not.toContain('trackSubagentRuns')
     const without = patchLayer(resolveSettings({}), '/home', undefined)
     expect(without).toContain('id: tool-agent-team')
     expect(without).not.toContain('agent-team-settlement')
-    expect(without).not.toContain('trackSubagentRuns')
   })
 })
 

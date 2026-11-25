@@ -254,10 +254,12 @@ export class TeamService extends TypertRemoteService {
    * Complete one in-progress task on behalf of the harness, bypassing member authorization.
    * @param caller - exact live Team member whose board holds the task.
    * @param id - task the harness observed finished.
+   * @param ownerId - the owner the harness observed finishing it. A task another owner holds is
+   *   refused with `TEAM_TASK_INVALID_TRANSITION`.
    * @returns the completed task view.
    */
-  async markCompleted(caller: Agent, id: TeamTaskId): Promise<TeamTaskView> {
-    return await this.tasks.completeRun(this.roster.membership(caller).root, id)
+  async markCompleted(caller: Agent, id: TeamTaskId, ownerId: SessionId): Promise<TeamTaskView> {
+    return await this.tasks.completeRun(this.roster.membership(caller).root, id, ownerId)
   }
 
   /**
@@ -280,10 +282,12 @@ export class TeamService extends TypertRemoteService {
    * @param caller - exact live Team member whose board holds the task.
    * @param id - task whose owner can no longer finish it.
    * @param cause - why the harness gave up on the owner.
+   * @param ownerId - the owner the harness gave up on. A task another owner holds is refused with
+   *   `TEAM_TASK_INVALID_TRANSITION`. Omit it when the run itself ended, which loses the task whoever holds it.
    * @returns the lost task view.
    */
-  async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause): Promise<TeamTaskView> {
-    return await this.tasks.markLost(this.roster.membership(caller).root, id, cause)
+  async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause, ownerId?: SessionId): Promise<TeamTaskView> {
+    return await this.tasks.markLost(this.roster.membership(caller).root, id, cause, ownerId)
   }
 
   /**
@@ -360,9 +364,7 @@ export class TeamService extends TypertRemoteService {
    * notice that cannot be queued is logged and does not fail the change.
    */
   private async tellDisplacedOwner(lead: Agent, task: TeamTaskView, displaced: DisplacedOwner): Promise<void> {
-    const owner = this.journal.state(lead).members.find(member => member.id === displaced.ownerId)
-    // A tracked plain run owns its row under a child Session id and has no mailbox.
-    if (owner === undefined || owner.phase !== 'active') return
+    const owner = { id: displaced.ownerId, name: displaced.ownerName }
     const running = this.ctx.agents.get(owner.id)?.status === 'running'
     const why = displaced.reason === undefined ? '' : ` (reason: ${displaced.reason})`
     const text = `Task ${task.id} "${task.subject}" is no longer yours: the Lead ${displaced.action}${why}. `
@@ -416,8 +418,8 @@ export class TeamService extends TypertRemoteService {
     // A row that was never recorded was already reported at start.
     void run.task.then(
       view => info.stopReason === 'completed'
-        ? this.tasks.completeRun(run.root, view.id)
-        : this.tasks.markLost(run.root, view.id, 'owner-failed'),
+        ? this.tasks.completeRun(run.root, view.id, run.childId)
+        : this.tasks.markLost(run.root, view.id, 'owner-failed', run.childId),
       () => undefined,
     ).catch((error: unknown) => {
       this.ctx.logger.warn(`Agent Teams could not settle subagent run "${info.runId}": ${errorMessage(error)}`)

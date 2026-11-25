@@ -108,6 +108,12 @@ interface TeamServiceInternals {
 }
 
 /** White-box access follows the runtime owners so coverage does not widen the service API. */
+/** Update one task at whatever revision it currently has. */
+function taskUpdater(ctx: Context, lead: Agent, taskId: TeamTaskId) {
+  return (caller: Agent, request: Omit<Parameters<typeof ctx.agentTeams.updateTask>[1], 'taskId' | 'expectedRevision'>) =>
+    ctx.agentTeams.updateTask(caller, { taskId, expectedRevision: ctx.agentTeams.getTask(lead, taskId).revision, ...request })
+}
+
 function teamInternals(ctx: Context): TeamServiceInternals {
   return ctx.agentTeams as unknown as TeamServiceInternals
 }
@@ -1858,7 +1864,7 @@ describe('Lost tasks and the frozen executed graph', () => {
       taskId: task.id, expectedRevision: task.revision, action: 'claim',
     })
     expect(ctx.agentTeams.outstandingTasks(lead)).toEqual([
-      { id: task.id, subject: 'work', ownerName: 'worker', live: true },
+      { id: task.id, subject: 'work', ownerId: worker.id, ownerName: 'worker', live: true },
     ])
 
     await expect(ctx.agentTeams.markLost(lead, TeamTaskId('missing'), 'run-ended'))
@@ -1921,14 +1927,23 @@ describe('Lost tasks and the frozen executed graph', () => {
     expect(theirs).toMatchObject({ status: 'in_progress', ownerName: 'worker', revision: 1 })
     expect(durable(lead).tasks).toMatchObject([{ ownerId: lead.id }, { ownerId: worker.id }])
     expect(ctx.agentTeams.outstandingTasks(lead)).toEqual([
-      { id: own.id, subject: 'the request', ownerName: 'lead', live: false },
-      { id: theirs.id, subject: 'begun by worker', ownerName: 'worker', live: true },
+      { id: own.id, subject: 'the request', ownerId: lead.id, ownerName: 'lead', live: false },
+      { id: theirs.id, subject: 'begun by worker', ownerId: worker.id, ownerName: 'worker', live: true },
     ])
 
+    // What the harness observed about one owner does not settle a task another owner holds.
+    await expect(ctx.agentTeams.markCompleted(lead, theirs.id, lead.id)).rejects.toMatchObject({
+      code: 'TEAM_TASK_INVALID_TRANSITION',
+      message: 'team task "task-2" is now owned by "worker", not by the owner this transition is for',
+    })
+    await expect(ctx.agentTeams.markLost(lead, own.id, 'owner-failed', worker.id))
+      .rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
+    expect(ctx.agentTeams.listTasks(lead)).toMatchObject([{ status: 'in_progress' }, { status: 'in_progress' }])
+
     // The harness completes either member's task the same way, from any member of the Team.
-    expect(await ctx.agentTeams.markCompleted(worker, own.id)).toMatchObject({ status: 'completed', ownerName: 'lead' })
-    expect(await ctx.agentTeams.markCompleted(lead, theirs.id)).toMatchObject({ status: 'completed', ownerName: 'worker' })
-    await expect(ctx.agentTeams.markCompleted(lead, own.id))
+    expect(await ctx.agentTeams.markCompleted(worker, own.id, lead.id)).toMatchObject({ status: 'completed', ownerName: 'lead' })
+    expect(await ctx.agentTeams.markCompleted(lead, theirs.id, worker.id)).toMatchObject({ status: 'completed', ownerName: 'worker' })
+    await expect(ctx.agentTeams.markCompleted(lead, own.id, lead.id))
       .rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
     expect(ctx.agentTeams.outstandingTasks(lead)).toEqual([])
 
@@ -1943,7 +1958,7 @@ describe('Lost tasks and the frozen executed graph', () => {
       taskId: task.id, expectedRevision: task.revision, action: 'claim',
     })
     expect(ctx.agentTeams.outstandingTasks(lead)).toEqual([
-      { id: task.id, subject: 'own', ownerName: 'lead', live: false },
+      { id: task.id, subject: 'own', ownerId: lead.id, ownerName: 'lead', live: false },
     ])
     const completed = await ctx.agentTeams.updateTask(lead, {
       taskId: task.id, expectedRevision: claimed.revision, action: 'complete',
@@ -2066,7 +2081,7 @@ describe('Tracked subagent runs', () => {
     ctx.emit(carrier, 'subagent/start', remote)
     await vi.waitFor(() => {
       expect(ctx.agentTeams.outstandingTasks(lead)).toEqual([
-        { id: TeamTaskId('task-1'), subject: 'subagent run via acp', ownerName: 'remote-child', live: true },
+        { id: TeamTaskId('task-1'), subject: 'subagent run via acp', ownerId: SessionId('remote-child'), ownerName: 'remote-child', live: true },
       ])
     })
     // The board is full, so the next run cannot be recorded; its end is then silent.
@@ -2227,9 +2242,10 @@ describe('Taking a task from its owner', () => {
     expect(notices).toHaveLength(1)
   })
 
-  it('sends no notice for a tracked run, which has no mailbox', async () => {
-    const { ctx, lead } = await setup(['hang'], { trackSubagentRuns: true })
+  it('refuses to release, reassign, or complete the row of a tracked run, which settles when the run ends', async () => {
+    const { ctx, lead } = await setup(['hang', 'hang'], { trackSubagentRuns: true })
     vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    const worker = await waitRunning(ctx, (await spawn(ctx, lead, 'worker')).member.id)
     const controller = new AbortController()
     const run = await ctx.subagents.start('spawn', { prompt: content('delegated'), parent: lead, signal: controller.signal })
     const tracked = await vi.waitFor(() => {
@@ -2237,13 +2253,27 @@ describe('Taking a task from its owner', () => {
       expect(row).toBeDefined()
       return row!
     })
-    const send = vi.spyOn(teamInternals(ctx).mailbox, 'send')
-    await expect(ctx.agentTeams.updateTask(lead, { taskId: tracked.id, expectedRevision: tracked.revision, action: 'complete' }))
-      .resolves.toMatchObject({ status: 'completed', ownerName: run.id })
-    expect(send).not.toHaveBeenCalled()
+    for (const request of [
+      { action: 'release' }, { action: 'reassign' }, { action: 'reassign', owner: 'worker' }, { action: 'complete' },
+    ] as const) {
+      const refused = ctx.agentTeams.updateTask(lead, { taskId: tracked.id, expectedRevision: tracked.revision, ...request })
+      await expect(refused).rejects.toMatchObject({
+        code: 'TEAM_TASK_INVALID_TRANSITION',
+        message: `team task "task-1" records subagent run "${run.id}" and settles when that run ends; it cannot be released, reassigned, or completed by a member`,
+      })
+    }
+    expect(ctx.agentTeams.getTask(lead, tracked.id)).toMatchObject({ status: 'in_progress', revision: tracked.revision, ownerName: run.id })
+    // The run's ending settles its own row and no task of a member.
+    const held = await ctx.agentTeams.beginTask(worker, { subject: 'held by worker', description: 'held' })
     controller.abort()
     await run.result
     await run.dispose()
+    await vi.waitFor(() => {
+      expect(ctx.agentTeams.getTask(lead, tracked.id)).toMatchObject({ status: 'lost', lostCause: 'owner-failed', ownerName: run.id })
+    })
+    expect(ctx.agentTeams.getTask(lead, held.id)).toMatchObject({ status: 'in_progress', ownerName: 'worker' })
+    worker.cancel({ kind: 'parent' })
+    await waitNoAgent(ctx, worker.id)
   })
 
   it('keeps the task change when the notice cannot be queued', async () => {
@@ -2384,10 +2414,7 @@ describe('Task attempts and reasons', () => {
     const second = await waitRunning(ctx, (await spawn(ctx, lead, 'second')).member.id)
     const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
     expect('attempts' in task || 'goalRevision' in task).toBe(false)
-    const update = (caller: Agent, request: Omit<Parameters<typeof ctx.agentTeams.updateTask>[1], 'taskId' | 'expectedRevision'>) =>
-      ctx.agentTeams.updateTask(caller, {
-        taskId: task.id, expectedRevision: ctx.agentTeams.getTask(lead, task.id).revision, ...request,
-      })
+    const update = taskUpdater(ctx, lead, task.id)
 
     await update(first, { action: 'claim' })
     // The owner gives the task back without a reason.
@@ -2434,6 +2461,50 @@ describe('Task attempts and reasons', () => {
     second.cancel({ kind: 'parent' })
     await waitNoAgent(ctx, first.id)
     await waitNoAgent(ctx, second.id)
+  })
+
+  it('records the goal a lost owner worked toward when the goal is edited before the task is reopened', async () => {
+    const { ctx, lead } = await setup(['hang'])
+    const worker = await waitRunning(ctx, (await spawn(ctx, lead, 'worker')).member.id)
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
+    const update = taskUpdater(ctx, lead, task.id)
+
+    // The first owner only ever saw the text the task was created with.
+    await update(worker, { action: 'claim' })
+    await ctx.agentTeams.markLost(lead, task.id, 'owner-failed', worker.id)
+    await update(lead, { action: 'edit', writeScopes: ['src'] })
+    expect('ownerGoalRevision' in durable(lead).tasks[0]!).toBe(false)
+    await update(lead, { action: 'edit', description: 'work; the first try failed on the parser' })
+    const second = await update(lead, { action: 'edit', description: 'work on the parser only' })
+    expect(durable(lead).tasks[0]).toMatchObject({ status: 'lost', goalRevision: second.revision, ownerGoalRevision: 1 })
+    const reopened = await update(lead, { action: 'reopen' })
+    expect(reopened.attempts).toEqual([{ ownerName: 'worker', ended: 'lost', lostCause: 'owner-failed', goalRevision: 1 }])
+    expect('ownerGoalRevision' in durable(lead).tasks[0]!).toBe(false)
+
+    // The second owner worked toward the edited text, and an edit made after it was lost does not change that.
+    await update(lead, { action: 'claim' })
+    await ctx.agentTeams.markLost(lead, task.id, 'run-ended')
+    const third = await update(lead, { action: 'edit', subject: 'parser' })
+    expect(durable(lead).tasks[0]).toMatchObject({ goalRevision: third.revision, ownerGoalRevision: second.revision })
+    // The tombstone of a lost task keeps the goal and drops what only a lost task carries.
+    const deleted = await update(lead, { action: 'delete' })
+    expect(deleted).toMatchObject({ status: 'deleted', goalRevision: third.revision })
+    const tombstone = durable(lead).tasks[0]!
+    expect('ownerGoalRevision' in tombstone || 'lostCause' in tombstone).toBe(false)
+
+    // Reopened after an edit, the same owner's attempt names the goal from before the edit.
+    const again = await ctx.agentTeams.createTask(lead, { subject: 'again', description: 'again' })
+    const edited = await ctx.agentTeams.updateTask(lead, { taskId: again.id, expectedRevision: again.revision, action: 'edit', description: 'again, v2' })
+    await ctx.agentTeams.updateTask(lead, { taskId: again.id, expectedRevision: edited.revision, action: 'claim' })
+    await ctx.agentTeams.markLost(lead, again.id, 'run-ended')
+    const changed = await ctx.agentTeams.updateTask(lead, { taskId: again.id, expectedRevision: edited.revision + 2, action: 'edit', description: 'again, v3' })
+    const back = await ctx.agentTeams.updateTask(lead, { taskId: again.id, expectedRevision: changed.revision, action: 'reopen' })
+    expect(back).toMatchObject({
+      goalRevision: changed.revision,
+      attempts: [{ ownerName: 'lead', ended: 'lost', lostCause: 'run-ended', goalRevision: edited.revision }],
+    })
+    worker.cancel({ kind: 'parent' })
+    await waitNoAgent(ctx, worker.id)
   })
 
   it('accepts a reason only on the actions that can end an ownership', async () => {

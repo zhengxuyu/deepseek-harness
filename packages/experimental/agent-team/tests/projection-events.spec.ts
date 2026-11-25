@@ -199,12 +199,13 @@ describe('Agent Teams projection events', () => {
     }
   })
 
-  it('accepts at version 3 only the owner and cause fields the status carries', () => {
+  it('accepts at version 3 only the owner, cause, and owner-goal fields the status carries', () => {
     const owner = SessionId('owner')
     for (const valid of [
       taskV3({ status: 'pending' }),
       taskV3({ status: 'in_progress', ownerId: owner }),
       taskV3({ status: 'completed', ownerId: owner }),
+      taskV3({ status: 'lost', ownerId: owner, lostCause: 'run-ended', goalRevision: 3, ownerGoalRevision: 1 }),
       taskV3({ status: 'deleted' }),
       taskV3({ status: 'deleted', ownerId: owner }),
     ]) {
@@ -217,6 +218,7 @@ describe('Agent Teams projection events', () => {
       taskV3({ status: 'completed' }),
       taskV3({ status: 'completed', ownerId: owner, lostCause: 'run-ended' }),
       taskV3({ status: 'lost', lostCause: 'run-ended' }),
+      taskV3({ status: 'completed', ownerId: owner, ownerGoalRevision: 1 }),
       taskV3({ status: 'deleted', ownerId: owner, lostCause: 'run-ended' }),
     ]) {
       expect(() => projectTeam(ROOT, [event('team/task', { version: 3, teamId: TEAM, task: invalid }, SessionSeq(0))]))

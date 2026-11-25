@@ -64,7 +64,7 @@ The [format references](persistence-changes/historical-formats/README.md) cover 
 | `event:team/member` | event | `4fb59762612c3e3ac3a3bd4f84c9c148d3c3893bd422ba2b201cc039fabd49bc` | [`{ type: "team/member" }`](#persistence-type-sha256-4fb59762612c3e3ac3a3bd4f84c9c148d3c3893bd422ba2b201cc039fabd49bc) |
 | `event:team/message/delivered` | event | `48f9c19417a1abbedfa59f4667bba36b93ac2db407adf5e84cb3ba0de30942cb` | [`{ type: "team/message/delivered" }`](#persistence-type-sha256-48f9c19417a1abbedfa59f4667bba36b93ac2db407adf5e84cb3ba0de30942cb) |
 | `event:team/message/queued` | event | `21fb6a90d5068f6a0003b7ab316ed2f56342477146a65c00db0f13c4d8df667d` | [`{ type: "team/message/queued" }`](#persistence-type-sha256-21fb6a90d5068f6a0003b7ab316ed2f56342477146a65c00db0f13c4d8df667d) |
-| `event:team/task` | event | `13a93782792d1c77a95a3659e0fe98d56549e4d6dea3ab5ecb53c4fd6fd07388` | [`{ type: "team/task" }`](#persistence-type-sha256-13a93782792d1c77a95a3659e0fe98d56549e4d6dea3ab5ecb53c4fd6fd07388) |
+| `event:team/task` | event | `b6c6715a42d588ef94092fa06603b51e146d4d1fe8402b0af9fdb4cebad1c0c5` | [`{ type: "team/task" }`](#persistence-type-sha256-b6c6715a42d588ef94092fa06603b51e146d4d1fe8402b0af9fdb4cebad1c0c5) |
 | `event:todo/write` | event | `b978cff734e62143eb56c9125423ec275405eda969802d42aaf73ecb987d3b26` | [`{ type: "todo/write" }`](#persistence-type-sha256-b978cff734e62143eb56c9125423ec275405eda969802d42aaf73ecb987d3b26) |
 | `event:tool-workflow/agent-end` | event | `babf9ee4d1af62bf6c3a8103737f7a5e4e78ce179be835ce05a38803e15884b7` | [`{ type: "tool-workflow/agent-end" }`](#persistence-type-sha256-babf9ee4d1af62bf6c3a8103737f7a5e4e78ce179be835ce05a38803e15884b7) |
 | `event:tool-workflow/agent-start` | event | `5f26a6c20b37632f8f57729d171c671def4683d994ac6257a8dffcd855101627` | [`{ type: "tool-workflow/agent-start" }`](#persistence-type-sha256-5f26a6c20b37632f8f57729d171c671def4683d994ac6257a8dffcd855101627) |
@@ -975,7 +975,7 @@ Source: [`packages/core/session/src/types.ts:330`](../packages/core/session/src/
 
 Types: [TeamId](subsystems/agent-team.md) · [TeamMemberSnapshot](subsystems/agent-team.md)
 
-Source: [`packages/experimental/agent-team/src/types.ts:349`](../packages/experimental/agent-team/src/types.ts)
+Source: [`packages/experimental/agent-team/src/types.ts:366`](../packages/experimental/agent-team/src/types.ts)
 
 <a id="teammessagedelivered--log-only"></a>
 
@@ -993,7 +993,7 @@ Source: [`packages/experimental/agent-team/src/types.ts:349`](../packages/experi
 
 Types: [TeamId](subsystems/agent-team.md) · [TeamMessageId](subsystems/agent-team.md)
 
-Source: [`packages/experimental/agent-team/src/types.ts:360`](../packages/experimental/agent-team/src/types.ts)
+Source: [`packages/experimental/agent-team/src/types.ts:377`](../packages/experimental/agent-team/src/types.ts)
 
 <a id="teammessagequeued--log-only"></a>
 
@@ -1006,7 +1006,7 @@ Source: [`packages/experimental/agent-team/src/types.ts:360`](../packages/experi
 
 Types: [TeamId](subsystems/agent-team.md) · [TeamMessageSnapshot](subsystems/agent-team.md)
 
-Source: [`packages/experimental/agent-team/src/types.ts:358`](../packages/experimental/agent-team/src/types.ts)
+Source: [`packages/experimental/agent-team/src/types.ts:375`](../packages/experimental/agent-team/src/types.ts)
 
 <a id="teamtask--log-only"></a>
 
@@ -1024,7 +1024,7 @@ Source: [`packages/experimental/agent-team/src/types.ts:358`](../packages/experi
 
 Types: [TeamId](subsystems/agent-team.md) · [TeamTaskSnapshot](subsystems/agent-team.md)
 
-Source: [`packages/experimental/agent-team/src/types.ts:354`](../packages/experimental/agent-team/src/types.ts)
+Source: [`packages/experimental/agent-team/src/types.ts:371`](../packages/experimental/agent-team/src/types.ts)
 
 ### `todo/*`
 
@@ -3198,7 +3198,7 @@ Sources: [`packages/compaction/compaction/src/checkpoint.ts:22`](../packages/com
 
 SHA-256: `7c59428517dc8a8f7527d896731d55f15fbcb8ca5bcc3906a337323394af55f3`
 
-Sources: [`packages/experimental/agent-team/src/types.ts:139`](../packages/experimental/agent-team/src/types.ts)
+Sources: [`packages/experimental/agent-team/src/types.ts:145`](../packages/experimental/agent-team/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3342,7 +3342,7 @@ Sources: [`packages/web/web-search-deepseek/src/provider.ts:55`](../packages/web
 
 SHA-256: `d7e9ecfd8f64f2232342c34804dc843f2c7d1e0741474905b2de6ab0f7ca14c7`
 
-Sources: [`packages/experimental/agent-team/src/types.ts:153`](../packages/experimental/agent-team/src/types.ts)
+Sources: [`packages/experimental/agent-team/src/types.ts:166`](../packages/experimental/agent-team/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3800,7 +3800,7 @@ Array of [`ImageOffloadTarget`](#persistence-type-sha256-1cde1bedde79c5e8a56aee9
 
 SHA-256: `5b9ab8211435cb146aee5f2b6804dac10b6fdc33d1bc5d4aee7bab70f4bd5fc5`
 
-Sources: [`packages/experimental/agent-team/src/types.ts:132`](../packages/experimental/agent-team/src/types.ts)
+Sources: [`packages/experimental/agent-team/src/types.ts:137`](../packages/experimental/agent-team/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3974,7 +3974,7 @@ Sources: [`packages/llm/llm-retry/src/types.ts:43`](../packages/llm/llm-retry/sr
 | `step` | required | `number` |
 | `turn` | required | `number` |
 
-<a id="persistence-type-sha256-90a1494b725487c0f7d3a36737aeda033c438c80e799c86815a5bcac0ab842ac"></a>
+<a id="persistence-type-sha256-4e59bfdfb07e040885f7488cc9283c68d23238ecbdcb67f52960ab4ef794e877"></a>
 
 <a id="persistence-type-lostteamtask"></a>
 
@@ -3982,9 +3982,9 @@ Sources: [`packages/llm/llm-retry/src/types.ts:43`](../packages/llm/llm-retry/sr
 
 ### `LostTeamTask`
 
-SHA-256: `90a1494b725487c0f7d3a36737aeda033c438c80e799c86815a5bcac0ab842ac`
+SHA-256: `4e59bfdfb07e040885f7488cc9283c68d23238ecbdcb67f52960ab4ef794e877`
 
-Sources: [`packages/experimental/agent-team/src/types.ts:146`](../packages/experimental/agent-team/src/types.ts)
+Sources: [`packages/experimental/agent-team/src/types.ts:153`](../packages/experimental/agent-team/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3994,6 +3994,7 @@ Sources: [`packages/experimental/agent-team/src/types.ts:146`](../packages/exper
 | `goalRevision` | optional | `number` |
 | `id` | required | `string` |
 | `lostCause` | required | [`TeamTaskLostCause`](#persistence-type-sha256-9c6db63046b0b1efca43992dc54fb5af9b657e51830af7b6b95a1c1d7f6dd818) |
+| `ownerGoalRevision` | optional | `number` |
 | `ownerId` | required | `string` |
 | `revision` | required | `number` |
 | `status` | required | `"lost"` |
@@ -4327,7 +4328,7 @@ One of:
 
 SHA-256: `5da7d7231352eb49219922d33de37d652b054dc7e56133b5e32b8b1988649b6b`
 
-Sources: [`packages/experimental/agent-team/src/types.ts:125`](../packages/experimental/agent-team/src/types.ts)
+Sources: [`packages/experimental/agent-team/src/types.ts:129`](../packages/experimental/agent-team/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -4918,7 +4919,7 @@ Sources: [`packages/experimental/agent-team/src/types.ts:47`](../packages/experi
 
 SHA-256: `2eafefdc6f79a4922d68a787a09eaf4dd2b2369c3777fba4c05e800b5678ac8e`
 
-Sources: [`packages/experimental/agent-team/src/types.ts:233`](../packages/experimental/agent-team/src/types.ts)
+Sources: [`packages/experimental/agent-team/src/types.ts:250`](../packages/experimental/agent-team/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -4938,7 +4939,7 @@ Sources: [`packages/experimental/agent-team/src/types.ts:233`](../packages/exper
 
 SHA-256: `2152caf1a71e588e4df2358a806dea24936c1c47131134f01a12939d12cdc0c0`
 
-Sources: [`packages/experimental/agent-team/src/types.ts:242`](../packages/experimental/agent-team/src/types.ts)
+Sources: [`packages/experimental/agent-team/src/types.ts:259`](../packages/experimental/agent-team/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -5012,7 +5013,7 @@ One of:
 - `"owner-failed"`
 - `"run-ended"`
 
-<a id="persistence-type-sha256-cab26022fc1ca04d60a0511bbb5679c580d707f3023f20fcc96140f61af35e18"></a>
+<a id="persistence-type-sha256-03ea5a975afab65fad75dbb145c4ada8ba20e983849ab32dc7d99d3eda87c8f5"></a>
 
 <a id="persistence-type-packagesexperimentalagent-teamsrctypeststeamtasksnapshot"></a>
 
@@ -5020,13 +5021,13 @@ One of:
 
 ### `TeamTaskSnapshot`
 
-SHA-256: `cab26022fc1ca04d60a0511bbb5679c580d707f3023f20fcc96140f61af35e18`
+SHA-256: `03ea5a975afab65fad75dbb145c4ada8ba20e983849ab32dc7d99d3eda87c8f5`
 
-Sources: [`packages/experimental/agent-team/src/types.ts:164`](../packages/experimental/agent-team/src/types.ts)
+Sources: [`packages/experimental/agent-team/src/types.ts:179`](../packages/experimental/agent-team/src/types.ts)
 
 One of:
 
-- [`LostTeamTask`](#persistence-type-sha256-90a1494b725487c0f7d3a36737aeda033c438c80e799c86815a5bcac0ab842ac)
+- [`LostTeamTask`](#persistence-type-sha256-4e59bfdfb07e040885f7488cc9283c68d23238ecbdcb67f52960ab4ef794e877)
 - [`CompletedTeamTask`](#persistence-type-sha256-7c59428517dc8a8f7527d896731d55f15fbcb8ca5bcc3906a337323394af55f3)
 - [`InProgressTeamTask`](#persistence-type-sha256-5b9ab8211435cb146aee5f2b6804dac10b6fdc33d1bc5d4aee7bab70f4bd5fc5)
 - [`DeletedTeamTask`](#persistence-type-sha256-d7e9ecfd8f64f2232342c34804dc843f2c7d1e0741474905b2de6ab0f7ca14c7)
@@ -5042,7 +5043,7 @@ One of:
 
 SHA-256: `51edec100659da3a9bd9c3f6ba1180f5e64ec9a1585e5057080df45c180bd357`
 
-Sources: [`packages/experimental/agent-team/src/types.ts:176`](../packages/experimental/agent-team/src/types.ts)
+Sources: [`packages/experimental/agent-team/src/types.ts:191`](../packages/experimental/agent-team/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -5646,6 +5647,17 @@ One of:
 - `"error"`
 - `"success"`
 
+<a id="persistence-type-sha256-24dcca151a7baf1977e9a49c5951b2019d4dc7caa7696d92e6b64276d7b60aa2"></a>
+
+### `union (2 variants)`
+
+SHA-256: `24dcca151a7baf1977e9a49c5951b2019d4dc7caa7696d92e6b64276d7b60aa2`
+
+One of:
+
+- [`{ task, teamId, version }`](#persistence-type-sha256-a40d12070f6f4a124f32fb3cc86e7857554702e32f0eda3080a25c4b9ac9b18c)
+- [`{ task, teamId, version }`](#persistence-type-sha256-50957d069ff497ac950fa2ad78f56c058f26ae2e304e50d85488138d387c8f23)
+
 <a id="persistence-type-sha256-50cf02d875f8a1f1411f4a6fbcffab9120ccef5f74a47331fbf29480e5f68f48"></a>
 
 ### `union (2 variants)`
@@ -5667,17 +5679,6 @@ One of:
 
 - [`{ compactionId, llmStreamCall, maxTokens?, model, … }`](#persistence-type-sha256-a99ec0993c62c058e50af9f68922202a3b54f5e259bc2abf1915a73381d2316d)
 - [`{ compactionId, maxTokens?, model, provider, … }`](#persistence-type-sha256-576a2de8355eb09850963ff5953420b172e274d9283666eb7d889097db120796)
-
-<a id="persistence-type-sha256-d5dcf4dbd4a423467abf3e9426e55d8105539e6909e1a8452d358671ff0e85de"></a>
-
-### `union (2 variants)`
-
-SHA-256: `d5dcf4dbd4a423467abf3e9426e55d8105539e6909e1a8452d358671ff0e85de`
-
-One of:
-
-- [`{ task, teamId, version }`](#persistence-type-sha256-a40d12070f6f4a124f32fb3cc86e7857554702e32f0eda3080a25c4b9ac9b18c)
-- [`{ task, teamId, version }`](#persistence-type-sha256-2716f3e3a0fc7353736463c874ae47fadb115b0e9a024afddd0267fae16e392a)
 
 <a id="persistence-type-sha256-5776e5553ff2dfe3f5bc202dbb1e7c9f93e35a531aebb7764c23b2b6153b2ccc"></a>
 
@@ -7667,7 +7668,7 @@ Sources: [`packages/web/web-search-deepseek/src/provider.ts:61`](../packages/web
 
 SHA-256: `b1ebd5cda47d90d980bb05bffc3f970c51537b9aff15b3bc3d639811727741b1`
 
-Sources: [`packages/experimental/agent-team/src/types.ts:349`](../packages/experimental/agent-team/src/types.ts)
+Sources: [`packages/experimental/agent-team/src/types.ts:366`](../packages/experimental/agent-team/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -7695,7 +7696,7 @@ Sources: [`packages/core/session/src/types.ts:330`](../packages/core/session/src
 
 SHA-256: `ea08ec1df0c33108fd03345b9af199cf04dea450aa045d3c683f216311403403`
 
-Sources: [`packages/experimental/agent-team/src/types.ts:358`](../packages/experimental/agent-team/src/types.ts)
+Sources: [`packages/experimental/agent-team/src/types.ts:375`](../packages/experimental/agent-team/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -7709,7 +7710,7 @@ Sources: [`packages/experimental/agent-team/src/types.ts:358`](../packages/exper
 
 SHA-256: `0bcfaf5566d271028429ac7b562cb59053c9d78b8ae14708c35fac835108d1b1`
 
-Sources: [`packages/experimental/agent-team/src/types.ts:360`](../packages/experimental/agent-team/src/types.ts)
+Sources: [`packages/experimental/agent-team/src/types.ts:377`](../packages/experimental/agent-team/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -7849,17 +7850,17 @@ Sources: [`packages/compaction/compaction-image-offload/src/projection.ts:25`](.
 |---|---|---|
 | `targets` | required | [`ImageOffloadTarget[]`](#persistence-type-sha256-9e2c06d8653585b33d72d5c1a80da79c8a24a88c284409bca15cc0f0ead5ebfb) |
 
-<a id="persistence-type-sha256-2716f3e3a0fc7353736463c874ae47fadb115b0e9a024afddd0267fae16e392a"></a>
+<a id="persistence-type-sha256-50957d069ff497ac950fa2ad78f56c058f26ae2e304e50d85488138d387c8f23"></a>
 
 ### `{ task, teamId, version }`
 
-SHA-256: `2716f3e3a0fc7353736463c874ae47fadb115b0e9a024afddd0267fae16e392a`
+SHA-256: `50957d069ff497ac950fa2ad78f56c058f26ae2e304e50d85488138d387c8f23`
 
-Sources: [`packages/experimental/agent-team/src/types.ts:356`](../packages/experimental/agent-team/src/types.ts)
+Sources: [`packages/experimental/agent-team/src/types.ts:373`](../packages/experimental/agent-team/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
-| `task` | required | [`TeamTaskSnapshot`](#persistence-type-sha256-cab26022fc1ca04d60a0511bbb5679c580d707f3023f20fcc96140f61af35e18) |
+| `task` | required | [`TeamTaskSnapshot`](#persistence-type-sha256-03ea5a975afab65fad75dbb145c4ada8ba20e983849ab32dc7d99d3eda87c8f5) |
 | `teamId` | required | `string` |
 | `version` | required | `3` |
 
@@ -7869,7 +7870,7 @@ Sources: [`packages/experimental/agent-team/src/types.ts:356`](../packages/exper
 
 SHA-256: `a40d12070f6f4a124f32fb3cc86e7857554702e32f0eda3080a25c4b9ac9b18c`
 
-Sources: [`packages/experimental/agent-team/src/types.ts:355`](../packages/experimental/agent-team/src/types.ts)
+Sources: [`packages/experimental/agent-team/src/types.ts:372`](../packages/experimental/agent-team/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -8696,17 +8697,17 @@ SHA-256: `21fb6a90d5068f6a0003b7ab316ed2f56342477146a65c00db0f13c4d8df667d`
 | `time` | required | `number` |
 | `type` | required | `"team/message/queued"` |
 
-<a id="persistence-type-sha256-13a93782792d1c77a95a3659e0fe98d56549e4d6dea3ab5ecb53c4fd6fd07388"></a>
+<a id="persistence-type-sha256-b6c6715a42d588ef94092fa06603b51e146d4d1fe8402b0af9fdb4cebad1c0c5"></a>
 
 <a id="persistence-type-eventteamtask"></a>
 
 ### `{ type: "team/task" }`
 
-SHA-256: `13a93782792d1c77a95a3659e0fe98d56549e4d6dea3ab5ecb53c4fd6fd07388`
+SHA-256: `b6c6715a42d588ef94092fa06603b51e146d4d1fe8402b0af9fdb4cebad1c0c5`
 
 | Property | Presence | Type |
 |---|---|---|
-| `data` | required | [`union (2 variants)`](#persistence-type-sha256-d5dcf4dbd4a423467abf3e9426e55d8105539e6909e1a8452d358671ff0e85de) |
+| `data` | required | [`union (2 variants)`](#persistence-type-sha256-24dcca151a7baf1977e9a49c5951b2019d4dc7caa7696d92e6b64276d7b60aa2) |
 | `ignorable` | optional | `true` |
 | `seq` | required | `number` |
 | `time` | required | `number` |

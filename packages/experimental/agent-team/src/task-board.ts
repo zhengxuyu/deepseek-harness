@@ -46,25 +46,28 @@ export interface TrackedRunRequest {
   readonly ownerId: SessionId
 }
 
-/** The fields a transition carries over unchanged, with the status, owner, and cause removed. */
+/** The fields a transition carries over unchanged, with the status, owner, cause, and owner goal removed. */
 function fields(task: TeamTaskSnapshot): TeamTaskFields {
-  const { status: _status, ownerId: _ownerId, lostCause: _lostCause, ...rest } = task
+  const { status: _status, ownerId: _ownerId, lostCause: _lostCause, ownerGoalRevision: _ownerGoalRevision, ...rest } = task
   return rest
 }
 
 /**
  * The carried-over fields with the current ownership closed as one more
- * attempt. A task with no owner has no ownership to close.
+ * attempt. A task with no owner has no ownership to close. The attempt records
+ * the goal its owner worked toward, which for a lost task edited since is the
+ * goal from before the edit.
  */
 function closed(task: TeamTaskSnapshot, ended: TeamTaskAttemptEnd, reason: string | undefined): TeamTaskFields {
   const rest = fields(task)
   if (task.ownerId === undefined) return rest
+  const goalRevision = task.ownerGoalRevision ?? task.goalRevision
   const attempt: TeamTaskAttempt = {
     ownerId: task.ownerId,
     ended,
     ...task.lostCause === undefined ? {} : { lostCause: task.lostCause },
     ...reason === undefined ? {} : { reason },
-    ...task.goalRevision === undefined ? {} : { goalRevision: task.goalRevision },
+    ...goalRevision === undefined ? {} : { goalRevision },
   }
   return { ...rest, attempts: [...task.attempts ?? [], attempt] }
 }
@@ -95,6 +98,8 @@ function deleted(task: TeamTaskSnapshot): DeletedTeamTask {
  */
 export interface DisplacedOwner {
   readonly ownerId: SessionId
+  /** The owner's roster name; only a member's task can be taken. */
+  readonly ownerName: string
   /** Whether the owner holds no other in-progress task after the change. */
   readonly idle: boolean
   /** What the acting member did, completing the sentence "the Lead ...". */
@@ -158,10 +163,11 @@ export class TeamTaskBoard {
    * Complete one in-progress task from the harness, bypassing member authorization.
    * @param root - exact live Team Lead whose log holds the task.
    * @param id - task the harness observed finished.
+   * @param ownerId - the owner the harness observed finishing it; the task is refused when another owner holds it.
    * @returns the completed task view.
    */
-  async completeRun(root: Agent, id: TeamTaskId): Promise<TeamTaskView> {
-    return this.transition(root, id, current => ({ ...fields(current), status: 'completed', ownerId: current.ownerId }))
+  async completeRun(root: Agent, id: TeamTaskId, ownerId: SessionId): Promise<TeamTaskView> {
+    return this.transition(root, id, ownerId, current => ({ ...fields(current), status: 'completed', ownerId: current.ownerId }))
   }
 
   /**
@@ -169,10 +175,12 @@ export class TeamTaskBoard {
    * @param root - exact live Team Lead whose log holds the task.
    * @param id - task whose owner can no longer finish it.
    * @param cause - why the harness gave up on the owner.
+   * @param ownerId - the owner the harness gave up on; the task is refused when another owner holds it.
+   *   Omitted when the run itself ended, which loses the task whoever holds it.
    * @returns the lost task view.
    */
-  async markLost(root: Agent, id: TeamTaskId, cause: TeamTaskLostCause): Promise<TeamTaskView> {
-    return this.transition(root, id, current => lost(current, cause))
+  async markLost(root: Agent, id: TeamTaskId, cause: TeamTaskLostCause, ownerId?: SessionId): Promise<TeamTaskView> {
+    return this.transition(root, id, ownerId, current => lost(current, cause))
   }
 
   /**
@@ -207,7 +215,7 @@ export class TeamTaskBoard {
     for (const task of state.tasks) {
       if (!isOutstanding(task)) continue
       const ownerName = this.ownerName(root, state, task.ownerId)
-      rows.push({ id: task.id, subject: task.subject, ownerName, live: live(task.ownerId) })
+      rows.push({ id: task.id, subject: task.subject, ownerId: task.ownerId, ownerName, live: live(task.ownerId) })
     }
     return rows
   }
@@ -280,6 +288,7 @@ export class TeamTaskBoard {
         case 'release':
           authorizeOwner()
           if (!isOutstanding(current)) throw new TeamError('only an in-progress task can be released', 'TEAM_TASK_INVALID_TRANSITION')
+          this.assertMemberOwned(root, state, current)
           next = pending(current, 'released', reason)
           action = 'unassigned it'
           break
@@ -289,16 +298,7 @@ export class TeamTaskBoard {
           if (request.subject === undefined && request.description === undefined && request.writeScopes === undefined) {
             throw new TeamError('task edit requires subject, description, or write_scopes', 'TEAM_INVALID_ARGUMENT')
           }
-          next = {
-            ...current,
-            ...request.subject === undefined ? {} : { subject: requiredText(request.subject, 'subject', 200) },
-            ...request.description === undefined
-              ? {}
-              : { description: requiredText(request.description, 'description', 16_384) },
-            ...request.writeScopes === undefined ? {} : { writeScopes: this.writeScopes(request.writeScopes) },
-            // A new subject or description is a new goal; later attempts are recorded against it.
-            ...request.subject === undefined && request.description === undefined ? {} : { goalRevision: current.revision + 1 },
-          }
+          next = this.edited(current, request)
           break
         case 'set_dependencies':
           authorizeOwner()
@@ -309,6 +309,7 @@ export class TeamTaskBoard {
         case 'complete':
           authorizeOwner()
           if (!isOutstanding(current)) throw new TeamError('only an in-progress task can complete', 'TEAM_TASK_INVALID_TRANSITION')
+          this.assertMemberOwned(root, state, current)
           next = { ...fields(current), status: 'completed', ownerId: current.ownerId }
           action = 'marked it completed'
           break
@@ -328,6 +329,7 @@ export class TeamTaskBoard {
               'TEAM_TASK_INVALID_TRANSITION',
             )
           }
+          if (isOutstanding(current)) this.assertMemberOwned(root, state, current)
           if (request.owner === undefined || request.owner.trim().length === 0) {
             next = pending(current, 'released', reason)
             action = 'unassigned it'
@@ -367,14 +369,20 @@ export class TeamTaskBoard {
       if (action === undefined || !isOutstanding(current) || owner) return { view }
       const ownerId = current.ownerId
       const idle = !state.tasks.some(other => other.id !== current.id && isOutstanding(other) && other.ownerId === ownerId)
-      return { view, displaced: { ownerId, idle, action, ...reason === undefined ? {} : { reason } } }
+      const ownerName = this.ownerName(root, state, ownerId)
+      return { view, displaced: { ownerId, ownerName, idle, action, ...reason === undefined ? {} : { reason } } }
     })
   }
 
-  /** Append one harness-owned transition to an in-progress task. */
+  /**
+   * Append one harness-owned transition to an in-progress task. With `ownerId`,
+   * the task must still be held by that owner: what the harness observed about
+   * one owner says nothing about a task that has since moved to another.
+   */
   private async transition(
     root: Agent,
     id: TeamTaskId,
+    ownerId: SessionId | undefined,
     next: (current: InProgressTeamTask) => TeamTaskSnapshot,
   ): Promise<TeamTaskView> {
     return this.journal.transact(root.id, async () => {
@@ -383,6 +391,12 @@ export class TeamTaskBoard {
       if (current === undefined) throw new TeamError(`team task "${id}" not found`, 'TEAM_TASK_NOT_FOUND')
       if (!isOutstanding(current)) {
         throw new TeamError(`team task "${id}" is ${current.status}, not in progress`, 'TEAM_TASK_INVALID_TRANSITION')
+      }
+      if (ownerId !== undefined && current.ownerId !== ownerId) {
+        throw new TeamError(
+          `team task "${id}" is now owned by "${this.ownerName(root, state, current.ownerId)}", not by the owner this transition is for`,
+          'TEAM_TASK_INVALID_TRANSITION',
+        )
       }
       const task: TeamTaskSnapshot = { ...next(current), revision: current.revision + 1 }
       await this.journal.appendAndFlush(root, 'team/task', { version: 3, teamId: TeamId(root.id), task })
@@ -422,6 +436,36 @@ export class TeamTaskBoard {
       throw new TeamError('Team task id space exhausted', 'TEAM_TASK_LIMIT')
     }
     return id
+  }
+
+  /**
+   * Apply an edit. A new subject or description is a new goal, and later
+   * attempts are recorded against it. The owner of a lost task worked toward
+   * the goal from before the first such edit, which the lost task keeps.
+   */
+  private edited(current: TeamTaskSnapshot, request: UpdateTeamTaskRequest): TeamTaskSnapshot {
+    const changes = {
+      ...request.subject === undefined ? {} : { subject: requiredText(request.subject, 'subject', 200) },
+      ...request.description === undefined ? {} : { description: requiredText(request.description, 'description', 16_384) },
+      ...request.writeScopes === undefined ? {} : { writeScopes: this.writeScopes(request.writeScopes) },
+    }
+    if (request.subject === undefined && request.description === undefined) return { ...current, ...changes }
+    const goalRevision = current.revision + 1
+    if (current.status !== 'lost') return { ...current, ...changes, goalRevision }
+    return { ...current, ...changes, goalRevision, ownerGoalRevision: current.ownerGoalRevision ?? current.goalRevision ?? 1 }
+  }
+
+  /**
+   * Refuse a member action on the row of a tracked run. The row records a run
+   * the harness follows; no member holds it, and the run has no mailbox through
+   * which it could be told to stop. It settles when the run ends.
+   */
+  private assertMemberOwned(root: Agent, state: TeamState, task: InProgressTeamTask): void {
+    if (task.ownerId === root.id || state.members.some(member => member.id === task.ownerId)) return
+    throw new TeamError(
+      `team task "${task.id}" records subagent run "${task.ownerId}" and settles when that run ends; it cannot be released, reassigned, or completed by a member`,
+      'TEAM_TASK_INVALID_TRANSITION',
+    )
   }
 
   /** Refuse to change the executed part of the graph: in-progress and completed tasks are frozen. */
