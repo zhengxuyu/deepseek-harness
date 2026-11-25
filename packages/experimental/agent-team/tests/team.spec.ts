@@ -7,13 +7,16 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { scopeTarget } from '@deepseek-ai/dsh-scope'
 import { SessionLogOffset, SessionId, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SubagentService from '@deepseek-ai/dsh-subagent'
+import { SubagentRunId } from '@deepseek-ai/dsh-subagent'
+import type { SubagentRunInfo } from '@deepseek-ai/dsh-subagent'
 import { deliverSubagentPrompt, type HostPromptDeliverer } from '@deepseek-ai/dsh-subagent/internal'
 import * as SubagentFork from '@deepseek-ai/dsh-subagent-fork-in-process'
 import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
-import { MockAdapter, textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
+import { MockAdapter, maxTokensResponse, textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import TeamService, { TeamError, TeamId, TeamMessageId, TeamTaskId } from '../src/index.ts'
 import { TeamRuntimeLifecycle } from '../src/lifecycle.ts'
 import { teamProjectionDefinition } from '../src/projection.ts'
@@ -88,6 +91,7 @@ interface TeamServiceInternals {
     liveChildrenByRoot(): Map<Agent, SessionId[]>
   }
   readonly mailbox: {
+    send(caller: Agent, request: unknown): Promise<unknown>
     tryDispatch(root: Agent, message: TeamMessageSnapshot, signal: AbortSignal): Promise<boolean>
     serializeDispatch(message: TeamMessageSnapshot, operation: () => Promise<boolean>): Promise<boolean>
     markDelivered(root: Agent, messageId: ReturnType<typeof TeamMessageId>, targetId: SessionId): Promise<void>
@@ -95,12 +99,21 @@ interface TeamServiceInternals {
   readonly journal: {
     state(root: Agent): unknown
   }
+  readonly tasks: {
+    markOwnerLost(root: Agent, ownerId: SessionId, cause: string): Promise<TeamTaskId[]>
+  }
   disposeRuntime(): Promise<void>
   recoverFor(agent: Agent): Promise<void>
   scheduleRecovery(agent: Agent): void
 }
 
 /** White-box access follows the runtime owners so coverage does not widen the service API. */
+/** Update one task at whatever revision it currently has. */
+function taskUpdater(ctx: Context, lead: Agent, taskId: TeamTaskId) {
+  return (caller: Agent, request: Omit<Parameters<typeof ctx.agentTeams.updateTask>[1], 'taskId' | 'expectedRevision'>) =>
+    ctx.agentTeams.updateTask(caller, { taskId, expectedRevision: ctx.agentTeams.getTask(lead, taskId).revision, ...request })
+}
+
 function teamInternals(ctx: Context): TeamServiceInternals {
   return ctx.agentTeams as unknown as TeamServiceInternals
 }
@@ -765,7 +778,10 @@ describe('Team shared task DAG', () => {
       expectedRevision: complete.revision,
       action: 'reassign',
       owner: 'lead',
-    })).rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
+    })).rejects.toMatchObject({
+      code: 'TEAM_TASK_INVALID_TRANSITION',
+      message: `team task "${task.id}" is completed and only a pending or in-progress task can be reassigned; reopen it first`,
+    })
     const reopened = await ctx.agentTeams.updateTask(owner, {
       taskId: task.id,
       expectedRevision: complete.revision,
@@ -776,9 +792,19 @@ describe('Team shared task DAG', () => {
       expectedRevision: reopened.revision,
       action: 'claim',
     })
-    const deleted = await ctx.agentTeams.updateTask(owner, {
+    await expect(ctx.agentTeams.updateTask(owner, {
       taskId: task.id,
       expectedRevision: claimed.revision,
+      action: 'delete',
+    })).rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
+    const released = await ctx.agentTeams.updateTask(owner, {
+      taskId: task.id,
+      expectedRevision: claimed.revision,
+      action: 'release',
+    })
+    const deleted = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id,
+      expectedRevision: released.revision,
       action: 'delete',
     })
     expect(deleted.status).toBe('deleted')
@@ -818,19 +844,16 @@ describe('Team shared task DAG', () => {
       taskId: blocker.id, expectedRevision: leadClaim.revision, action: 'complete',
     })
     expect(completedBlocker.status).toBe('completed')
-    const assigned = await ctx.agentTeams.updateTask(lead, {
-      taskId: task.id, expectedRevision: task.revision, action: 'reassign', owner: 'editor',
+    const subject = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: task.revision, action: 'edit', subject: 'edited subject',
     })
-    const subject = await ctx.agentTeams.updateTask(editor, {
-      taskId: task.id, expectedRevision: assigned.revision, action: 'edit', subject: 'edited subject',
-    })
-    const description = await ctx.agentTeams.updateTask(editor, {
+    const description = await ctx.agentTeams.updateTask(lead, {
       taskId: task.id,
       expectedRevision: subject.revision,
       action: 'edit',
       description: 'edited description',
     })
-    const scopes = await ctx.agentTeams.updateTask(editor, {
+    const scopes = await ctx.agentTeams.updateTask(lead, {
       taskId: task.id,
       expectedRevision: description.revision,
       action: 'edit',
@@ -841,8 +864,29 @@ describe('Team shared task DAG', () => {
       description: 'edited description',
       writeScopes: ['src/nested'],
     })
+    const assigned = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: scopes.revision, action: 'reassign', owner: 'editor',
+    })
+    // The executed part of the graph is frozen: a running task keeps the text
+    // and edges its owner started from. Its owner can still change.
+    await expect(ctx.agentTeams.updateTask(editor, {
+      taskId: task.id, expectedRevision: assigned.revision, action: 'edit', subject: 'late edit',
+    })).rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
+    await expect(ctx.agentTeams.updateTask(editor, {
+      taskId: task.id, expectedRevision: assigned.revision, action: 'set_dependencies', blockedBy: [],
+    })).rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
+    await expect(ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: assigned.revision, action: 'reassign', owner: 'editor',
+    })).rejects.toMatchObject({
+      code: 'TEAM_INVALID_ARGUMENT',
+      message: `team task "${task.id}" is already owned by "editor"`,
+    })
+    const taken = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: assigned.revision, action: 'reassign', owner: 'lead',
+    })
+    expect(taken).toMatchObject({ status: 'in_progress', ownerName: 'lead' })
     const unassigned = await ctx.agentTeams.updateTask(lead, {
-      taskId: task.id, expectedRevision: scopes.revision, action: 'reassign', owner: ' ',
+      taskId: task.id, expectedRevision: taken.revision, action: 'reassign', owner: ' ',
     })
     expect(unassigned).toMatchObject({ status: 'pending' })
     expect('ownerId' in unassigned).toBe(false)
@@ -868,7 +912,9 @@ describe('Team shared task DAG', () => {
     expect(ctx.agentTeams.getTask(lead, broad.id).writeScopeWarnings)
       .toEqual([`write scopes overlap with ${narrow.id}`])
 
-    ctx.agentTeams.interrupt(lead, 'editor')
+    // Taking the task interrupted the editor's turn and left the notice in its inbox.
+    await vi.waitFor(() => { expect(editor.status).toBe('idle') })
+    editor.cancel({ kind: 'parent' })
     await waitNoAgent(ctx, editor.id)
   })
 })
@@ -1805,5 +1851,678 @@ describe('Team mailbox and waiting', () => {
     expect(durable(second.lead).members[0]).toMatchObject({
       phase: 'failed', error: 'settled elsewhere',
     })
+  })
+})
+
+describe('Lost tasks and the frozen executed graph', () => {
+  it('marks a claimed task lost, keeps its owner, and recovers only through reopen', async () => {
+    const { ctx, lead } = await setup(['hang'])
+    const started = await spawn(ctx, lead, 'worker')
+    const worker = await waitRunning(ctx, started.member.id)
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
+    const claimed = await ctx.agentTeams.updateTask(worker, {
+      taskId: task.id, expectedRevision: task.revision, action: 'claim',
+    })
+    expect(ctx.agentTeams.outstandingTasks(lead)).toEqual([
+      { id: task.id, subject: 'work', ownerId: worker.id, ownerName: 'worker', live: true },
+    ])
+
+    await expect(ctx.agentTeams.markLost(lead, TeamTaskId('missing'), 'run-ended'))
+      .rejects.toMatchObject({ code: 'TEAM_TASK_NOT_FOUND' })
+    const lost = await ctx.agentTeams.markLost(lead, task.id, 'run-ended')
+    expect(lost).toMatchObject({ status: 'lost', lostCause: 'run-ended', ownerName: 'worker', ready: false })
+    expect(durable(lead).tasks[0]).toMatchObject({ status: 'lost', lostCause: 'run-ended', ownerId: worker.id })
+    expect(ctx.agentTeams.outstandingTasks(lead)).toEqual([])
+    await expect(ctx.agentTeams.markLost(lead, task.id, 'run-ended'))
+      .rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
+
+    // The owner cannot finish or re-take it, and nobody can move it, until it is reopened.
+    await expect(ctx.agentTeams.updateTask(worker, {
+      taskId: task.id, expectedRevision: lost.revision, action: 'complete',
+    })).rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
+    await expect(ctx.agentTeams.updateTask(worker, {
+      taskId: task.id, expectedRevision: lost.revision, action: 'claim',
+    })).rejects.toMatchObject({
+      code: 'TEAM_TASK_INVALID_TRANSITION',
+      message: `team task "${task.id}" is lost (run-ended): its owner is gone; reopen it before it can be claimed`,
+    })
+    await expect(ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: lost.revision, action: 'reassign', owner: 'worker',
+    })).rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
+    await expect(ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: lost.revision, action: 'reassign',
+    })).rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
+    // Lost is on the open part of the graph: its text and edges may change.
+    const blocker = await ctx.agentTeams.createTask(lead, { subject: 'blocker', description: 'blocker' })
+    const edited = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: lost.revision, action: 'edit', description: 'retry with the diagnosis',
+    })
+    const rewired = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: edited.revision, action: 'set_dependencies', blockedBy: [blocker.id],
+    })
+    expect(rewired).toMatchObject({ status: 'lost', lostCause: 'run-ended', blockedBy: [blocker.id] })
+    const reopened = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: rewired.revision, action: 'reopen',
+    })
+    expect(reopened).toMatchObject({ status: 'pending', ready: false })
+    expect('ownerId' in reopened).toBe(false)
+    expect('lostCause' in reopened).toBe(false)
+    const deleted = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: reopened.revision, action: 'delete',
+    })
+    expect(deleted.status).toBe('deleted')
+
+    ctx.agentTeams.interrupt(lead, 'worker')
+    await waitNoAgent(ctx, worker.id)
+    expect(claimed.status).toBe('in_progress')
+  })
+
+  it('records work any member has begun as its own in-progress task, and completes it for the harness', async () => {
+    const { ctx, lead } = await setup(['hang'])
+    const started = await spawn(ctx, lead, 'worker')
+    const worker = await waitRunning(ctx, started.member.id)
+    const own = await ctx.agentTeams.beginTask(lead, { subject: 'the request', description: 'what the run was asked' })
+    const theirs = await ctx.agentTeams.beginTask(worker, { subject: 'begun by worker', description: 'already under way' })
+    expect(own).toMatchObject({ status: 'in_progress', ownerName: 'lead', revision: 1, blockedBy: [], writeScopes: [] })
+    expect(theirs).toMatchObject({ status: 'in_progress', ownerName: 'worker', revision: 1 })
+    expect(durable(lead).tasks).toMatchObject([{ ownerId: lead.id }, { ownerId: worker.id }])
+    expect(ctx.agentTeams.outstandingTasks(lead)).toEqual([
+      { id: own.id, subject: 'the request', ownerId: lead.id, ownerName: 'lead', live: false },
+      { id: theirs.id, subject: 'begun by worker', ownerId: worker.id, ownerName: 'worker', live: true },
+    ])
+
+    // What the harness observed about one owner does not settle a task another owner holds.
+    await expect(ctx.agentTeams.markCompleted(lead, theirs.id, lead.id)).rejects.toMatchObject({
+      code: 'TEAM_TASK_INVALID_TRANSITION',
+      message: 'team task "task-2" is now owned by "worker", not by the owner this transition is for',
+    })
+    await expect(ctx.agentTeams.markLost(lead, own.id, 'owner-failed', worker.id))
+      .rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
+    expect(ctx.agentTeams.listTasks(lead)).toMatchObject([{ status: 'in_progress' }, { status: 'in_progress' }])
+
+    // The harness completes either member's task the same way, from any member of the Team.
+    expect(await ctx.agentTeams.markCompleted(worker, own.id, lead.id)).toMatchObject({ status: 'completed', ownerName: 'lead' })
+    expect(await ctx.agentTeams.markCompleted(lead, theirs.id, worker.id)).toMatchObject({ status: 'completed', ownerName: 'worker' })
+    await expect(ctx.agentTeams.markCompleted(lead, own.id, lead.id))
+      .rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
+    expect(ctx.agentTeams.outstandingTasks(lead)).toEqual([])
+
+    ctx.agentTeams.interrupt(lead, 'worker')
+    await waitNoAgent(ctx, worker.id)
+  })
+
+  it('freezes completed tasks and reports Lead-owned work as not live while the Lead is idle', async () => {
+    const { ctx, lead } = await setup([])
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'own', description: 'own' })
+    const claimed = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: task.revision, action: 'claim',
+    })
+    expect(ctx.agentTeams.outstandingTasks(lead)).toEqual([
+      { id: task.id, subject: 'own', ownerId: lead.id, ownerName: 'lead', live: false },
+    ])
+    const completed = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: claimed.revision, action: 'complete',
+    })
+    for (const action of ['edit', 'set_dependencies', 'delete'] as const) {
+      await expect(ctx.agentTeams.updateTask(lead, {
+        taskId: task.id, expectedRevision: completed.revision, action, subject: 'late', blockedBy: [],
+      })).rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
+    }
+    const reopened = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: completed.revision, action: 'reopen',
+    })
+    expect(reopened.status).toBe('pending')
+    const deleted = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: reopened.revision, action: 'delete',
+    })
+    expect(deleted.status).toBe('deleted')
+  })
+
+  it('loses what a member claimed while provisioning once its provisioning fails', async () => {
+    const { ctx, lead } = await setup(['hang'])
+    const internals = teamInternals(ctx)
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'early', description: 'claimed while provisioning' })
+    const untouched = await ctx.agentTeams.createTask(lead, { subject: 'untouched', description: 'never claimed' })
+    vi.spyOn(internals.roster, 'checkpointInitialPrompt').mockImplementationOnce(async (childId) => {
+      const child = await waitRunning(ctx, childId)
+      await ctx.agentTeams.updateTask(child, { taskId: task.id, expectedRevision: task.revision, action: 'claim' })
+      throw new Error('checkpoint failed')
+    })
+    // The mark commits after the failed member record; hold its transaction so
+    // the flush lands before the storage root is removed.
+    const marks: Promise<TeamTaskId[]>[] = []
+    const markOwnerLost = internals.tasks.markOwnerLost.bind(internals.tasks)
+    vi.spyOn(internals.tasks, 'markOwnerLost').mockImplementation((root, ownerId, cause) => {
+      const mark = markOwnerLost(root, ownerId, cause)
+      marks.push(mark)
+      return mark
+    })
+    await expect(spawn(ctx, lead, 'early-claimer')).rejects.toThrow('checkpoint failed')
+    const member = durable(lead).members[0]
+    expect(member).toMatchObject({ phase: 'failed' })
+    await vi.waitFor(() => { expect(marks).toHaveLength(1) })
+    await expect(marks[0]).resolves.toEqual([task.id])
+    expect(ctx.agentTeams.getTask(lead, task.id)).toMatchObject({ status: 'lost', lostCause: 'owner-failed', ownerName: 'early-claimer' })
+    expect(ctx.agentTeams.getTask(lead, untouched.id).status).toBe('pending')
+    if (member !== undefined) await waitNoAgent(ctx, member.id)
+  })
+
+  it('contains a failed lost mark for a member that failed provisioning', async () => {
+    const { ctx, lead } = await setup([])
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    vi.spyOn(teamInternals(ctx).tasks, 'markOwnerLost').mockRejectedValueOnce(new Error('disk full'))
+    await expect(spawn(ctx, lead, 'never-starts', { provider: 'missing' })).rejects.toThrow()
+    await vi.waitFor(() => {
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not mark tasks of failed member'))
+    })
+  })
+})
+
+describe('Tracked subagent runs', () => {
+  it('records a delegated run as an owned task and completes it when the run completes', async () => {
+    const { ctx, lead } = await setup([textResponse('child done')], { trackSubagentRuns: true })
+    const controller = new AbortController()
+    const run = await ctx.subagents.start('spawn', {
+      prompt: content('do the delegated part'), parent: lead, signal: controller.signal,
+    })
+    const [tracked] = await vi.waitFor(() => {
+      const tasks = ctx.agentTeams.listTasks(lead)
+      expect(tasks).toHaveLength(1)
+      return tasks
+    })
+    expect(tracked).toMatchObject({
+      status: 'in_progress', subject: 'subagent run via spawn', ownerName: run.id, ready: false,
+    })
+    expect(ctx.agentTeams.outstandingTasks(lead)).toMatchObject([{ id: tracked!.id, ownerName: run.id }])
+    await expect(run.result).resolves.toMatchObject({ stopReason: 'completed' })
+    await run.dispose()
+    await vi.waitFor(() => {
+      expect(ctx.agentTeams.getTask(lead, tracked!.id)).toMatchObject({ status: 'completed', ownerName: run.id })
+    })
+    expect(ctx.agentTeams.outstandingTasks(lead)).toEqual([])
+  })
+
+  it('loses the task of a run that ends without completing', async () => {
+    const { ctx, lead } = await setup(['hang'], { trackSubagentRuns: true })
+    const controller = new AbortController()
+    const run = await ctx.subagents.start('spawn', {
+      prompt: content('never finishes'), parent: lead, signal: controller.signal,
+    })
+    await vi.waitFor(() => { expect(ctx.agentTeams.outstandingTasks(lead)).toHaveLength(1) })
+    controller.abort()
+    await run.result
+    await run.dispose()
+    await vi.waitFor(() => {
+      expect(ctx.agentTeams.listTasks(lead)[0]).toMatchObject({ status: 'lost', lostCause: 'owner-failed' })
+    })
+  })
+
+  it('does not track roster epochs, orphaned parents, or unknown runs, and warns on a failed record', async () => {
+    const { ctx, lead } = await setup(['hang'], { trackSubagentRuns: true, maxTasks: 1 })
+    const started = await spawn(ctx, lead, 'mate')
+    const mate = await waitRunning(ctx, started.member.id)
+    expect(ctx.agentTeams.listTasks(lead)).toEqual([])
+
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    const carrier = scopeTarget(ctx.subagents, lead)
+    const orphan = { id: SessionId('orphan'), session: { header: {} } } as Agent
+    ctx.emit(scopeTarget(ctx.subagents, orphan), 'subagent/start', {
+      runId: SubagentRunId('orphan-run'), provider: 'spawn', id: SessionId('orphan-child'), local: true,
+    } satisfies SubagentRunInfo)
+    ctx.emit(carrier, 'subagent/end', {
+      runId: SubagentRunId('never-started'), provider: 'spawn', id: SessionId('nobody'), local: true, stopReason: 'completed',
+    })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(ctx.agentTeams.listTasks(lead)).toEqual([])
+    expect(warn).not.toHaveBeenCalled()
+
+    // A remote child never enters the registry, so its run counts as live until it ends.
+    const remote: SubagentRunInfo = { runId: SubagentRunId('remote-run'), provider: 'acp', id: SessionId('remote-child'), local: false }
+    ctx.emit(carrier, 'subagent/start', remote)
+    await vi.waitFor(() => {
+      expect(ctx.agentTeams.outstandingTasks(lead)).toEqual([
+        { id: TeamTaskId('task-1'), subject: 'subagent run via acp', ownerId: SessionId('remote-child'), ownerName: 'remote-child', live: true },
+      ])
+    })
+    // The board is full, so the next run cannot be recorded; its end is then silent.
+    const overflow: SubagentRunInfo = { runId: SubagentRunId('overflow-run'), provider: 'spawn', id: SessionId('overflow-child'), local: true }
+    ctx.emit(carrier, 'subagent/start', overflow)
+    await vi.waitFor(() => {
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not record subagent run "overflow-run"'))
+    })
+    ctx.emit(carrier, 'subagent/end', { ...overflow, stopReason: 'completed' })
+    // A tracked task the harness already marked lost cannot be completed by its late run.
+    await ctx.agentTeams.markLost(lead, TeamTaskId('task-1'), 'run-ended')
+    ctx.emit(carrier, 'subagent/end', { ...remote, stopReason: 'completed' })
+    await vi.waitFor(() => {
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not settle subagent run "remote-run"'))
+    })
+    expect(warn).toHaveBeenCalledTimes(2)
+    expect(ctx.agentTeams.outstandingTasks(lead)).toEqual([])
+
+    ctx.agentTeams.interrupt(lead, 'mate')
+    await waitNoAgent(ctx, mate.id)
+  })
+
+  it('records runs delegated below a teammate or below a plain child on the Lead board', async () => {
+    const { ctx, lead } = await setup(
+      ['hang', textResponse('grandchild done'), 'hang', textResponse('great-grandchild done')],
+      { trackSubagentRuns: true },
+    )
+    const started = await spawn(ctx, lead, 'mate')
+    const mate = await waitRunning(ctx, started.member.id)
+    const controller = new AbortController()
+    const run = await ctx.subagents.start('spawn', {
+      prompt: content('nested'), parent: mate, signal: controller.signal,
+    })
+    await vi.waitFor(() => {
+      expect(ctx.agentTeams.listTasks(lead)).toMatchObject([{ status: 'in_progress', ownerName: run.id }])
+    })
+    await run.result
+    await run.dispose()
+    await vi.waitFor(() => { expect(ctx.agentTeams.listTasks(lead)[0]?.status).toBe('completed') })
+
+    // A plain child is not a member; the walk up its lineage still finds the Lead.
+    const child = await ctx.subagents.start('spawn', {
+      prompt: content('hangs while delegating'), parent: lead, signal: controller.signal,
+    })
+    const grandchild = await ctx.subagents.start('spawn', {
+      prompt: content('nested twice'), parent: child.localAgent!, signal: controller.signal,
+    })
+    await vi.waitFor(() => {
+      expect(ctx.agentTeams.listTasks(lead).map(task => task.ownerName)).toEqual([run.id, child.id, grandchild.id])
+    })
+    await grandchild.result
+    await grandchild.dispose()
+    controller.abort()
+    await child.result
+    await child.dispose()
+    await vi.waitFor(() => {
+      expect(ctx.agentTeams.listTasks(lead).map(task => task.status)).toEqual(['completed', 'lost', 'completed'])
+    })
+    ctx.agentTeams.interrupt(lead, 'mate')
+    await waitNoAgent(ctx, mate.id)
+  })
+})
+
+/** The text of every Team message waiting in one Agent's inbox. */
+function waitingNotices(agent: Agent): string[] {
+  return agent.inbox.nextStep
+    .filter(message => message.source.kind === 'team-message')
+    .map(message => message.content.map(block => block.type === 'text' ? block.text : '').join(' '))
+}
+
+/** Wait until the adapter served `requests` model requests and the Lead and every child are idle again. */
+async function settledTurns(ctx: Context, lead: Agent, adapter: MockAdapter, requests: number): Promise<void> {
+  await vi.waitFor(() => {
+    expect(adapter.requests).toHaveLength(requests)
+    expect(ctx.agents.list().filter(agent => agent.id !== lead.id)).toEqual([])
+    expect(lead.status).toBe('idle')
+  }, { timeout: 5_000 })
+}
+
+describe('Taking a task from its owner', () => {
+  it('tells the owner and interrupts its turn when the Lead unassigns its only task', async () => {
+    const { ctx, lead } = await setup(['hang'])
+    const started = await spawn(ctx, lead, 'worker')
+    const worker = await waitRunning(ctx, started.member.id)
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
+    const claimed = await ctx.agentTeams.updateTask(worker, { taskId: task.id, expectedRevision: task.revision, action: 'claim' })
+    const unassigned = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: claimed.revision, action: 'reassign',
+    })
+    expect(unassigned.status).toBe('pending')
+    await vi.waitFor(() => { expect(worker.status).toBe('idle') })
+    expect(waitingNotices(worker)).toEqual([expect.stringContaining(
+      `Task ${task.id} "work" is no longer yours: the Lead unassigned it. Stop working on it and do not change its files further.`,
+    )])
+    worker.cancel({ kind: 'parent' })
+    await waitNoAgent(ctx, worker.id)
+  })
+
+  it('moves an in-progress task to another member in one transition and tells the previous owner', async () => {
+    const { ctx, lead } = await setup(['hang', 'hang'])
+    const first = await waitRunning(ctx, (await spawn(ctx, lead, 'first')).member.id)
+    const second = await waitRunning(ctx, (await spawn(ctx, lead, 'second')).member.id)
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
+    const claimed = await ctx.agentTeams.updateTask(first, { taskId: task.id, expectedRevision: task.revision, action: 'claim' })
+    const moved = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: claimed.revision, action: 'reassign', owner: 'second',
+    })
+    // One revision: the task was never pending, so no other member could claim it in between.
+    expect(moved).toMatchObject({ status: 'in_progress', ownerName: 'second', revision: claimed.revision + 1 })
+    await vi.waitFor(() => { expect(first.status).toBe('idle') })
+    expect(waitingNotices(first)).toEqual([expect.stringContaining('the Lead reassigned it to second.')])
+    expect(second.status).toBe('running')
+    expect(waitingNotices(second)).toEqual([])
+    first.cancel({ kind: 'parent' })
+    ctx.agentTeams.interrupt(lead, 'second')
+    await waitNoAgent(ctx, first.id)
+    await waitNoAgent(ctx, second.id)
+  })
+
+  it('tells the owner when the Lead completes its task, and keeps its turn while it holds another task', async () => {
+    const { ctx, lead } = await setup(['hang'])
+    const worker = await waitRunning(ctx, (await spawn(ctx, lead, 'worker')).member.id)
+    const held = []
+    for (const subject of ['one', 'two']) {
+      const task = await ctx.agentTeams.createTask(lead, { subject, description: subject })
+      held.push(await ctx.agentTeams.updateTask(worker, { taskId: task.id, expectedRevision: task.revision, action: 'claim' }))
+    }
+    const [one, two] = held
+    const completed = await ctx.agentTeams.updateTask(lead, { taskId: one!.id, expectedRevision: one!.revision, action: 'complete' })
+    expect(completed).toMatchObject({ status: 'completed', ownerName: 'worker' })
+    expect(waitingNotices(worker)).toEqual([expect.stringContaining(`Task ${one!.id} "one" is no longer yours: the Lead marked it completed.`)])
+    // The worker still owns a task, so the notice steers it and its turn goes on.
+    expect(worker.status).toBe('running')
+    // The owner's own changes send no notice.
+    await ctx.agentTeams.updateTask(worker, { taskId: two!.id, expectedRevision: two!.revision, action: 'release' })
+    expect(waitingNotices(worker)).toHaveLength(1)
+    ctx.agentTeams.interrupt(lead, 'worker')
+    await vi.waitFor(() => { expect(worker.status).toBe('idle') })
+    worker.cancel({ kind: 'parent' })
+    await waitNoAgent(ctx, worker.id)
+  })
+
+  it('wakes an inactive owner with the notice', async () => {
+    const { ctx, lead, adapter } = await setup([
+      textResponse('first turn done'), textResponse('lead reads the settlement'),
+      textResponse('worker reads the notice'), textResponse('lead reads the settlement'),
+    ])
+    const started = await spawn(ctx, lead, 'worker')
+    await settledTurns(ctx, lead, adapter, 2)
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
+    const assigned = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: task.revision, action: 'reassign', owner: 'worker',
+    })
+    await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: assigned.revision, action: 'reassign' })
+    await settledTurns(ctx, lead, adapter, 4)
+    const notices = (await storedEvents(ctx, started.member.id))
+      .filter(event => event.type === 'user/message' && event.data.source.kind === 'team-message')
+    expect(notices).toHaveLength(1)
+  })
+
+  it('refuses to release, reassign, or complete the row of a tracked run, which settles when the run ends', async () => {
+    const { ctx, lead } = await setup(['hang', 'hang'], { trackSubagentRuns: true })
+    vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    const worker = await waitRunning(ctx, (await spawn(ctx, lead, 'worker')).member.id)
+    const controller = new AbortController()
+    const run = await ctx.subagents.start('spawn', { prompt: content('delegated'), parent: lead, signal: controller.signal })
+    const tracked = await vi.waitFor(() => {
+      const [row] = ctx.agentTeams.listTasks(lead)
+      expect(row).toBeDefined()
+      return row!
+    })
+    for (const request of [
+      { action: 'release' }, { action: 'reassign' }, { action: 'reassign', owner: 'worker' }, { action: 'complete' },
+    ] as const) {
+      const refused = ctx.agentTeams.updateTask(lead, { taskId: tracked.id, expectedRevision: tracked.revision, ...request })
+      await expect(refused).rejects.toMatchObject({
+        code: 'TEAM_TASK_INVALID_TRANSITION',
+        message: `team task "task-1" records subagent run "${run.id}" and settles when that run ends; it cannot be released, reassigned, or completed by a member`,
+      })
+    }
+    expect(ctx.agentTeams.getTask(lead, tracked.id)).toMatchObject({ status: 'in_progress', revision: tracked.revision, ownerName: run.id })
+    // The run's ending settles its own row and no task of a member.
+    const held = await ctx.agentTeams.beginTask(worker, { subject: 'held by worker', description: 'held' })
+    controller.abort()
+    await run.result
+    await run.dispose()
+    await vi.waitFor(() => {
+      expect(ctx.agentTeams.getTask(lead, tracked.id)).toMatchObject({ status: 'lost', lostCause: 'owner-failed', ownerName: run.id })
+    })
+    expect(ctx.agentTeams.getTask(lead, held.id)).toMatchObject({ status: 'in_progress', ownerName: 'worker' })
+    worker.cancel({ kind: 'parent' })
+    await waitNoAgent(ctx, worker.id)
+  })
+
+  it('keeps the task change when the notice cannot be queued', async () => {
+    const { ctx, lead } = await setup(['hang'])
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    vi.spyOn(teamInternals(ctx).mailbox, 'send').mockRejectedValue(new TeamError('inbox full', 'TEAM_MAILBOX_FULL'))
+    const worker = await waitRunning(ctx, (await spawn(ctx, lead, 'worker')).member.id)
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
+    const claimed = await ctx.agentTeams.updateTask(worker, { taskId: task.id, expectedRevision: task.revision, action: 'claim' })
+    const unassigned = await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: claimed.revision, action: 'reassign' })
+    expect(unassigned.status).toBe('pending')
+    expect(warn).toHaveBeenCalledWith(`Agent Teams could not tell "worker" that it lost ${task.id}: inbox full`)
+    await waitNoAgent(ctx, worker.id)
+  })
+})
+
+describe('Member turns that end without completing', () => {
+  it.each([
+    ['max-tokens', maxTokensResponse('cut off'), 'lost'],
+    ['completed', textResponse('done for now'), 'in_progress'],
+    ['aborted', 'hang', 'in_progress'],
+  ] as const)('after a member turn ended %s, leaves its task %s', async (stopReason, entry, status) => {
+    const { ctx, lead, adapter } = await setup([
+      textResponse('first turn done'), textResponse('lead reads the settlement'), entry, textResponse('lead reads the settlement'),
+    ])
+    vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    const ended: string[] = []
+    ctx.on('subagent/end', (info) => { ended.push(info.stopReason) })
+    const started = await spawn(ctx, lead, 'worker')
+    await settledTurns(ctx, lead, adapter, 2)
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
+    await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action: 'reassign', owner: 'worker' })
+    await ctx.agentTeams.sendMessage(lead, { target: 'worker', content: content('continue'), signal: SIGNAL })
+    if (stopReason === 'aborted') {
+      await waitRunning(ctx, started.member.id)
+      ctx.agentTeams.interrupt(lead, 'worker')
+    }
+    await vi.waitFor(() => { expect(ended).toEqual(['completed', stopReason]) }, { timeout: 5_000 })
+    await vi.waitFor(() => { expect(ctx.agentTeams.getTask(lead, task.id).status).toBe(status) })
+    if (status === 'lost') {
+      expect(ctx.agentTeams.getTask(lead, task.id)).toMatchObject({ lostCause: 'owner-failed', ownerName: 'worker' })
+    }
+    await waitNoAgent(ctx, started.member.id)
+  })
+
+  it('contains a failed lost mark after a member turn ended', async () => {
+    const { ctx, lead } = await setup([maxTokensResponse('cut off')])
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    vi.spyOn(teamInternals(ctx).tasks, 'markOwnerLost').mockRejectedValue(new Error('disk full'))
+    const started = await spawn(ctx, lead, 'worker')
+    await waitNoAgent(ctx, started.member.id)
+    await vi.waitFor(() => {
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('after its turn ended max-tokens: disk full'))
+    })
+  })
+})
+
+describe('Interrupting every running teammate', () => {
+  it('interrupts the running teammates, waits until each is idle, and is reserved for the Lead', async () => {
+    const { ctx, lead, adapter } = await setup([textResponse('done'), textResponse('lead reads the settlement'), 'hang'])
+    await spawn(ctx, lead, 'idle')
+    await settledTurns(ctx, lead, adapter, 2)
+    const busy = await waitRunning(ctx, (await spawn(ctx, lead, 'busy')).member.id)
+    await expect(ctx.agentTeams.interruptTeammates(busy)).rejects.toMatchObject({ code: 'TEAM_LEAD_REQUIRED' })
+    await expect(ctx.agentTeams.interruptTeammates(lead)).resolves.toEqual(['busy'])
+    expect(busy.status).not.toBe('running')
+    await expect(ctx.agentTeams.interruptTeammates(lead)).resolves.toEqual([])
+    await waitNoAgent(ctx, busy.id)
+  })
+})
+
+describe('Task statuses and their fields', () => {
+  it('deletes a lost task as a tombstone that keeps the owner and drops the cause', async () => {
+    const { ctx, lead } = await setup([])
+    const task = await ctx.agentTeams.beginTask(lead, { subject: 'work', description: 'work' })
+    const lost = await ctx.agentTeams.markLost(lead, task.id, 'run-ended')
+    const deleted = await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: lost.revision, action: 'delete' })
+    expect(deleted.status).toBe('deleted')
+    const [tombstone] = durable(lead).tasks
+    expect(tombstone).toMatchObject({ status: 'deleted', ownerId: lead.id })
+    expect('lostCause' in tombstone!).toBe(false)
+    expect(ctx.agentTeams.listTasks(lead)).toEqual([])
+  })
+
+  it('refuses a claim with the reason that applies to the task\'s status', async () => {
+    const { ctx, lead } = await setup(['hang'])
+    const worker = await waitRunning(ctx, (await spawn(ctx, lead, 'worker')).member.id)
+    const blocker = await ctx.agentTeams.createTask(lead, { subject: 'blocker', description: 'blocker' })
+    const blocked = await ctx.agentTeams.createTask(lead, { subject: 'blocked', description: 'blocked', blockedBy: [blocker.id] })
+    await expect(ctx.agentTeams.updateTask(worker, { taskId: blocked.id, expectedRevision: blocked.revision, action: 'claim' }))
+      .rejects.toMatchObject({
+        code: 'TEAM_TASK_BLOCKED',
+        message: `team task "${blocked.id}" is not ready to claim: its blocker "${blocker.id}" is not completed`,
+      })
+    const claimed = await ctx.agentTeams.updateTask(lead, { taskId: blocker.id, expectedRevision: blocker.revision, action: 'claim' })
+    await expect(ctx.agentTeams.updateTask(lead, { taskId: blocker.id, expectedRevision: claimed.revision, action: 'claim' }))
+      .rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION', message: `team task "${blocker.id}" is already in progress under you` })
+    await expect(ctx.agentTeams.updateTask(worker, { taskId: blocker.id, expectedRevision: claimed.revision, action: 'claim' }))
+      .rejects.toMatchObject({ code: 'TEAM_TASK_ALREADY_CLAIMED' })
+    const completed = await ctx.agentTeams.updateTask(lead, { taskId: blocker.id, expectedRevision: claimed.revision, action: 'complete' })
+    await expect(ctx.agentTeams.updateTask(worker, { taskId: blocker.id, expectedRevision: completed.revision, action: 'claim' }))
+      .rejects.toMatchObject({
+        code: 'TEAM_TASK_INVALID_TRANSITION',
+        message: `team task "${blocker.id}" is completed; reopen it before it can be claimed`,
+      })
+    ctx.agentTeams.interrupt(lead, 'worker')
+    await waitNoAgent(ctx, worker.id)
+  })
+
+  it('keeps every blocker of a started task completed: a completed blocker reopens only after its dependents', async () => {
+    const { ctx, lead } = await setup([])
+    const upstream = await ctx.agentTeams.createTask(lead, { subject: 'upstream', description: 'upstream' })
+    const downstream = await ctx.agentTeams.createTask(lead, { subject: 'downstream', description: 'downstream', blockedBy: [upstream.id] })
+    const upstreamClaimed = await ctx.agentTeams.updateTask(lead, { taskId: upstream.id, expectedRevision: upstream.revision, action: 'claim' })
+    const upstreamDone = await ctx.agentTeams.updateTask(lead, { taskId: upstream.id, expectedRevision: upstreamClaimed.revision, action: 'complete' })
+    const reopen = { taskId: upstream.id, expectedRevision: upstreamDone.revision, action: 'reopen' as const }
+    const downstreamClaimed = await ctx.agentTeams.updateTask(lead, { taskId: downstream.id, expectedRevision: downstream.revision, action: 'claim' })
+    await expect(ctx.agentTeams.updateTask(lead, reopen)).rejects.toMatchObject({
+      code: 'TEAM_TASK_HAS_DEPENDENTS',
+      message: `team task "${upstream.id}" is a completed blocker of "${downstream.id}", which is in progress; release or unassign "${downstream.id}" first`,
+    })
+    const downstreamDone = await ctx.agentTeams.updateTask(lead, { taskId: downstream.id, expectedRevision: downstreamClaimed.revision, action: 'complete' })
+    await expect(ctx.agentTeams.updateTask(lead, reopen)).rejects.toMatchObject({
+      code: 'TEAM_TASK_HAS_DEPENDENTS',
+      message: `team task "${upstream.id}" is a completed blocker of "${downstream.id}", which is completed; reopen "${downstream.id}" first`,
+    })
+    await ctx.agentTeams.updateTask(lead, { taskId: downstream.id, expectedRevision: downstreamDone.revision, action: 'reopen' })
+    await expect(ctx.agentTeams.updateTask(lead, reopen)).resolves.toMatchObject({ status: 'pending' })
+    expect(ctx.agentTeams.getTask(lead, downstream.id)).toMatchObject({ status: 'pending', ready: false })
+  })
+})
+
+describe('Task attempts and reasons', () => {
+  it('records each ended ownership with how it ended, why, and the goal it worked toward', async () => {
+    const { ctx, lead } = await setup(['hang', 'hang'])
+    vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    const first = await waitRunning(ctx, (await spawn(ctx, lead, 'first')).member.id)
+    const second = await waitRunning(ctx, (await spawn(ctx, lead, 'second')).member.id)
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
+    expect('attempts' in task || 'goalRevision' in task).toBe(false)
+    const update = taskUpdater(ctx, lead, task.id)
+
+    await update(first, { action: 'claim' })
+    // The owner gives the task back without a reason.
+    await update(first, { action: 'release' })
+    await update(first, { action: 'claim' })
+    // The Lead moves it; the previous owner reads why.
+    const moved = await update(lead, { action: 'reassign', owner: 'second', reason: '  first is busy  ' })
+    expect(moved.attempts).toEqual([
+      { ownerName: 'first', ended: 'released' },
+      { ownerName: 'first', ended: 'reassigned', reason: 'first is busy' },
+    ])
+    await vi.waitFor(() => {
+      expect(waitingNotices(first)).toEqual([expect.stringContaining('the Lead reassigned it to second (reason: first is busy). Stop working on it')])
+    })
+    await update(lead, { action: 'reassign', reason: 'not needed yet' })
+    await update(second, { action: 'claim' })
+    await update(second, { action: 'complete' })
+    // Feedback goes in the reopen reason and leaves the goal text as it is.
+    const returned = await update(lead, { action: 'reopen', reason: 'the test still fails' })
+    expect(returned).toMatchObject({ status: 'pending', subject: 'work', description: 'work' })
+    expect('goalRevision' in returned).toBe(false)
+    // A new description is a new goal.
+    const edited = await update(lead, { action: 'edit', description: 'work, and add the missing test' })
+    expect(edited.goalRevision).toBe(edited.revision)
+    await update(lead, { action: 'edit', writeScopes: ['src'] })
+    expect(ctx.agentTeams.getTask(lead, task.id).goalRevision).toBe(edited.revision)
+    await update(lead, { action: 'claim' })
+    await ctx.agentTeams.markLost(lead, task.id, 'run-ended')
+    const reopened = await update(lead, { action: 'reopen' })
+    expect(reopened.attempts).toEqual([
+      { ownerName: 'first', ended: 'released' },
+      { ownerName: 'first', ended: 'reassigned', reason: 'first is busy' },
+      { ownerName: 'second', ended: 'released', reason: 'not needed yet' },
+      { ownerName: 'second', ended: 'completed', reason: 'the test still fails' },
+      { ownerName: 'lead', ended: 'lost', lostCause: 'run-ended', goalRevision: edited.revision },
+    ])
+    // The durable record names owners by Session id and survives deletion.
+    const deleted = await update(lead, { action: 'delete' })
+    expect(deleted.attempts).toHaveLength(5)
+    expect(durable(lead).tasks[0]).toMatchObject({
+      status: 'deleted', goalRevision: edited.revision, attempts: [{ ownerId: first.id }, { ownerId: first.id }, { ownerId: second.id }, { ownerId: second.id }, { ownerId: lead.id }],
+    })
+    first.cancel({ kind: 'parent' })
+    second.cancel({ kind: 'parent' })
+    await waitNoAgent(ctx, first.id)
+    await waitNoAgent(ctx, second.id)
+  })
+
+  it('records the goal a lost owner worked toward when the goal is edited before the task is reopened', async () => {
+    const { ctx, lead } = await setup(['hang'])
+    const worker = await waitRunning(ctx, (await spawn(ctx, lead, 'worker')).member.id)
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
+    const update = taskUpdater(ctx, lead, task.id)
+
+    // The first owner only ever saw the text the task was created with.
+    await update(worker, { action: 'claim' })
+    await ctx.agentTeams.markLost(lead, task.id, 'owner-failed', worker.id)
+    await update(lead, { action: 'edit', writeScopes: ['src'] })
+    expect('ownerGoalRevision' in durable(lead).tasks[0]!).toBe(false)
+    await update(lead, { action: 'edit', description: 'work; the first try failed on the parser' })
+    const second = await update(lead, { action: 'edit', description: 'work on the parser only' })
+    expect(durable(lead).tasks[0]).toMatchObject({ status: 'lost', goalRevision: second.revision, ownerGoalRevision: 1 })
+    const reopened = await update(lead, { action: 'reopen' })
+    expect(reopened.attempts).toEqual([{ ownerName: 'worker', ended: 'lost', lostCause: 'owner-failed', goalRevision: 1 }])
+    expect('ownerGoalRevision' in durable(lead).tasks[0]!).toBe(false)
+
+    // The second owner worked toward the edited text, and an edit made after it was lost does not change that.
+    await update(lead, { action: 'claim' })
+    await ctx.agentTeams.markLost(lead, task.id, 'run-ended')
+    const third = await update(lead, { action: 'edit', subject: 'parser' })
+    expect(durable(lead).tasks[0]).toMatchObject({ goalRevision: third.revision, ownerGoalRevision: second.revision })
+    // The tombstone of a lost task keeps the goal and drops what only a lost task carries.
+    const deleted = await update(lead, { action: 'delete' })
+    expect(deleted).toMatchObject({ status: 'deleted', goalRevision: third.revision })
+    const tombstone = durable(lead).tasks[0]!
+    expect('ownerGoalRevision' in tombstone || 'lostCause' in tombstone).toBe(false)
+
+    // Reopened after an edit, the same owner's attempt names the goal from before the edit.
+    const again = await ctx.agentTeams.createTask(lead, { subject: 'again', description: 'again' })
+    const edited = await ctx.agentTeams.updateTask(lead, { taskId: again.id, expectedRevision: again.revision, action: 'edit', description: 'again, v2' })
+    await ctx.agentTeams.updateTask(lead, { taskId: again.id, expectedRevision: edited.revision, action: 'claim' })
+    await ctx.agentTeams.markLost(lead, again.id, 'run-ended')
+    const changed = await ctx.agentTeams.updateTask(lead, { taskId: again.id, expectedRevision: edited.revision + 2, action: 'edit', description: 'again, v3' })
+    const back = await ctx.agentTeams.updateTask(lead, { taskId: again.id, expectedRevision: changed.revision, action: 'reopen' })
+    expect(back).toMatchObject({
+      goalRevision: changed.revision,
+      attempts: [{ ownerName: 'lead', ended: 'lost', lostCause: 'run-ended', goalRevision: edited.revision }],
+    })
+    worker.cancel({ kind: 'parent' })
+    await waitNoAgent(ctx, worker.id)
+  })
+
+  it('accepts a reason only on the actions that can end an ownership', async () => {
+    const { ctx, lead } = await setup([])
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
+    for (const action of ['claim', 'edit', 'set_dependencies', 'complete', 'delete'] as const) {
+      await expect(ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action, reason: 'why' }))
+        .rejects.toMatchObject({
+          code: 'TEAM_INVALID_ARGUMENT',
+          message: `reason is accepted only on release, reassign, and reopen, not ${action}`,
+        })
+    }
+    await expect(ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action: 'reassign', reason: ' ' }))
+      .rejects.toMatchObject({ code: 'TEAM_INVALID_ARGUMENT', message: 'reason must be non-empty' })
+    // Unassigning a task nobody owns ends no ownership, so it records no attempt.
+    const unassigned = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: task.revision, action: 'reassign', reason: 'still unowned',
+    })
+    expect('attempts' in unassigned).toBe(false)
   })
 })

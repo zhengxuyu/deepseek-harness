@@ -2187,7 +2187,8 @@ List shared tasks, including readiness, owner, revision, blockers, and write-sco
       "enum": [
         "pending",
         "in_progress",
-        "completed"
+        "completed",
+        "lost"
       ]
     },
     "owner": {
@@ -2267,6 +2268,10 @@ Compare-and-set a shared task action using the latest revision from team_task_ge
     "owner": {
       "type": "string",
       "description": "Member target from spawn_teammate or list_agents for Lead-only reassign; omit to unassign."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Why the task is taken from its owner or reopened, for release, reassign, and reopen. Recorded on the task's attempts, which every member reads on the task. A member receives it in a notice only when the Lead unassigns or reassigns a task that member is working on; reopen and an owner's own release notify nobody. It does not change the subject or description."
     }
   },
   "required": [

@@ -354,9 +354,33 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'async updateTask(caller: Agent, request: UpdateTeamTaskRequest): Promise<TeamTaskView>',
-        description: 'Compare-and-set one authorized task transition.',
+        description: 'Compare-and-set one authorized task transition. When the Lead takes an in-progress task from a teammate, by unassigning it, reassigning it, or completing it, the teammate is told through its Team mailbox; a teammate that then holds no other in-progress task has its current turn interrupted.',
         parameters: [{ name: 'caller', description: 'exact live Team member authorizing the mutation.' }, { name: 'request', description: 'task identity, expected revision, action, and action fields.' }],
         returns: 'the committed next task revision.',
+      },
+      {
+        signature: 'async beginTask(caller: Agent, request: Pick<CreateTeamTaskRequest, \'subject\' | \'description\'>): Promise<TeamTaskView>',
+        description: 'Record work the caller has already begun as an in-progress task it owns. Any member may be the caller; the harness uses it for work no member created a task for, such as the request a run was started with.',
+        parameters: [{ name: 'caller', description: 'exact live Team member that owns the work.' }, { name: 'request', description: 'subject and description of the work.' }],
+        returns: 'the revision-one task view, in progress and owned by the caller.',
+      },
+      {
+        signature: 'async markCompleted(caller: Agent, id: TeamTaskId, ownerId: SessionId): Promise<TeamTaskView>',
+        description: 'Complete one in-progress task on behalf of the harness, bypassing member authorization.',
+        parameters: [{ name: 'caller', description: 'exact live Team member whose board holds the task.' }, { name: 'id', description: 'task the harness observed finished.' }, { name: 'ownerId', description: 'the owner the harness observed finishing it. A task another owner holds is refused with `TEAM_TASK_INVALID_TRANSITION`.' }],
+        returns: 'the completed task view.',
+      },
+      {
+        signature: 'outstandingTasks(caller: Agent): OutstandingTeamTask[]',
+        description: 'List in-progress tasks on the caller\'s Team board with whether each owner is still running.',
+        parameters: [{ name: 'caller', description: 'exact live Team member reading the board.' }],
+        returns: 'outstanding rows in creation order; empty once every claimed task settled.',
+      },
+      {
+        signature: 'async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause, ownerId?: SessionId): Promise<TeamTaskView>',
+        description: 'Mark one in-progress task `lost` on behalf of the harness; the owner stays recorded.',
+        parameters: [{ name: 'caller', description: 'exact live Team member whose board holds the task.' }, { name: 'id', description: 'task whose owner can no longer finish it.' }, { name: 'cause', description: 'why the harness gave up on the owner.' }, { name: 'ownerId', description: 'the owner the harness gave up on. A task another owner holds is refused with `TEAM_TASK_INVALID_TRANSITION`. Omit it when the run itself ended, which loses the task whoever holds it.' }],
+        returns: 'the lost task view.',
       },
       {
         signature: 'async waitForChange(caller: Agent, timeoutMs: number, signal: AbortSignal): Promise<TeamWaitResult>',
@@ -369,6 +393,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Interrupt one live teammate turn without clearing its pending inbox.',
         parameters: [{ name: 'caller', description: 'exact live Lead Agent.' }, { name: 'targetName', description: 'durable teammate name.' }],
         returns: 'the target status sampled before cancellation.',
+      },
+      {
+        signature: 'async interruptTeammates(caller: Agent): Promise<string[]>',
+        description: 'Interrupt the current turn of every running teammate and wait until each is idle. Pending inboxes are kept. The harness uses it when a run ends with teammates still working.',
+        parameters: [{ name: 'caller', description: 'exact live Lead Agent.' }],
+        returns: 'the names of the teammates that were running, in roster order.',
       },
       {
         signature: 'tryMembership(agent: Agent): TeamMembership | undefined',
@@ -5648,6 +5678,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type OptionalSessionSeq = SessionSeq | null;',
   },
   {
+    name: 'OutstandingTeamTask',
+    declaration: 'export interface OutstandingTeamTask {\n    readonly id: TeamTaskId;\n    readonly subject: string;\n    readonly ownerId: SessionId;\n    readonly ownerName: string;\n    readonly live: boolean;\n}',
+  },
+  {
     name: 'PackageResult',
     declaration: 'export interface PackageResult {\n    exitCode: number;\n    output: string;\n    truncated: boolean;\n    logPath: string;\n    kind?: PluginInstallFailureKind;\n}',
   },
@@ -7092,16 +7126,28 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type TeamTaskAction = \'claim\' | \'release\' | \'edit\' | \'set_dependencies\' | \'complete\' | \'reopen\' | \'reassign\' | \'delete\';',
   },
   {
+    name: 'TeamTaskAttemptEnd',
+    declaration: 'export type TeamTaskAttemptEnd = \'released\' | \'reassigned\' | \'completed\' | \'lost\';',
+  },
+  {
+    name: 'TeamTaskAttemptView',
+    declaration: 'export interface TeamTaskAttemptView {\n    readonly ownerName: string;\n    readonly ended: TeamTaskAttemptEnd;\n    readonly lostCause?: TeamTaskLostCause;\n    readonly reason?: string;\n    readonly goalRevision?: number;\n}',
+  },
+  {
     name: 'TeamTaskId',
     declaration: 'export type TeamTaskId = Branded<\'TeamTaskId\'>;',
   },
   {
+    name: 'TeamTaskLostCause',
+    declaration: 'export type TeamTaskLostCause = \'owner-failed\' | \'run-ended\';',
+  },
+  {
     name: 'TeamTaskStatus',
-    declaration: 'export type TeamTaskStatus = \'pending\' | \'in_progress\' | \'completed\' | \'deleted\';',
+    declaration: 'export type TeamTaskStatus = \'pending\' | \'in_progress\' | \'completed\' | \'lost\' | \'deleted\';',
   },
   {
     name: 'TeamTaskView',
-    declaration: 'export interface TeamTaskView {\n    readonly id: TeamTaskId;\n    readonly revision: number;\n    readonly subject: string;\n    readonly description: string;\n    readonly status: TeamTaskStatus;\n    readonly blockedBy: TeamTaskId[];\n    readonly writeScopes: string[];\n    readonly ownerName?: string;\n    readonly ready: boolean;\n    readonly writeScopeWarnings: string[];\n}',
+    declaration: 'export interface TeamTaskView {\n    readonly id: TeamTaskId;\n    readonly revision: number;\n    readonly subject: string;\n    readonly description: string;\n    readonly status: TeamTaskStatus;\n    readonly blockedBy: TeamTaskId[];\n    readonly writeScopes: string[];\n    readonly ownerName?: string;\n    readonly lostCause?: TeamTaskLostCause;\n    readonly goalRevision?: number;\n    readonly attempts?: TeamTaskAttemptView[];\n    readonly ready: boolean;\n    readonly writeScopeWarnings: string[];\n}',
   },
   {
     name: 'TeamView',
@@ -7477,7 +7523,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'UpdateTeamTaskRequest',
-    declaration: 'export interface UpdateTeamTaskRequest {\n    readonly taskId: TeamTaskId;\n    readonly expectedRevision: number;\n    readonly action: TeamTaskAction;\n    readonly subject?: string;\n    readonly description?: string;\n    readonly blockedBy?: readonly TeamTaskId[];\n    readonly writeScopes?: readonly string[];\n    readonly owner?: string;\n}',
+    declaration: 'export interface UpdateTeamTaskRequest {\n    readonly taskId: TeamTaskId;\n    readonly expectedRevision: number;\n    readonly action: TeamTaskAction;\n    readonly subject?: string;\n    readonly description?: string;\n    readonly blockedBy?: readonly TeamTaskId[];\n    readonly writeScopes?: readonly string[];\n    readonly owner?: string;\n    readonly reason?: string;\n}',
   },
   {
     name: 'UserMessage',

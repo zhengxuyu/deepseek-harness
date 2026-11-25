@@ -215,6 +215,27 @@ export class TeamRoster {
   }
 
   /**
+   * Interrupt the current turn of every running teammate and wait until each is idle.
+   * @param caller - exact live Lead Agent.
+   * @returns the names of the teammates that were running, in roster order.
+   */
+  async interruptRunning(caller: Agent): Promise<string[]> {
+    const membership = this.membership(caller)
+    if (membership.role !== 'lead') throw new TeamError('only the Team Lead can interrupt teammates', 'TEAM_LEAD_REQUIRED')
+    const names: string[] = []
+    const stopped: Promise<void>[] = []
+    for (const member of this.journal.state(membership.root).members) {
+      const live = this.ctx.agents.get(member.id)
+      if (member.phase !== 'active' || live === undefined || availability(live) !== 'running') continue
+      this.ctx.subagents.interrupt(member.id, { kind: 'ancestor', agent: caller })
+      names.push(member.name)
+      stopped.push(live.whenIdle())
+    }
+    await Promise.all(stopped)
+    return names
+  }
+
+  /**
    * Group exact live roster children by their current Lead for runtime teardown.
    * @returns each live Lead and the roster child ids currently in the Agent registry.
    */

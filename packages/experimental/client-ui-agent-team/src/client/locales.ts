@@ -27,6 +27,7 @@ export const zh = {
   'status.pending': '待处理',
   'status.in_progress': '进行中',
   'status.completed': '已完成',
+  'status.lost': '已丢失',
 } satisfies Record<string, string>
 
 /** Agent Teams locale key union. */
@@ -56,4 +57,5 @@ export const en = {
   'status.pending': 'Pending',
   'status.in_progress': 'In progress',
   'status.completed': 'Completed',
+  'status.lost': 'Lost',
 } satisfies Record<TeamKey, string>

@@ -16542,7 +16542,7 @@
       "kind": "event",
       "event": "team/task",
       "surface": false,
-      "digest": "d595ec73b32b016a6055333c67a5d646032b22e672da1d4a09c5b1ae398a093a",
+      "digest": "b6c6715a42d588ef94092fa06603b51e146d4d1fe8402b0af9fdb4cebad1c0c5",
       "schema": {
         "root": 0,
         "nodes": [
@@ -16556,43 +16556,50 @@
               },
               {
                 "name": "ignorable",
-                "type": 12,
+                "type": 30,
                 "optional": true
               },
               {
                 "name": "seq",
-                "type": 5,
+                "type": 6,
                 "optional": false
               },
               {
                 "name": "time",
-                "type": 5,
+                "type": 6,
                 "optional": false
               },
               {
                 "name": "type",
-                "type": 13,
+                "type": 31,
                 "optional": false
               }
             ],
             "indices": []
           },
           {
+            "kind": "union",
+            "types": [
+              2,
+              13
+            ]
+          },
+          {
             "kind": "object",
             "properties": [
               {
                 "name": "task",
-                "type": 2,
+                "type": 3,
                 "optional": false
               },
               {
                 "name": "teamId",
-                "type": 4,
+                "type": 5,
                 "optional": false
               },
               {
                 "name": "version",
-                "type": 11,
+                "type": 12,
                 "optional": false
               }
             ],
@@ -16603,42 +16610,42 @@
             "properties": [
               {
                 "name": "blockedBy",
-                "type": 3,
+                "type": 4,
                 "optional": false
               },
               {
                 "name": "description",
-                "type": 4,
-                "optional": false
-              },
-              {
-                "name": "id",
-                "type": 4,
-                "optional": false
-              },
-              {
-                "name": "ownerId",
-                "type": 4,
-                "optional": true
-              },
-              {
-                "name": "revision",
                 "type": 5,
                 "optional": false
               },
               {
-                "name": "status",
+                "name": "id",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 5,
+                "optional": true
+              },
+              {
+                "name": "revision",
                 "type": 6,
                 "optional": false
               },
               {
+                "name": "status",
+                "type": 7,
+                "optional": false
+              },
+              {
                 "name": "subject",
-                "type": 4,
+                "type": 5,
                 "optional": false
               },
               {
                 "name": "writeScopes",
-                "type": 3,
+                "type": 4,
                 "optional": false
               }
             ],
@@ -16646,7 +16653,7 @@
           },
           {
             "kind": "array",
-            "element": 4
+            "element": 5
           },
           {
             "kind": "primitive",
@@ -16659,19 +16666,19 @@
           {
             "kind": "union",
             "types": [
-              7,
               8,
               9,
-              10
+              10,
+              11
             ]
           },
           {
             "kind": "literal",
-            "value": "completed"
+            "value": "deleted"
           },
           {
             "kind": "literal",
-            "value": "deleted"
+            "value": "completed"
           },
           {
             "kind": "literal",
@@ -16684,6 +16691,397 @@
           {
             "kind": "literal",
             "value": 2
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "task",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "teamId",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 29,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              15,
+              25,
+              26,
+              27,
+              28
+            ]
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 16,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 6,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 5,
+                "optional": true
+              },
+              {
+                "name": "revision",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 8,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 17
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "ended",
+                "type": 18,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 6,
+                "optional": true
+              },
+              {
+                "name": "lostCause",
+                "type": 22,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "reason",
+                "type": 5,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              9,
+              19,
+              20,
+              21
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "lost"
+          },
+          {
+            "kind": "literal",
+            "value": "reassigned"
+          },
+          {
+            "kind": "literal",
+            "value": "released"
+          },
+          {
+            "kind": "union",
+            "types": [
+              23,
+              24
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "owner-failed"
+          },
+          {
+            "kind": "literal",
+            "value": "run-ended"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 16,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 6,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 11,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 16,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 6,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "lostCause",
+                "type": 22,
+                "optional": false
+              },
+              {
+                "name": "ownerGoalRevision",
+                "type": 6,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 19,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 16,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 6,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 16,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 6,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 10,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": 3
           },
           {
             "kind": "literal",
@@ -21803,6 +22201,20 @@
       "sources": []
     },
     {
+      "digest": "02258c148f51296a9ab59dcb206f65ea11b597b55a7d443520519543a6f642a5",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "literal",
+            "value": "reassigned"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
+    },
+    {
       "digest": "022623b9ef98ec47ec3c3bae0c51027c70d2601141c5e92e26a0d83d1b4cef06",
       "schema": {
         "root": 0,
@@ -21917,6 +22329,414 @@
       },
       "names": [],
       "sources": []
+    },
+    {
+      "digest": "03ea5a975afab65fad75dbb145c4ada8ba20e983849ab32dc7d99d3eda87c8f5",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "union",
+            "types": [
+              1,
+              15,
+              16,
+              18,
+              20
+            ]
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 9,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "lostCause",
+                "type": 10,
+                "optional": false
+              },
+              {
+                "name": "ownerGoalRevision",
+                "type": 9,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 14,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 3
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "ended",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 9,
+                "optional": true
+              },
+              {
+                "name": "lostCause",
+                "type": 10,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "reason",
+                "type": 13,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              5,
+              6,
+              7,
+              8
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "lost"
+          },
+          {
+            "kind": "literal",
+            "value": "reassigned"
+          },
+          {
+            "kind": "literal",
+            "value": "completed"
+          },
+          {
+            "kind": "literal",
+            "value": "released"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "union",
+            "types": [
+              11,
+              12
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "owner-failed"
+          },
+          {
+            "kind": "literal",
+            "value": "run-ended"
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "array",
+            "element": 13
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 9,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 14,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 9,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 17,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 14,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "in_progress"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 9,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 13,
+                "optional": true
+              },
+              {
+                "name": "revision",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 19,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 14,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "deleted"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 9,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 21,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 14,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "pending"
+          }
+        ]
+      },
+      "names": [
+        "packages/experimental/agent-team/src/types.ts#TeamTaskSnapshot"
+      ],
+      "sources": [
+        "packages/experimental/agent-team/src/types.ts:179"
+      ]
     },
     {
       "digest": "05a2796621b1ee6c03ef7abe560b25116bb4da4d592312117242a78415a32b04",
@@ -22698,7 +23518,7 @@
       },
       "names": [],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:216"
+        "packages/experimental/agent-team/src/types.ts:377"
       ]
     },
     {
@@ -28052,6 +28872,99 @@
       "sources": []
     },
     {
+      "digest": "11703e954db540fa664de20cab90d2b793776684389e23f47b9c8a9431615da0",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "ended",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 6,
+                "optional": true
+              },
+              {
+                "name": "lostCause",
+                "type": 7,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 10,
+                "optional": false
+              },
+              {
+                "name": "reason",
+                "type": 10,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "completed"
+          },
+          {
+            "kind": "literal",
+            "value": "lost"
+          },
+          {
+            "kind": "literal",
+            "value": "reassigned"
+          },
+          {
+            "kind": "literal",
+            "value": "released"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "union",
+            "types": [
+              8,
+              9
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "owner-failed"
+          },
+          {
+            "kind": "literal",
+            "value": "run-ended"
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          }
+        ]
+      },
+      "names": [
+        "packages/experimental/agent-team/src/types.ts#TeamTaskAttempt"
+      ],
+      "sources": [
+        "packages/experimental/agent-team/src/types.ts:94"
+      ]
+    },
+    {
       "digest": "119abe2b9c0b2f46ecb31d82b9acba4d4b30e049f655e2475e8b4ae12d5a9e25",
       "schema": {
         "root": 0,
@@ -28312,6 +29225,20 @@
       ]
     },
     {
+      "digest": "13527ff9ba8f89d110df1ffc1a3e898834b49ecb528f88550378fc69c337f981",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "literal",
+            "value": "released"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
+    },
+    {
       "digest": "1379f0b72275994d20f1ddca2d60a96ab16ec80397ca9f1af21bdc67ba5c269c",
       "schema": {
         "root": 0,
@@ -28319,6 +29246,20 @@
           {
             "kind": "literal",
             "value": "developer/message"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
+    },
+    {
+      "digest": "137ac60e26bcb192210d9a32a704b73b0924ed34019323defa1b787be95bd45e",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "literal",
+            "value": 3
           }
         ]
       },
@@ -34699,7 +35640,7 @@
         "packages/experimental/agent-team/src/types.ts#TeamMessageSource"
       ],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:115"
+        "packages/experimental/agent-team/src/types.ts:259"
       ]
     },
     {
@@ -35214,6 +36155,522 @@
       "sources": []
     },
     {
+      "digest": "24dcca151a7baf1977e9a49c5951b2019d4dc7caa7696d92e6b64276d7b60aa2",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "union",
+            "types": [
+              1,
+              12
+            ]
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "task",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "teamId",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 11,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "blockedBy",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "id",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 4,
+                "optional": true
+              },
+              {
+                "name": "revision",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 3,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 4
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "union",
+            "types": [
+              7,
+              8,
+              9,
+              10
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "deleted"
+          },
+          {
+            "kind": "literal",
+            "value": "completed"
+          },
+          {
+            "kind": "literal",
+            "value": "in_progress"
+          },
+          {
+            "kind": "literal",
+            "value": "pending"
+          },
+          {
+            "kind": "literal",
+            "value": 2
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "task",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "teamId",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 28,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              14,
+              24,
+              25,
+              26,
+              27
+            ]
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 15,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 5,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "lostCause",
+                "type": 21,
+                "optional": false
+              },
+              {
+                "name": "ownerGoalRevision",
+                "type": 5,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 18,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 3,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 16
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "ended",
+                "type": 17,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 5,
+                "optional": true
+              },
+              {
+                "name": "lostCause",
+                "type": 21,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "reason",
+                "type": 4,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              8,
+              18,
+              19,
+              20
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "lost"
+          },
+          {
+            "kind": "literal",
+            "value": "reassigned"
+          },
+          {
+            "kind": "literal",
+            "value": "released"
+          },
+          {
+            "kind": "union",
+            "types": [
+              22,
+              23
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "owner-failed"
+          },
+          {
+            "kind": "literal",
+            "value": "run-ended"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 15,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 5,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 8,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 3,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 15,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 5,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 3,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 15,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 5,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 4,
+                "optional": true
+              },
+              {
+                "name": "revision",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 3,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 15,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 5,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 10,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 3,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": 3
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
+    },
+    {
       "digest": "2517ba143a271508d3ca35126d5aca8f7f1facf5aaddce4adf011832042fa2b9",
       "schema": {
         "root": 0,
@@ -35511,6 +36968,20 @@
           {
             "kind": "literal",
             "value": "approval/policy"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
+    },
+    {
+      "digest": "26b0e99212ec45911085ab6e5b3e9b3c40af5b2a1ce021784ba4d57735e93f7a",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "literal",
+            "value": "run-ended"
           }
         ]
       },
@@ -39389,7 +40860,7 @@
         "packages/experimental/agent-team/src/types.ts#TeamMessageSnapshot"
       ],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:106"
+        "packages/experimental/agent-team/src/types.ts:250"
       ]
     },
     {
@@ -45131,6 +46602,20 @@
           {
             "kind": "literal",
             "value": "image/jpeg"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
+    },
+    {
+      "digest": "3fb8268f735b7110f4505933d39eede5f6ffe7736f61ced248060d5d9ae35986",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "literal",
+            "value": "lost"
           }
         ]
       },
@@ -50922,6 +52407,173 @@
       "sources": []
     },
     {
+      "digest": "4e59bfdfb07e040885f7488cc9283c68d23238ecbdcb67f52960ab4ef794e877",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 1,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 8,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "lostCause",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "ownerGoalRevision",
+                "type": 8,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 8,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 13,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 2
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "ended",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 8,
+                "optional": true
+              },
+              {
+                "name": "lostCause",
+                "type": 9,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "reason",
+                "type": 12,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              4,
+              5,
+              6,
+              7
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "completed"
+          },
+          {
+            "kind": "literal",
+            "value": "lost"
+          },
+          {
+            "kind": "literal",
+            "value": "reassigned"
+          },
+          {
+            "kind": "literal",
+            "value": "released"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "union",
+            "types": [
+              10,
+              11
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "run-ended"
+          },
+          {
+            "kind": "literal",
+            "value": "owner-failed"
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "array",
+            "element": 12
+          }
+        ]
+      },
+      "names": [
+        "packages/experimental/agent-team/src/types.ts#LostTeamTask"
+      ],
+      "sources": [
+        "packages/experimental/agent-team/src/types.ts:153"
+      ]
+    },
+    {
       "digest": "4e887768586528565381dadbddee6cef555874148089f4579e0b4b1ad096fc9c",
       "schema": {
         "root": 0,
@@ -51295,6 +52947,437 @@
       "sources": []
     },
     {
+      "digest": "50957d069ff497ac950fa2ad78f56c058f26ae2e304e50d85488138d387c8f23",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "task",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "teamId",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 23,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              2,
+              16,
+              17,
+              19,
+              21
+            ]
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 3,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 15,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 10,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "lostCause",
+                "type": 11,
+                "optional": false
+              },
+              {
+                "name": "ownerGoalRevision",
+                "type": 10,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 10,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 15,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 4
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "ended",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 10,
+                "optional": true
+              },
+              {
+                "name": "lostCause",
+                "type": 11,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "reason",
+                "type": 14,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              6,
+              7,
+              8,
+              9
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "lost"
+          },
+          {
+            "kind": "literal",
+            "value": "completed"
+          },
+          {
+            "kind": "literal",
+            "value": "reassigned"
+          },
+          {
+            "kind": "literal",
+            "value": "released"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "union",
+            "types": [
+              12,
+              13
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "owner-failed"
+          },
+          {
+            "kind": "literal",
+            "value": "run-ended"
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "array",
+            "element": 14
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 3,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 15,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 10,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 10,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 15,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 3,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 15,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 10,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 10,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 18,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 15,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "in_progress"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 3,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 15,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 10,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 14,
+                "optional": true
+              },
+              {
+                "name": "revision",
+                "type": 10,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 20,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 15,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "deleted"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 3,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 15,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 10,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 10,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 22,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 15,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "pending"
+          },
+          {
+            "kind": "literal",
+            "value": 3
+          }
+        ]
+      },
+      "names": [],
+      "sources": [
+        "packages/experimental/agent-team/src/types.ts:373"
+      ]
+    },
+    {
       "digest": "50cf02d875f8a1f1411f4a6fbcffab9120ccef5f74a47331fbf29480e5f68f48",
       "schema": {
         "root": 0,
@@ -51517,10 +53600,10 @@
         ]
       },
       "names": [
-        "packages/experimental/agent-team/src/types.ts#TeamTaskSnapshot"
+        "packages/experimental/agent-team/src/types.ts#TeamTaskSnapshotV2"
       ],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:74"
+        "packages/experimental/agent-team/src/types.ts:191"
       ]
     },
     {
@@ -54291,6 +56374,167 @@
       ]
     },
     {
+      "digest": "5b9ab8211435cb146aee5f2b6804dac10b6fdc33d1bc5d4aee7bab70f4bd5fc5",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 1,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 8,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 8,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 13,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 2
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "ended",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 8,
+                "optional": true
+              },
+              {
+                "name": "lostCause",
+                "type": 9,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "reason",
+                "type": 12,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              4,
+              5,
+              6,
+              7
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "reassigned"
+          },
+          {
+            "kind": "literal",
+            "value": "released"
+          },
+          {
+            "kind": "literal",
+            "value": "completed"
+          },
+          {
+            "kind": "literal",
+            "value": "lost"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "union",
+            "types": [
+              10,
+              11
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "run-ended"
+          },
+          {
+            "kind": "literal",
+            "value": "owner-failed"
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "array",
+            "element": 12
+          },
+          {
+            "kind": "literal",
+            "value": "in_progress"
+          }
+        ]
+      },
+      "names": [
+        "packages/experimental/agent-team/src/types.ts#InProgressTeamTask"
+      ],
+      "sources": [
+        "packages/experimental/agent-team/src/types.ts:137"
+      ]
+    },
+    {
       "digest": "5bb69b88517f6214f2af4d1a6d2b771e271ad3ad695cc9c2c272069ae698c9bc",
       "schema": {
         "root": 0,
@@ -54605,6 +56849,162 @@
       },
       "names": [],
       "sources": []
+    },
+    {
+      "digest": "5da7d7231352eb49219922d33de37d652b054dc7e56133b5e32b8b1988649b6b",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 1,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 8,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 8,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 13,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 2
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "ended",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 8,
+                "optional": true
+              },
+              {
+                "name": "lostCause",
+                "type": 9,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "reason",
+                "type": 12,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              4,
+              5,
+              6,
+              7
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "reassigned"
+          },
+          {
+            "kind": "literal",
+            "value": "released"
+          },
+          {
+            "kind": "literal",
+            "value": "completed"
+          },
+          {
+            "kind": "literal",
+            "value": "lost"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "union",
+            "types": [
+              10,
+              11
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "run-ended"
+          },
+          {
+            "kind": "literal",
+            "value": "owner-failed"
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "array",
+            "element": 12
+          },
+          {
+            "kind": "literal",
+            "value": "pending"
+          }
+        ]
+      },
+      "names": [
+        "packages/experimental/agent-team/src/types.ts#PendingTeamTask"
+      ],
+      "sources": [
+        "packages/experimental/agent-team/src/types.ts:129"
+      ]
     },
     {
       "digest": "5dd766ccd1702a1142ad8b4bd44f2242f8e8a6752669ad3de0a5d224329b1438",
@@ -63501,6 +65901,163 @@
       "sources": []
     },
     {
+      "digest": "7c59428517dc8a8f7527d896731d55f15fbcb8ca5bcc3906a337323394af55f3",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 1,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 8,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 8,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 13,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 2
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "ended",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 8,
+                "optional": true
+              },
+              {
+                "name": "lostCause",
+                "type": 9,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "reason",
+                "type": 12,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              4,
+              5,
+              6,
+              7
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "completed"
+          },
+          {
+            "kind": "literal",
+            "value": "lost"
+          },
+          {
+            "kind": "literal",
+            "value": "reassigned"
+          },
+          {
+            "kind": "literal",
+            "value": "released"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "union",
+            "types": [
+              10,
+              11
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "run-ended"
+          },
+          {
+            "kind": "literal",
+            "value": "owner-failed"
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "array",
+            "element": 12
+          }
+        ]
+      },
+      "names": [
+        "packages/experimental/agent-team/src/types.ts#CompletedTeamTask"
+      ],
+      "sources": [
+        "packages/experimental/agent-team/src/types.ts:145"
+      ]
+    },
+    {
       "digest": "7c6129b6961cf4b2a030f36c78d2b0a5be38617651a9b81322e054ee512bee06",
       "schema": {
         "root": 0,
@@ -71305,6 +73862,35 @@
       "sources": []
     },
     {
+      "digest": "9c6db63046b0b1efca43992dc54fb5af9b657e51830af7b6b95a1c1d7f6dd818",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "union",
+            "types": [
+              1,
+              2
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "owner-failed"
+          },
+          {
+            "kind": "literal",
+            "value": "run-ended"
+          }
+        ]
+      },
+      "names": [
+        "packages/experimental/agent-team/src/types.ts#TeamTaskLostCause"
+      ],
+      "sources": [
+        "packages/experimental/agent-team/src/types.ts:83"
+      ]
+    },
+    {
       "digest": "9d80129e13edfb6feb03ed327e6085c6ef60b97ad074244b2f5fd4667424a6a4",
       "schema": {
         "root": 0,
@@ -71312,6 +73898,20 @@
           {
             "kind": "literal",
             "value": "other"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
+    },
+    {
+      "digest": "9da5b2fb6e928fc90291c7a1f90a544eef47cc51e75a562fca91aecbe346caba",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "literal",
+            "value": "owner-failed"
           }
         ]
       },
@@ -72212,7 +74812,7 @@
       },
       "names": [],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:212"
+        "packages/experimental/agent-team/src/types.ts:372"
       ]
     },
     {
@@ -77149,7 +79749,7 @@
       },
       "names": [],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:210"
+        "packages/experimental/agent-team/src/types.ts:366"
       ]
     },
     {
@@ -77334,12 +79934,8 @@
           }
         ]
       },
-      "names": [
-        "packages/experimental/agent-team/src/types.ts#TeamTaskStatus"
-      ],
-      "sources": [
-        "packages/experimental/agent-team/src/types.ts:71"
-      ]
+      "names": [],
+      "sources": []
     },
     {
       "digest": "b3681c026a0b98e98b103f057dfd217fbe904129c090efd668253ec9aea7fece",
@@ -78215,6 +80811,561 @@
           {
             "kind": "literal",
             "value": 1
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
+    },
+    {
+      "digest": "b6c6715a42d588ef94092fa06603b51e146d4d1fe8402b0af9fdb4cebad1c0c5",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 30,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 31,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              2,
+              13
+            ]
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "task",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "teamId",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 12,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "blockedBy",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "id",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 5,
+                "optional": true
+              },
+              {
+                "name": "revision",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 5
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "union",
+            "types": [
+              8,
+              9,
+              10,
+              11
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "deleted"
+          },
+          {
+            "kind": "literal",
+            "value": "completed"
+          },
+          {
+            "kind": "literal",
+            "value": "in_progress"
+          },
+          {
+            "kind": "literal",
+            "value": "pending"
+          },
+          {
+            "kind": "literal",
+            "value": 2
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "task",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "teamId",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 29,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              15,
+              25,
+              26,
+              27,
+              28
+            ]
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 16,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 6,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 5,
+                "optional": true
+              },
+              {
+                "name": "revision",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 8,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 17
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "ended",
+                "type": 18,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 6,
+                "optional": true
+              },
+              {
+                "name": "lostCause",
+                "type": 22,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "reason",
+                "type": 5,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              9,
+              19,
+              20,
+              21
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "lost"
+          },
+          {
+            "kind": "literal",
+            "value": "reassigned"
+          },
+          {
+            "kind": "literal",
+            "value": "released"
+          },
+          {
+            "kind": "union",
+            "types": [
+              23,
+              24
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "owner-failed"
+          },
+          {
+            "kind": "literal",
+            "value": "run-ended"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 16,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 6,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 11,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 16,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 6,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "lostCause",
+                "type": 22,
+                "optional": false
+              },
+              {
+                "name": "ownerGoalRevision",
+                "type": 6,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 19,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 16,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 6,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 16,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 6,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 10,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": 3
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "literal",
+            "value": "team/task"
           }
         ]
       },
@@ -82540,6 +85691,45 @@
       "sources": []
     },
     {
+      "digest": "c27819d193b324660287027655410cc5f7c4fcffd71b29b53ad3b091e2f7b524",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "union",
+            "types": [
+              1,
+              2,
+              3,
+              4
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "completed"
+          },
+          {
+            "kind": "literal",
+            "value": "lost"
+          },
+          {
+            "kind": "literal",
+            "value": "reassigned"
+          },
+          {
+            "kind": "literal",
+            "value": "released"
+          }
+        ]
+      },
+      "names": [
+        "packages/experimental/agent-team/src/types.ts#TeamTaskAttemptEnd"
+      ],
+      "sources": [
+        "packages/experimental/agent-team/src/types.ts:91"
+      ]
+    },
+    {
       "digest": "c2deb7c9183735d4e0fffddf5c623f4e34daa1c8e96b111982e957dfcbbcf896",
       "schema": {
         "root": 0,
@@ -86717,163 +89907,6 @@
       "sources": []
     },
     {
-      "digest": "d595ec73b32b016a6055333c67a5d646032b22e672da1d4a09c5b1ae398a093a",
-      "schema": {
-        "root": 0,
-        "nodes": [
-          {
-            "kind": "object",
-            "properties": [
-              {
-                "name": "data",
-                "type": 1,
-                "optional": false
-              },
-              {
-                "name": "ignorable",
-                "type": 12,
-                "optional": true
-              },
-              {
-                "name": "seq",
-                "type": 5,
-                "optional": false
-              },
-              {
-                "name": "time",
-                "type": 5,
-                "optional": false
-              },
-              {
-                "name": "type",
-                "type": 13,
-                "optional": false
-              }
-            ],
-            "indices": []
-          },
-          {
-            "kind": "object",
-            "properties": [
-              {
-                "name": "task",
-                "type": 2,
-                "optional": false
-              },
-              {
-                "name": "teamId",
-                "type": 4,
-                "optional": false
-              },
-              {
-                "name": "version",
-                "type": 11,
-                "optional": false
-              }
-            ],
-            "indices": []
-          },
-          {
-            "kind": "object",
-            "properties": [
-              {
-                "name": "blockedBy",
-                "type": 3,
-                "optional": false
-              },
-              {
-                "name": "description",
-                "type": 4,
-                "optional": false
-              },
-              {
-                "name": "id",
-                "type": 4,
-                "optional": false
-              },
-              {
-                "name": "ownerId",
-                "type": 4,
-                "optional": true
-              },
-              {
-                "name": "revision",
-                "type": 5,
-                "optional": false
-              },
-              {
-                "name": "status",
-                "type": 6,
-                "optional": false
-              },
-              {
-                "name": "subject",
-                "type": 4,
-                "optional": false
-              },
-              {
-                "name": "writeScopes",
-                "type": 3,
-                "optional": false
-              }
-            ],
-            "indices": []
-          },
-          {
-            "kind": "array",
-            "element": 4
-          },
-          {
-            "kind": "primitive",
-            "type": "string"
-          },
-          {
-            "kind": "primitive",
-            "type": "number"
-          },
-          {
-            "kind": "union",
-            "types": [
-              7,
-              8,
-              9,
-              10
-            ]
-          },
-          {
-            "kind": "literal",
-            "value": "completed"
-          },
-          {
-            "kind": "literal",
-            "value": "deleted"
-          },
-          {
-            "kind": "literal",
-            "value": "in_progress"
-          },
-          {
-            "kind": "literal",
-            "value": "pending"
-          },
-          {
-            "kind": "literal",
-            "value": 2
-          },
-          {
-            "kind": "literal",
-            "value": true
-          },
-          {
-            "kind": "literal",
-            "value": "team/task"
-          }
-        ]
-      },
-      "names": [],
-      "sources": []
-    },
-    {
       "digest": "d634b0e4a22f5525bb396007039f9625faeccbaf821ed8e42e011e3b2290b768",
       "schema": {
         "root": 0,
@@ -89758,6 +92791,167 @@
       },
       "names": [],
       "sources": []
+    },
+    {
+      "digest": "d7e9ecfd8f64f2232342c34804dc843f2c7d1e0741474905b2de6ab0f7ca14c7",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attempts",
+                "type": 1,
+                "optional": true
+              },
+              {
+                "name": "blockedBy",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "description",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 8,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "ownerId",
+                "type": 12,
+                "optional": true
+              },
+              {
+                "name": "revision",
+                "type": 8,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "subject",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "writeScopes",
+                "type": 13,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 2
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "ended",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 8,
+                "optional": true
+              },
+              {
+                "name": "lostCause",
+                "type": 9,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 12,
+                "optional": false
+              },
+              {
+                "name": "reason",
+                "type": 12,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              4,
+              5,
+              6,
+              7
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "reassigned"
+          },
+          {
+            "kind": "literal",
+            "value": "released"
+          },
+          {
+            "kind": "literal",
+            "value": "completed"
+          },
+          {
+            "kind": "literal",
+            "value": "lost"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "union",
+            "types": [
+              10,
+              11
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "run-ended"
+          },
+          {
+            "kind": "literal",
+            "value": "owner-failed"
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "array",
+            "element": 12
+          },
+          {
+            "kind": "literal",
+            "value": "deleted"
+          }
+        ]
+      },
+      "names": [
+        "packages/experimental/agent-team/src/types.ts#DeletedTeamTask"
+      ],
+      "sources": [
+        "packages/experimental/agent-team/src/types.ts:166"
+      ]
     },
     {
       "digest": "d85590a5675c6e2fd8164e5792a6cceac714605b8ac228adae5ee668facb1490",
@@ -95324,7 +98518,7 @@
       },
       "names": [],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:214"
+        "packages/experimental/agent-team/src/types.ts:375"
       ]
     },
     {
@@ -96090,6 +99284,99 @@
       "sources": [
         "packages/llm/llm/src/types.ts:446"
       ]
+    },
+    {
+      "digest": "f1ded88b23fe5fd0a3a5fcd4bcce1fe74a764e785be0920e7e3082a2f7cb88b3",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "array",
+            "element": 1
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "ended",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "goalRevision",
+                "type": 7,
+                "optional": true
+              },
+              {
+                "name": "lostCause",
+                "type": 8,
+                "optional": true
+              },
+              {
+                "name": "ownerId",
+                "type": 11,
+                "optional": false
+              },
+              {
+                "name": "reason",
+                "type": 11,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              3,
+              4,
+              5,
+              6
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "completed"
+          },
+          {
+            "kind": "literal",
+            "value": "lost"
+          },
+          {
+            "kind": "literal",
+            "value": "reassigned"
+          },
+          {
+            "kind": "literal",
+            "value": "released"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "union",
+            "types": [
+              9,
+              10
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "owner-failed"
+          },
+          {
+            "kind": "literal",
+            "value": "run-ended"
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
     },
     {
       "digest": "f230c0b583e23b25ee0a61dbe4c05e95c1e2ae44b27939501eb9e03696f0c278",

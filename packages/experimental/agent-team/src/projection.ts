@@ -11,6 +11,7 @@ import type {
   TeamMessageId,
   TeamMessageSnapshot,
   TeamTaskSnapshot,
+  TeamTaskSnapshotV2,
 } from './types.ts'
 import {
   TeamId as toTeamId,
@@ -70,7 +71,7 @@ const teamMemberSnapshotSchema = z.object({
   error: z.string().optional(),
 }).strict() as z.ZodType<TeamMemberSnapshot>
 
-const teamTaskSnapshotSchema = z.object({
+const teamTaskSnapshotV2Schema = z.object({
   id: teamTaskIdSchema,
   revision: positiveSafeInteger,
   subject: z.string(),
@@ -79,7 +80,41 @@ const teamTaskSnapshotSchema = z.object({
   ownerId: sessionIdSchema.optional(),
   blockedBy: z.array(teamTaskIdSchema),
   writeScopes: z.array(z.string()),
-}).strict() as z.ZodType<TeamTaskSnapshot>
+}).strict() as z.ZodType<TeamTaskSnapshotV2>
+
+const lostCauseSchema = z.enum(['owner-failed', 'run-ended'])
+
+const teamTaskAttemptSchema = z.object({
+  ownerId: sessionIdSchema,
+  ended: z.enum(['released', 'reassigned', 'completed', 'lost']),
+  lostCause: lostCauseSchema.optional(),
+  reason: z.string().min(1).optional(),
+  goalRevision: positiveSafeInteger.optional(),
+}).strict().refine(
+  attempt => (attempt.ended === 'lost') === (attempt.lostCause !== undefined),
+  { message: 'an attempt carries lostCause exactly when it ended lost' },
+)
+
+const teamTaskFields = {
+  id: teamTaskIdSchema,
+  revision: positiveSafeInteger,
+  subject: z.string(),
+  description: z.string(),
+  blockedBy: z.array(teamTaskIdSchema),
+  writeScopes: z.array(z.string()),
+  goalRevision: positiveSafeInteger.optional(),
+  attempts: z.array(teamTaskAttemptSchema).min(1).optional(),
+}
+
+// One strict member per status: each names exactly the owner, cause, and owner-goal fields
+// that status carries, so a record with the fields of another status is refused.
+const teamTaskSnapshotSchema = z.discriminatedUnion('status', [
+  z.object({ ...teamTaskFields, status: z.literal('pending') }).strict(),
+  z.object({ ...teamTaskFields, status: z.literal('in_progress'), ownerId: sessionIdSchema }).strict(),
+  z.object({ ...teamTaskFields, status: z.literal('completed'), ownerId: sessionIdSchema }).strict(),
+  z.object({ ...teamTaskFields, status: z.literal('lost'), ownerId: sessionIdSchema, lostCause: lostCauseSchema, ownerGoalRevision: positiveSafeInteger.optional() }).strict(),
+  z.object({ ...teamTaskFields, status: z.literal('deleted'), ownerId: sessionIdSchema.optional() }).strict(),
+]) as z.ZodType<TeamTaskSnapshot>
 
 const teamMessageSnapshotSchema = z.object({
   id: teamMessageIdSchema,
@@ -100,11 +135,18 @@ const teamMemberEventSchema = z.object({
   member: teamMemberSnapshotSchema,
 }).strict() as z.ZodType<SessionEventMap['team/member']>
 
-const teamTaskEventSchema = z.object({
-  version: z.literal(2),
-  teamId: teamIdSchema,
-  task: teamTaskSnapshotSchema,
-}).strict() as z.ZodType<SessionEventMap['team/task']>
+const teamTaskEventSchema = z.union([
+  z.object({
+    version: z.literal(2),
+    teamId: teamIdSchema,
+    task: teamTaskSnapshotV2Schema,
+  }).strict(),
+  z.object({
+    version: z.literal(3),
+    teamId: teamIdSchema,
+    task: teamTaskSnapshotSchema,
+  }).strict(),
+]) as z.ZodType<SessionEventMap['team/task']>
 
 const teamMessageQueuedEventSchema = z.object({
   version: z.literal(2),
@@ -220,7 +262,10 @@ function applyProjectionEvent(state: TeamProjectionState, event: SessionEvent): 
   try {
     const selector = parsePersisted(event.type, teamEventSelectorSchema, event.data)
     if (selector.teamId !== state.id) return
-    if (selector.version !== 2) {
+    // `team/task` gained version 3 with the `lost` status; every other Team
+    // event is still written at version 2.
+    const supported = event.type === 'team/task' ? selector.version === 2 || selector.version === 3 : selector.version === 2
+    if (!supported) {
       throw new Error(`unsupported Agent Teams event version ${String(selector.version)}`)
     }
     applyCurrentTeamEvent(state, parseCurrentTeamEvent(event))
@@ -228,6 +273,19 @@ function applyProjectionEvent(state: TeamProjectionState, event: SessionEvent): 
     /* v8 ignore next -- the owned Team transition throws Error instances. */
     state.failure = error instanceof Error ? error.message : String(error)
   }
+}
+
+/**
+ * Read a version 2 task record as a current snapshot. Version 2 did not
+ * validate the owner per status; the builds that wrote it always recorded an
+ * owner on an in-progress or completed task and none on a pending one.
+ */
+function taskFromV2(task: TeamTaskSnapshotV2): TeamTaskSnapshot {
+  const { status, ownerId, ...fields } = task
+  if (status === 'pending') return { ...fields, status }
+  if (status === 'deleted') return { ...fields, status, ...ownerId === undefined ? {} : { ownerId } }
+  if (ownerId === undefined) throw new Error(`team task "${task.id}" is ${status} without an owner`)
+  return { ...fields, status, ownerId }
 }
 
 function applyCurrentTeamEvent(state: TeamState, event: TeamSessionEvent): void {
@@ -255,7 +313,7 @@ function applyCurrentTeamEvent(state: TeamState, event: TeamSessionEvent): void 
       break
     }
     case 'team/task': {
-      const task = event.data.task
+      const task = event.data.version === 2 ? taskFromV2(event.data.task) : event.data.task
       const index = state.tasks.findIndex(candidate => candidate.id === task.id)
       const prior = state.tasks[index]
       if (prior === undefined && task.revision !== 1) {
