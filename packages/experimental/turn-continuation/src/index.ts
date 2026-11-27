@@ -6,8 +6,10 @@
  * model instead of letting the turn close, at most `maxContinuations` times per
  * turn. The turn's recorded end reason is unchanged: a `max-tokens` turn stays
  * `max-tokens` however many continuations ran. The headless runner, the Team
- * service, and the Team settlement plugin therefore judge such a turn by its
- * last model message: one that was not cut off means the turn completed.
+ * service, and the Team settlement plugin count such a turn as completed when
+ * every cut-off message in it was answered by this plugin's notice and the
+ * message after the last notice was whole. They recognize the notice by its
+ * source: kind `turn-continuation`, reason `max-tokens`.
  *
  * @module @deepseek-ai/dsh-experimental-turn-continuation
  */

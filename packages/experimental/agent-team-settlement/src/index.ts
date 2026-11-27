@@ -18,7 +18,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { TeamError, taskUncollected } from '@deepseek-ai/dsh-experimental-agent-team'
+import { TeamError, TurnCutOffs, taskUncollected } from '@deepseek-ai/dsh-experimental-agent-team'
 import type { TeamService, TeamTaskId, TeamTaskView } from '@deepseek-ai/dsh-experimental-agent-team'
 import type { HeadlessSettlement, HeadlessSettlementReport, HeadlessUnsettledWork } from '@deepseek-ai/dsh-headless'
 import type { TurnEndReason } from '@deepseek-ai/dsh-session'
@@ -76,12 +76,12 @@ interface FollowedRun {
    */
   readonly baseline: ReadonlyMap<TeamTaskId, number>
   /**
-   * How the root's latest turn ended; absent until one ends. A turn the loop
-   * ended `max-tokens` whose latest model message was not cut off is `completed`.
+   * How the root's latest turn ended; absent until one ends. A `max-tokens`
+   * turn counts as `completed` under the rule of {@link TurnCutOffs}.
    */
   lastTurnEnd?: TurnEndReason['kind']
-  /** Whether the root's latest model message was cut off at the output limit. */
-  lastMessageCutOff: boolean
+  /** The root's model messages, which decide how a `max-tokens` turn is counted. */
+  readonly cutOffs: TurnCutOffs
   /** Why this run could not collect a task, for tasks whose reason the board does not record. */
   readonly reasons: Map<TeamTaskId, string>
 }
@@ -279,15 +279,8 @@ export function apply(ctx: Context, config: Config): void {
   ctx.on('session/event', (session, event) => {
     const run = runs.get(session.id)
     if (run === undefined) return
-    if (event.type === 'assistant/message') {
-      run.lastMessageCutOff = event.data.stream.some(entry =>
-        entry.type === 'chunk' && entry.chunk.type === 'finish' && entry.chunk.reason.kind === 'max-tokens')
-    }
-    if (event.type !== 'turn/end') return
-    // The loop reports max-tokens for a turn in which any message was cut off, also
-    // when the root went on afterwards; such a turn completed.
-    const { kind } = event.data.reason
-    run.lastTurnEnd = kind === 'max-tokens' && !run.lastMessageCutOff ? 'completed' : kind
+    run.cutOffs.observe(event)
+    if (event.type === 'turn/end') run.lastTurnEnd = run.cutOffs.outcome(event.data.reason.kind)
   })
   const settlement: HeadlessSettlement = {
     async begin(root, task) {
@@ -298,7 +291,7 @@ export function apply(ctx: Context, config: Config): void {
       for (const left of teams.outstandingTasks(root)) await teams.markLost(root, left.id, 'run-ended')
       const baseline = new Map(teams.listTasks(root).map(existing => [existing.id, existing.revision]))
       const recorded = await teams.beginTask(root, taskText(task))
-      const run: FollowedRun = { task: recorded.id, deadline, baseline, reasons: new Map(), lastMessageCutOff: false }
+      const run: FollowedRun = { task: recorded.id, deadline, baseline, reasons: new Map(), cutOffs: new TurnCutOffs() }
       runs.set(root.id, run)
       return {
         async settle() {

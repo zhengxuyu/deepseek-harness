@@ -7,9 +7,10 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 /**
  * How a member's or delegated run's turn ended: the subagent stop reason
  * (`completed`, `aborted`, `error`, `max-tokens`, `refusal`, or a backend's
- * merged variant), except that a turn reported `max-tokens` whose last model
- * message was not cut off is `completed`. Kept as a string so browser clients
- * read Team records without the host-only subagent types.
+ * merged variant), except that a turn reported `max-tokens` in which the
+ * continuation plugin had every cut-off message written again is `completed`.
+ * Kept as a string so browser clients read Team records without the host-only
+ * subagent types.
  */
 export type TeamStopReason = string
 

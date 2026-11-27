@@ -14,6 +14,7 @@ import SubagentService from '@deepseek-ai/dsh-subagent'
 import { SubagentRunId } from '@deepseek-ai/dsh-subagent'
 import type { SubagentRunInfo } from '@deepseek-ai/dsh-subagent'
 import { deliverSubagentPrompt, type HostPromptDeliverer } from '@deepseek-ai/dsh-subagent/internal'
+import * as TurnContinuation from '@deepseek-ai/dsh-experimental-turn-continuation'
 import * as SubagentFork from '@deepseek-ai/dsh-subagent-fork-in-process'
 import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import { MockAdapter, maxTokensResponse, textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
@@ -2360,32 +2361,39 @@ describe('Member turns that end without completing', () => {
     await waitNoAgent(ctx, started.member.id)
   })
 
-  it('keeps the tasks of a member that was cut off at the output limit and then finished its turn', async () => {
+  it.each([
+    // The continuation plugin's notice asks for the cut-off message again, and the message after it is whole.
+    ['the continuation plugin', true, 'in_progress', 'completed'],
+    // Any other message starts a step too, but nothing asked for the cut-off message again.
+    ['another message', false, 'lost', 'max-tokens'],
+  ] as const)('after a member turn was cut off and then continued by %s, leaves its task %s', async (_name, plugin, status, lastStop) => {
     const { ctx, lead, adapter } = await setup([
       textResponse('first turn done'), textResponse('lead reads the settlement'),
       maxTokensResponse('cut off'), textResponse('finished'), textResponse('lead reads the settlement'),
     ])
+    vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
     const ended: string[] = []
     ctx.on('subagent/end', (info) => { ended.push(info.stopReason) })
     const started = await spawn(ctx, lead, 'worker')
     await settledTurns(ctx, lead, adapter, 2)
-    // What a continuation plugin does: the cut-off message is answered with a notice, and the member goes on.
-    let continued = false
-    ctx.on('agent/turn-stopping', ({ agent }) => {
-      if (continued || agent.id !== started.member.id) return
-      continued = true
-      agent.steer(createUserMessage({ content: content('continue'), source: { kind: 'user' } }))
-    })
+    if (plugin) {
+      await ctx.plugin(TurnContinuation, { maxContinuations: 1, onMaxTokens: true })
+    } else {
+      let steered = false
+      ctx.on('agent/turn-stopping', ({ agent }) => {
+        if (steered || agent.id !== started.member.id) return
+        steered = true
+        agent.steer(createUserMessage({ content: content('an unrelated message'), source: { kind: 'user' } }))
+      })
+    }
     const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
-    const assigned = await ctx.agentTeams.updateTask(lead, {
-      taskId: task.id, expectedRevision: task.revision, action: 'reassign', owner: 'worker',
-    })
+    await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action: 'reassign', owner: 'worker' })
     await ctx.agentTeams.sendMessage(lead, { target: 'worker', content: content('continue'), signal: SIGNAL })
     await settledTurns(ctx, lead, adapter, 5)
-    // The loop still reports the turn as cut off; the member's work is judged by the message the turn ended with.
+    // The loop reports both turns as cut off; only the one the plugin continued finished what it was writing.
     expect(ended).toEqual(['completed', 'max-tokens'])
-    expect(ctx.agentTeams.getTask(lead, task.id)).toMatchObject({ status: 'in_progress', ownerName: 'worker', revision: assigned.revision })
-    expect(ctx.agentTeams.listMembers(lead)[1]).toMatchObject({ name: 'worker', lastStop: 'completed' })
+    await vi.waitFor(() => { expect(ctx.agentTeams.getTask(lead, task.id)).toMatchObject({ status, ownerName: 'worker' }) })
+    expect(ctx.agentTeams.listMembers(lead)[1]).toMatchObject({ name: 'worker', lastStop })
   })
 
   it('contains a failed lost mark after a member turn ended', async () => {

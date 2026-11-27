@@ -10,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-session-persistence'
 import type { SubagentRuntime, SubagentRunEndInfo, SubagentRunId, SubagentRunInfo, SubagentStopReason } from '@deepseek-ai/dsh-subagent'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { TeamActivity } from './activity.ts'
+import { TurnCutOffs } from './cut-off.ts'
 import { errorMessage, TeamError } from './error.ts'
 import { TeamJournal } from './journal.ts'
 import { TeamRuntimeLifecycle } from './lifecycle.ts'
@@ -40,6 +41,7 @@ export type * from './types.ts'
 export type { TeamMembership } from './roster.ts'
 export { TeamId, TeamMessageId, TeamTaskId } from './types.ts'
 export { TeamError } from './error.ts'
+export { TurnCutOffs } from './cut-off.ts'
 export { taskOpen, taskOutstanding, taskStarted, taskUncollected } from './task-status.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -61,18 +63,8 @@ interface TrackedRun {
   readonly local: boolean
   /** The board row of a tracked plain run, settled once its creation transaction commits; absent for a member's turn. */
   readonly task?: Promise<TeamTaskView>
-  /**
-   * Whether the run's latest model message was cut off at the output limit.
-   * Absent until the run produced one, and for a run whose Session is not in
-   * this process.
-   */
-  lastMessageCutOff?: boolean
-}
-
-/** Whether a model message ended at the output limit. */
-function cutOff(message: SessionEvent<'assistant/message'>['data']): boolean {
-  return message.stream.some(entry =>
-    entry.type === 'chunk' && entry.chunk.type === 'finish' && entry.chunk.reason.kind === 'max-tokens')
+  /** The run's model messages, when its Session is in this process; a run elsewhere feeds it nothing. */
+  readonly cutOffs: TurnCutOffs
 }
 
 /** Validate one positive safe-integer deployment limit. */
@@ -402,7 +394,7 @@ export class TeamService extends TypertRemoteService {
     const root = this.leadOf(parent)
     if (root === undefined) return
     if (this.journal.state(root).members.some(member => member.id === info.id)) {
-      this.runs.set(info.runId, { root, childId: info.id, local: info.local })
+      this.runs.set(info.runId, { root, childId: info.id, local: info.local, cutOffs: new TurnCutOffs() })
       return
     }
     if (!this.config.trackSubagentRuns) return
@@ -414,25 +406,14 @@ export class TeamService extends TypertRemoteService {
     task.catch((error: unknown) => {
       this.ctx.logger.warn(`Agent Teams could not record subagent run "${info.runId}": ${errorMessage(error)}`)
     })
-    this.runs.set(info.runId, { root, childId: info.id, local: info.local, task })
+    this.runs.set(info.runId, { root, childId: info.id, local: info.local, task, cutOffs: new TurnCutOffs() })
   }
 
-  /** Remember, for each followed run, whether its latest model message was cut off. */
+  /** Feed each followed run the events of its own Session. */
   private observeModelMessage(session: Session, event: SessionEvent): void {
-    if (event.type !== 'assistant/message') return
     for (const run of this.runs.values()) {
-      if (run.childId === session.id) run.lastMessageCutOff = cutOff(event.data)
+      if (run.childId === session.id) run.cutOffs.observe(event)
     }
-  }
-
-  /**
-   * How the work of an ended run ended. The agent loop reports `max-tokens`
-   * for a turn in which any model message was cut off, also when the model
-   * went on afterwards. When the run's latest model message was not cut off,
-   * the turn finished what it was doing, so its work `completed`.
-   */
-  private workOutcome(run: TrackedRun, stopReason: SubagentStopReason): SubagentStopReason {
-    return stopReason === 'max-tokens' && run.lastMessageCutOff === false ? 'completed' : stopReason
   }
 
   /**
@@ -441,14 +422,14 @@ export class TeamService extends TypertRemoteService {
    * loses the member's in-progress tasks with that stop reason: an aborted
    * turn was interrupted on purpose and the member can continue, any other
    * ending means it stopped without finishing. A tracked row completes when
-   * its run completed and is lost with the stop reason on any other. The
-   * outcome is the one {@link workOutcome} gives.
+   * its run completed and is lost with the stop reason on any other. A
+   * `max-tokens` run counts as `completed` under the rule of {@link TurnCutOffs}.
    */
   private observeRunEnd(info: SubagentRunEndInfo): void {
     const run = this.runs.get(info.runId)
     if (run === undefined) return
     this.runs.delete(info.runId)
-    const stopReason = this.workOutcome(run, info.stopReason)
+    const stopReason = run.cutOffs.outcome(info.stopReason)
     if (run.task === undefined) {
       void this.roster.recordStop(run.root, run.childId, stopReason).catch((error: unknown) => {
         this.ctx.logger.warn(`Agent Teams could not record the turn outcome of member "${run.childId}": ${errorMessage(error)}`)

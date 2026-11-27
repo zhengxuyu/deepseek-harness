@@ -23,7 +23,7 @@ interface TeamMemberSnapshot {
 }
 ```
 
-Every member starts in `provisioning` and reaches exactly one terminal roster phase, `active` or `failed`. Roster `running`/`inactive` status is derived separately and never rewrites this record. After that, each ended turn of an active member appends one more record that changes only `lastStop`, the epoch's stop reason (`completed`, `aborted`, `error`, `max-tokens`, `refusal`), written at payload version 3; version 2 records remain readable. The agent loop reports `max-tokens` for a turn in which any model message was cut off, also when the model went on afterwards; a turn whose last model message was not cut off is recorded as `completed` and keeps its tasks.
+Every member starts in `provisioning` and reaches exactly one terminal roster phase, `active` or `failed`. Roster `running`/`inactive` status is derived separately and never rewrites this record. After that, each ended turn of an active member appends one more record that changes only `lastStop`, the epoch's stop reason (`completed`, `aborted`, `error`, `max-tokens`, `refusal`), written at payload version 3; version 2 records remain readable. The agent loop reports `max-tokens` for a turn in which any model message was cut off, also when the model went on afterwards. Such a turn is recorded as `completed` and keeps its tasks only when each cut-off message was answered by the notice of the `turn-continuation` plugin, which asks for the message again, and the message after the last notice was whole. A cut-off message followed by a step that any other message started stays `max-tokens`.
 
 ## Durable mailbox
 

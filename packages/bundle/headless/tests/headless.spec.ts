@@ -13,7 +13,7 @@ import type {
   ResumeAgentOptions,
 } from '@deepseek-ai/dsh-agent'
 import AgentDefaultModelConfig from '@deepseek-ai/dsh-agent-default-model'
-import { LlmAttemptId, ToolCallId, createAssistantMessage, createToolResultMessage, type MessageId, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import { LlmAttemptId, ToolCallId, createAssistantMessage, createToolResultMessage, createUserMessage, type MessageId, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import SessionStore from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { Session, SessionId, UserMessage } from '@deepseek-ai/dsh-session'
@@ -499,7 +499,12 @@ describe('headless runner', () => {
     await test.ctx.fiber.dispose()
   })
 
-  it('exits 0 when a turn was cut off at the output limit and the model then finished its answer', async () => {
+  it.each([
+    // The continuation plugin's notice asks for the cut-off message again, and the answer after it is whole.
+    ['the continuation notice', { kind: 'turn-continuation', reason: 'max-tokens', attempt: 1 }, { code: 0, err: '' }],
+    // Any other message starts a step too, but nothing asked for the cut-off message again.
+    ['another message', { kind: 'user' }, { code: 1, err: 'dsh: turn ended: max-tokens\n' }],
+  ] as const)('counts a turn cut off at the output limit and then continued by %s', async (_name, source, expected) => {
     const test = await bench({
       afterPrompt(session, message) {
         session.append('turn/start', { turn: 1 })
@@ -516,6 +521,11 @@ describe('headless runner', () => {
         }, { surfaceOp: 'append' })
         session.append('step/end', { turn: 1, step: 1 })
         session.append('step/start', { turn: 1, step: 2 })
+        session.append('user/message', createUserMessage({
+          content: [{ type: 'text', text: 'go on' }],
+          // The continuation source kind is declared by a plugin this package does not import.
+          source: source as never,
+        }), { surfaceOp: 'append' })
         session.append('assistant/message', {
           stream: [],
           turn: 1,
@@ -530,7 +540,7 @@ describe('headless runner', () => {
         session.append('turn/end', { turn: 1, reason: { kind: 'max-tokens' } })
       },
     })
-    expect(await test.run()).toMatchObject({ code: 0, out: 'whole answer\n', err: '' })
+    expect(await test.run()).toMatchObject({ ...expected, out: 'whole answer\n' })
     await test.ctx.fiber.dispose()
   })
 

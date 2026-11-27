@@ -8,6 +8,7 @@ import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
+import * as TurnContinuation from '@deepseek-ai/dsh-experimental-turn-continuation'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
@@ -112,24 +113,33 @@ describe('agent-team-settlement', () => {
     expect(ctx.agentTeams.getTask(lead, task!.id)).toMatchObject({ status: 'lost', lostCause: 'owner-failed' })
   })
 
-  it('completes the run\'s task when the root was cut off at the output limit and then finished its turn', async () => {
+  it.each([
+    // The continuation plugin's notice asks for the cut-off message again, and the message after it is whole.
+    ['the continuation plugin', true, 'completed'],
+    // Any other message starts a step too, but nothing asked for the cut-off message again.
+    ['another message', false, 'lost'],
+  ] as const)('after the root was cut off and then continued by %s, leaves the run\'s task %s', async (_name, plugin, status) => {
     const { ctx, lead, begin } = await setup([maxTokensResponse('cut off'), textResponse('finished')])
-    // What a continuation plugin does: the cut-off message is answered with a notice, and the root goes on.
-    let continued = false
-    ctx.on('agent/turn-stopping', ({ agent }) => {
-      if (continued) return
-      continued = true
-      agent.steer(prompt('continue'))
-    })
+    if (plugin) {
+      await ctx.plugin(TurnContinuation, { maxContinuations: 1, onMaxTokens: true })
+    } else {
+      let steered = false
+      ctx.on('agent/turn-stopping', ({ agent }) => {
+        if (steered) return
+        steered = true
+        agent.steer(prompt('an unrelated message'))
+      })
+    }
     const ends: string[] = []
     ctx.on('session/event', (_session, event) => { if (event.type === 'turn/end') ends.push(event.data.reason.kind) })
     const run = await begin(lead)
     lead.followup(prompt('the request'))
     const [task] = ctx.agentTeams.listTasks(lead)
-    await expect(run.settle()).resolves.toEqual({ unsettled: [] })
-    // The loop still reports the turn as cut off; the task is settled by the message the turn ended with.
+    const report = await run.settle()
+    // The loop reports the turn as cut off either way.
     expect(ends).toEqual(['max-tokens'])
-    expect(ctx.agentTeams.getTask(lead, task!.id).status).toBe('completed')
+    expect(ctx.agentTeams.getTask(lead, task!.id).status).toBe(status)
+    expect(report.unsettled.map(row => row.reason)).toEqual(status === 'completed' ? [] : ['the turn ended max-tokens'])
   })
 
   it('loses the run\'s task when the root\'s turn did not complete', async () => {

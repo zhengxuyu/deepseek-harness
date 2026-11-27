@@ -134,12 +134,24 @@ interface HeadlessIo {
   exit(code: number): void
 }
 
-/** Aggregate the last assistant text and turn outcome in one owned interval. */
+/**
+ * Aggregate the last assistant text and turn outcome in one owned interval.
+ *
+ * The agent loop reports `max-tokens` for a turn in which any model message
+ * was cut off at the output limit, also when the model went on afterwards.
+ * Such a turn is `completed` here only when each cut-off message was answered
+ * by a `turn-continuation` notice, which tells the model to write the message
+ * again, and the message after the last notice was whole. A cut-off message
+ * followed by a step that any other message started stays `max-tokens`.
+ */
 function summarize(session: Session, firstSeq: SessionLogOffset): RunOutcome {
   let started = false
   let text = ''
   let reason: SessionEvent<'turn/end'>['data']['reason'] | undefined
-  let cutOff = false
+  // The latest model message was cut off; a continuation notice followed it; a cut-off message was left as it was.
+  let open = false
+  let continued = false
+  let abandoned = false
   const length = session.seq
   for (let seq = firstSeq; seq < length; seq++) {
     // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
@@ -149,23 +161,31 @@ function summarize(session: Session, firstSeq: SessionLogOffset): RunOutcome {
     }
     if (event.type === 'turn/start') {
       started = true
+      open = false
+      continued = false
+      abandoned = false
       continue
     }
     if (!started) continue
+    if (event.type === 'user/message') {
+      // The source kind is declared by the continuation plugin, which this package does not import.
+      const source: { readonly kind: string; readonly reason?: unknown } = event.data.source
+      if (source.kind === 'turn-continuation' && source.reason === 'max-tokens') continued = true
+    }
     if (event.type === 'assistant/message') {
       const joined = event.data.message.content
         .filter(block => block.type === 'text')
         .map(block => block.text)
         .join('')
       if (joined !== '') text = joined
-      cutOff = event.data.stream.some(entry =>
+      if (open && !continued) abandoned = true
+      open = event.data.stream.some(entry =>
         entry.type === 'chunk' && entry.chunk.type === 'finish' && entry.chunk.reason.kind === 'max-tokens')
+      continued = false
     }
     if (event.type === 'turn/end') reason = event.data.reason
   }
-  // The loop reports max-tokens for a turn in which any message was cut off, also
-  // when the model went on afterwards; such a turn finished its answer.
-  if (reason?.kind === 'max-tokens' && !cutOff) reason = { kind: 'completed' }
+  if (reason?.kind === 'max-tokens' && !open && !abandoned) reason = { kind: 'completed' }
   return { text, reason }
 }
 
