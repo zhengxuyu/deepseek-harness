@@ -2,6 +2,7 @@
 
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SubagentStopReason } from '@deepseek-ai/dsh-subagent'
 import type { TeamMembership } from './roster.ts'
 import { TeamError } from './error.ts'
 import type { TeamJournal } from './journal.ts'
@@ -22,6 +23,7 @@ import type {
   TeamTaskAttemptEnd,
   TeamTaskFields,
   TeamTaskLostCause,
+  TeamStopReason,
   TeamTaskSnapshot,
   TeamTaskView,
   UpdateTeamTaskRequest,
@@ -48,7 +50,9 @@ export interface TrackedRunRequest {
 
 /** The fields a transition carries over unchanged, with the status, owner, cause, and owner goal removed. */
 function fields(task: TeamTaskSnapshot): TeamTaskFields {
-  const { status: _status, ownerId: _ownerId, lostCause: _lostCause, ownerGoalRevision: _ownerGoalRevision, ...rest } = task
+  const {
+    status: _status, ownerId: _ownerId, lostCause: _lostCause, ownerGoalRevision: _ownerGoalRevision, ownerStop: _ownerStop, ...rest
+  } = task
   return rest
 }
 
@@ -66,6 +70,7 @@ function closed(task: TeamTaskSnapshot, ended: TeamTaskAttemptEnd, reason: strin
     ownerId: task.ownerId,
     ended,
     ...task.lostCause === undefined ? {} : { lostCause: task.lostCause },
+    ...task.ownerStop === undefined ? {} : { ownerStop: task.ownerStop },
     ...reason === undefined ? {} : { reason },
     ...goalRevision === undefined ? {} : { goalRevision },
   }
@@ -83,8 +88,8 @@ function inProgress(task: TeamTaskSnapshot, ownerId: SessionId, reason?: string)
 }
 
 /** The in-progress task marked `lost`; its owner stays recorded. */
-function lost(task: InProgressTeamTask, lostCause: TeamTaskLostCause): LostTeamTask {
-  return { ...fields(task), status: 'lost', ownerId: task.ownerId, lostCause }
+function lost(task: InProgressTeamTask, lostCause: TeamTaskLostCause, ownerStop?: TeamStopReason): LostTeamTask {
+  return { ...fields(task), status: 'lost', ownerId: task.ownerId, lostCause, ...ownerStop === undefined ? {} : { ownerStop } }
 }
 
 /** The tombstone of a pending or lost task; a lost task's owner stays recorded and its cause does not. */
@@ -177,10 +182,17 @@ export class TeamTaskBoard {
    * @param cause - why the harness gave up on the owner.
    * @param ownerId - the owner the harness gave up on; the task is refused when another owner holds it.
    *   Omitted when the run itself ended, which loses the task whoever holds it.
+   * @param ownerStop - how the owning run ended, when the cause is a run's stop reason.
    * @returns the lost task view.
    */
-  async markLost(root: Agent, id: TeamTaskId, cause: TeamTaskLostCause, ownerId?: SessionId): Promise<TeamTaskView> {
-    return this.transition(root, id, ownerId, current => lost(current, cause))
+  async markLost(
+    root: Agent,
+    id: TeamTaskId,
+    cause: TeamTaskLostCause,
+    ownerId?: SessionId,
+    ownerStop?: SubagentStopReason,
+  ): Promise<TeamTaskView> {
+    return this.transition(root, id, ownerId, current => lost(current, cause, ownerStop))
   }
 
   /**
@@ -188,14 +200,20 @@ export class TeamTaskBoard {
    * @param root - exact live Team Lead whose log holds the tasks.
    * @param ownerId - member or delegated child that can no longer finish its work.
    * @param cause - why the harness gave up on the owner.
+   * @param ownerStop - how the owner's turn ended, when the cause is a turn's stop reason.
    * @returns the ids marked, in creation order.
    */
-  async markOwnerLost(root: Agent, ownerId: SessionId, cause: TeamTaskLostCause): Promise<TeamTaskId[]> {
+  async markOwnerLost(
+    root: Agent,
+    ownerId: SessionId,
+    cause: TeamTaskLostCause,
+    ownerStop?: SubagentStopReason,
+  ): Promise<TeamTaskId[]> {
     return this.journal.transact(root.id, async () => {
       const marked: TeamTaskId[] = []
       for (const current of [...this.journal.state(root).tasks]) {
         if (!isOutstanding(current) || current.ownerId !== ownerId) continue
-        const task: TeamTaskSnapshot = { ...lost(current, cause), revision: current.revision + 1 }
+        const task: TeamTaskSnapshot = { ...lost(current, cause, ownerStop), revision: current.revision + 1 }
         await this.journal.appendAndFlush(root, 'team/task', { version: 3, teamId: TeamId(root.id), task })
         marked.push(task.id)
       }
@@ -619,6 +637,7 @@ export class TeamTaskBoard {
       ...task.attempts === undefined
         ? {}
         : { attempts: task.attempts.map(({ ownerId, ...attempt }) => ({ ownerName: this.ownerName(root, state, ownerId), ...attempt })) },
+      ...task.ownerStop === undefined ? {} : { ownerStop: task.ownerStop },
       ready: task.status === 'pending' && this.taskReady(state, task),
       writeScopeWarnings: [...warnings],
     }

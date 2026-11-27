@@ -14,6 +14,7 @@ import SubagentService from '@deepseek-ai/dsh-subagent'
 import { SubagentRunId } from '@deepseek-ai/dsh-subagent'
 import type { SubagentRunInfo } from '@deepseek-ai/dsh-subagent'
 import { deliverSubagentPrompt, type HostPromptDeliverer } from '@deepseek-ai/dsh-subagent/internal'
+import * as TurnContinuation from '@deepseek-ai/dsh-experimental-turn-continuation'
 import * as SubagentFork from '@deepseek-ai/dsh-subagent-fork-in-process'
 import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import { MockAdapter, maxTokensResponse, textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
@@ -86,6 +87,7 @@ function content(text: string) {
 interface TeamServiceInternals {
   readonly roster: {
     readonly inFlightCreations: Set<Promise<unknown>>
+    recordStop(root: Agent, memberId: SessionId, reason: string): Promise<boolean>
     checkpointInitialPrompt(childId: SessionId, messageId: string, signal: AbortSignal): Promise<void>
     reconcileProvisioning(root: Agent, signal: AbortSignal): Promise<void>
     liveChildrenByRoot(): Map<Agent, SessionId[]>
@@ -2018,6 +2020,41 @@ describe('Lost tasks and the frozen executed graph', () => {
   })
 })
 
+describe('Member turn outcomes', () => {
+  it('records how each teammate turn ended on the roster and in the Lead log', async () => {
+    const { ctx, lead } = await setup([textResponse('first turn done'), 'hang'])
+    const started = await spawn(ctx, lead, 'mate')
+    expect(started.member).not.toHaveProperty('lastStop')
+    await vi.waitFor(() => {
+      expect(ctx.agentTeams.listMembers(lead)[1]).toMatchObject({ name: 'mate', status: 'inactive', lastStop: 'completed' })
+    })
+    expect(durable(lead).members[0]).toMatchObject({ phase: 'active', lastStop: 'completed' })
+    // The next turn is interrupted; the record follows the latest outcome.
+    await ctx.agentTeams.sendMessage(lead, { target: 'mate', content: content('again'), signal: SIGNAL })
+    const mate = await waitRunning(ctx, started.member.id)
+    ctx.agentTeams.interrupt(lead, 'mate')
+    await waitNoAgent(ctx, mate.id)
+    await vi.waitFor(() => {
+      const row = ctx.agentTeams.listMembers(lead)[1]
+      expect(row).toMatchObject({ status: 'inactive' })
+      // The mock hangs until torn down, which the epoch reports as an error; either way it did not complete.
+      expect(row?.lastStop).toMatch(/^(aborted|error)$/)
+    })
+  })
+
+  it('ignores a turn outcome for a member that is not active and warns when the record fails', async () => {
+    const { ctx, lead } = await setup([textResponse('done')])
+    const internals = teamInternals(ctx)
+    await expect(internals.roster.recordStop(lead, SessionId('nobody'), 'completed')).resolves.toBe(false)
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    vi.spyOn(internals.roster, 'recordStop').mockRejectedValueOnce(new Error('disk full'))
+    await spawn(ctx, lead, 'mate')
+    await vi.waitFor(() => {
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not record the turn outcome of member'))
+    })
+  })
+})
+
 describe('Tracked subagent runs', () => {
   it('records a delegated run as an owned task and completes it when the run completes', async () => {
     const { ctx, lead } = await setup([textResponse('child done')], { trackSubagentRuns: true })
@@ -2053,8 +2090,13 @@ describe('Tracked subagent runs', () => {
     await run.result
     await run.dispose()
     await vi.waitFor(() => {
-      expect(ctx.agentTeams.listTasks(lead)[0]).toMatchObject({ status: 'lost', lostCause: 'owner-failed' })
+      expect(ctx.agentTeams.listTasks(lead)[0]).toMatchObject({ status: 'lost', lostCause: 'owner-failed', ownerStop: 'aborted' })
     })
+    // Reopening clears how the run ended along with the owner.
+    const lost = ctx.agentTeams.listTasks(lead)[0]!
+    const reopened = await ctx.agentTeams.updateTask(lead, { taskId: lost.id, expectedRevision: lost.revision, action: 'reopen' })
+    expect('ownerStop' in reopened).toBe(false)
+    expect(durable(lead).tasks[0]).not.toHaveProperty('ownerStop')
   })
 
   it('does not track roster epochs, orphaned parents, or unknown runs, and warns on a failed record', async () => {
@@ -2314,9 +2356,44 @@ describe('Member turns that end without completing', () => {
     await vi.waitFor(() => { expect(ended).toEqual(['completed', stopReason]) }, { timeout: 5_000 })
     await vi.waitFor(() => { expect(ctx.agentTeams.getTask(lead, task.id).status).toBe(status) })
     if (status === 'lost') {
-      expect(ctx.agentTeams.getTask(lead, task.id)).toMatchObject({ lostCause: 'owner-failed', ownerName: 'worker' })
+      expect(ctx.agentTeams.getTask(lead, task.id)).toMatchObject({ lostCause: 'owner-failed', ownerStop: stopReason, ownerName: 'worker' })
     }
     await waitNoAgent(ctx, started.member.id)
+  })
+
+  it.each([
+    // The continuation plugin's notice asks for the cut-off message again, and the message after it is whole.
+    ['the continuation plugin', true, 'in_progress', 'completed'],
+    // Any other message starts a step too, but nothing asked for the cut-off message again.
+    ['another message', false, 'lost', 'max-tokens'],
+  ] as const)('after a member turn was cut off and then continued by %s, leaves its task %s', async (_name, plugin, status, lastStop) => {
+    const { ctx, lead, adapter } = await setup([
+      textResponse('first turn done'), textResponse('lead reads the settlement'),
+      maxTokensResponse('cut off'), textResponse('finished'), textResponse('lead reads the settlement'),
+    ])
+    vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    const ended: string[] = []
+    ctx.on('subagent/end', (info) => { ended.push(info.stopReason) })
+    const started = await spawn(ctx, lead, 'worker')
+    await settledTurns(ctx, lead, adapter, 2)
+    if (plugin) {
+      await ctx.plugin(TurnContinuation, { maxContinuations: 1, onMaxTokens: true })
+    } else {
+      let steered = false
+      ctx.on('agent/turn-stopping', ({ agent }) => {
+        if (steered || agent.id !== started.member.id) return
+        steered = true
+        agent.steer(createUserMessage({ content: content('an unrelated message'), source: { kind: 'user' } }))
+      })
+    }
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
+    await ctx.agentTeams.updateTask(lead, { taskId: task.id, expectedRevision: task.revision, action: 'reassign', owner: 'worker' })
+    await ctx.agentTeams.sendMessage(lead, { target: 'worker', content: content('continue'), signal: SIGNAL })
+    await settledTurns(ctx, lead, adapter, 5)
+    // The loop reports both turns as cut off; only the one the plugin continued finished what it was writing.
+    expect(ended).toEqual(['completed', 'max-tokens'])
+    await vi.waitFor(() => { expect(ctx.agentTeams.getTask(lead, task.id)).toMatchObject({ status, ownerName: 'worker' }) })
+    expect(ctx.agentTeams.listMembers(lead)[1]).toMatchObject({ name: 'worker', lastStop })
   })
 
   it('contains a failed lost mark after a member turn ended', async () => {

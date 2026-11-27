@@ -13,7 +13,7 @@ import type {
   ResumeAgentOptions,
 } from '@deepseek-ai/dsh-agent'
 import AgentDefaultModelConfig from '@deepseek-ai/dsh-agent-default-model'
-import { LlmAttemptId, ToolCallId, createAssistantMessage, createToolResultMessage, type MessageId, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import { LlmAttemptId, ToolCallId, createAssistantMessage, createToolResultMessage, createUserMessage, type MessageId, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import SessionStore from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { Session, SessionId, UserMessage } from '@deepseek-ai/dsh-session'
@@ -222,6 +222,9 @@ async function bench(script: Script, options: BenchOptions = {}): Promise<{
     },
   }
 }
+
+/** The stream record of a model message that ended at the output limit. */
+const CUT_OFF = [{ type: 'chunk' as const, time: 1, chunk: { type: 'finish' as const, reason: { kind: 'max-tokens' as const } } }]
 
 describe('headless runner', () => {
   it('records a fresh Session in the filesystem provider working directory', async () => {
@@ -470,6 +473,74 @@ describe('headless runner', () => {
       begin: (root: Agent) => Promise.resolve({ settle: async () => { await root.whenIdle(); return { unsettled: [] } } }),
     })
     expect(await test.run()).toMatchObject({ code: 0, out: 'settled answer\n', err: '' })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('exits 1 and names a final turn cut off at the output limit', async () => {
+    const test = await bench({
+      afterPrompt(session, message) {
+        session.append('turn/start', { turn: 1 })
+        session.append('step/start', { turn: 1, step: 1 })
+        session.append('user/message', message, { surfaceOp: 'append' })
+        session.append('assistant/message', {
+          stream: CUT_OFF,
+          turn: 1,
+          step: 1,
+          message: createAssistantMessage({
+            content: [{ type: 'text', text: 'partial answer' }],
+            source: { provider: 'test-provider', model: 'test-model' },
+          }),
+        }, { surfaceOp: 'append' })
+        session.append('step/end', { turn: 1, step: 1 })
+        session.append('turn/end', { turn: 1, reason: { kind: 'max-tokens' } })
+      },
+    })
+    expect(await test.run()).toMatchObject({ code: 1, out: 'partial answer\n', err: 'dsh: turn ended: max-tokens\n' })
+    await test.ctx.fiber.dispose()
+  })
+
+  it.each([
+    // The continuation plugin's notice asks for the cut-off message again, and the answer after it is whole.
+    ['the continuation notice', { kind: 'turn-continuation', reason: 'max-tokens', attempt: 1 }, { code: 0, err: '' }],
+    // Any other message starts a step too, but nothing asked for the cut-off message again.
+    ['another message', { kind: 'user' }, { code: 1, err: 'dsh: turn ended: max-tokens\n' }],
+  ] as const)('counts a turn cut off at the output limit and then continued by %s', async (_name, source, expected) => {
+    const test = await bench({
+      afterPrompt(session, message) {
+        session.append('turn/start', { turn: 1 })
+        session.append('step/start', { turn: 1, step: 1 })
+        session.append('user/message', message, { surfaceOp: 'append' })
+        session.append('assistant/message', {
+          stream: CUT_OFF,
+          turn: 1,
+          step: 1,
+          message: createAssistantMessage({
+            content: [{ type: 'text', text: 'partial answer' }],
+            source: { provider: 'test-provider', model: 'test-model' },
+          }),
+        }, { surfaceOp: 'append' })
+        session.append('step/end', { turn: 1, step: 1 })
+        session.append('step/start', { turn: 1, step: 2 })
+        session.append('user/message', createUserMessage({
+          content: [{ type: 'text', text: 'go on' }],
+          // The continuation source kind is declared by a plugin this package does not import.
+          source: source as never,
+        }), { surfaceOp: 'append' })
+        session.append('assistant/message', {
+          stream: [],
+          turn: 1,
+          step: 2,
+          message: createAssistantMessage({
+            content: [{ type: 'text', text: 'whole answer' }],
+            source: { provider: 'test-provider', model: 'test-model' },
+          }),
+        }, { surfaceOp: 'append' })
+        session.append('step/end', { turn: 1, step: 2 })
+        // The loop keeps max-tokens for the turn once any of its messages was cut off.
+        session.append('turn/end', { turn: 1, reason: { kind: 'max-tokens' } })
+      },
+    })
+    expect(await test.run()).toMatchObject({ ...expected, out: 'whole answer\n' })
     await test.ctx.fiber.dispose()
   })
 

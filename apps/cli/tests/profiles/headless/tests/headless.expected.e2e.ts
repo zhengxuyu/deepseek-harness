@@ -860,12 +860,17 @@ describe('headless stream-json snapshots', () => {
           if (typeof identity !== 'string') throw new Error('Teammate initial task has no identity text')
           return [identity.trimEnd()]
         }).sort()
+        const latestMembers = new Map(members.map(member => [member.id, member]))
         projection = {
           sessions: logs.length,
           workflowStopReason: (rows.find(row => row.type === 'tool-workflow/run-end')?.data as JsonObject)?.stopReason,
           memberEdges: members.length,
           identityReminders,
-          activeMembers: members.filter(member => member.phase === 'active').map(member => member.name).sort(),
+          // The latest record per member: provisioning, active, then one record per ended turn.
+          activeMembers: [...latestMembers.values()].filter(member => member.phase === 'active').map(member => member.name).sort(),
+          memberStops: Object.fromEntries([...latestMembers.values()]
+            .map((member): [string, string | null] => [String(member.name), typeof member.lastStop === 'string' ? member.lastStop : null])
+            .sort()),
           tasks: latestTasks.map(task => ({
             subject: task.subject,
             revision: task.revision,
@@ -907,7 +912,11 @@ describe('headless stream-json snapshots', () => {
       You are teammate "researcher".
       </system-reminder>",
         ],
-        "memberEdges": 4,
+        "memberEdges": 6,
+        "memberStops": {
+          "implementer": "completed",
+          "researcher": "completed",
+        },
         "queuedMessages": 2,
         "sessions": 4,
         "steerEvidence": {

@@ -9,7 +9,7 @@ Types shared by the experimental implicit-root Team domain, model tools, and hos
 `TeamId` is the root `SessionId` under a distinct [brand](core.md#branded-ids). `TeamTaskId` is Team-local and monotonically allocated as `task-<n>`; `TeamMessageId` is globally random. A teammate's Session id remains its persistent identity, while `name` is an immutable model/UI label.
 
 ```ts type-equiv
-/** Whole durable value written on every teammate lifecycle change. */
+/** Whole durable value written on every teammate lifecycle change and turn end. */
 interface TeamMemberSnapshot {
   readonly id: SessionId
   readonly name: string
@@ -18,10 +18,12 @@ interface TeamMemberSnapshot {
   readonly context: 'fresh' | 'fork'
   readonly phase: TeamMemberPhase
   readonly error?: string
+  /** How the member's latest turn ended; present once an active member's first turn has ended. */
+  readonly lastStop?: TeamStopReason
 }
 ```
 
-Every member starts in `provisioning` and reaches exactly one terminal roster phase, `active` or `failed`. Roster `running`/`inactive` status is derived separately and never rewrites this record.
+Every member starts in `provisioning` and reaches exactly one terminal roster phase, `active` or `failed`. Roster `running`/`inactive` status is derived separately and never rewrites this record. After that, each ended turn of an active member appends one more record that changes only `lastStop`, the epoch's stop reason (`completed`, `aborted`, `error`, `max-tokens`, `refusal`), written at payload version 3; version 2 records remain readable. The agent loop reports `max-tokens` for a turn in which any model message was cut off, also when the model went on afterwards. Such a turn is recorded as `completed` and keeps its tasks only when each cut-off message was answered by the notice of the `turn-continuation` plugin, which asks for the message again, and the message after the last notice was whole. A cut-off message followed by a step that any other message started stays `max-tokens`.
 
 ## Durable mailbox
 
@@ -82,11 +84,13 @@ Every variant carries `id`, `revision`, `subject`, `description`, `blockedBy`, a
 | `lost` | its owner is gone | required: the owner that held it | required: `owner-failed` or `run-ended` |
 | `deleted` | retained tombstone | optional: kept from a `lost` task | absent |
 
+A `lost` task with cause `owner-failed` also records `ownerStop`, the stop reason of the member turn or tracked run that lost it, when the harness observed one. No other status carries it.
+
 `lost` means only that the owner is gone. `owner-failed` records that the owning member's turn, or the owning tracked run, ended without completing the task; `run-ended` records that a run ended before the task finished. `lost` says nothing about whether finished work was accepted, so a later acceptance check needs its own record. A `lost` task may also carry `ownerGoalRevision`, described below; no other status does.
 
-**Attempts and the goal.** A task records its earlier ownerships in `attempts`, in the order they ended. An attempt names the owner and how the ownership ended: `released` when the owner or the Lead returned the task to `pending`, `reassigned` when the Lead moved it to another member, and `completed` or `lost` when the task was reopened from that status, with the `lostCause` it had. `release`, `reassign`, and `reopen` accept a `reason`, which is recorded on the attempt the action ends. Only the message a member receives when the Lead unassigns or reassigns a task it is working on carries the reason; `reopen` and an owner's own `release` send no message, so their reason reaches a member only through `attempts`. A reason is feedback on the work: it leaves `subject` and `description` unchanged. `edit` changes the goal, and an edit of `subject` or `description` sets `goalRevision` to the new revision; each attempt records the `goalRevision` its owner worked toward, so a reader can tell a second attempt at the same goal from an attempt at a changed one. An attempt with no `goalRevision`, or with 1, worked toward the text the task was created with. A `lost` task can be edited before it is reopened, and its owner never saw that edit: the first such edit stores the goal the owner had as `ownerGoalRevision` on the lost task, and `reopen` records that value on the attempt. `attempts` and `goalRevision` are absent until they have something to record.
+**Attempts and the goal.** A task records its earlier ownerships in `attempts`, in the order they ended. An attempt names the owner and how the ownership ended: `released` when the owner or the Lead returned the task to `pending`, `reassigned` when the Lead moved it to another member, and `completed` or `lost` when the task was reopened from that status, with the `lostCause` and `ownerStop` it had. `release`, `reassign`, and `reopen` accept a `reason`, which is recorded on the attempt the action ends. Only the message a member receives when the Lead unassigns or reassigns a task it is working on carries the reason; `reopen` and an owner's own `release` send no message, so their reason reaches a member only through `attempts`. A reason is feedback on the work: it leaves `subject` and `description` unchanged. `edit` changes the goal, and an edit of `subject` or `description` sets `goalRevision` to the new revision; each attempt records the `goalRevision` its owner worked toward, so a reader can tell a second attempt at the same goal from an attempt at a changed one. An attempt with no `goalRevision`, or with 1, worked toward the text the task was created with. A `lost` task can be edited before it is reopened, and its owner never saw that edit: the first such edit stores the goal the owner had as `ownerGoalRevision` on the lost task, and `reopen` records that value on the attempt. `attempts` and `goalRevision` are absent until they have something to record.
 
-Three groups of statuses are defined once, in `task-status.ts`, and every decision uses them. A task is *outstanding* while it is `in_progress`: a run that follows the board waits only on outstanding tasks. A task is *open* while it is `pending` or `lost`: its text, edges, and existence may change. A task is *started* while it is `in_progress` or `completed`: it is frozen, and every task in its `blockedBy` is `completed`. Views add owner name, readiness, lost cause, and write-scope overlap warnings without changing the durable snapshot.
+Three groups of statuses are defined once, in `task-status.ts`, and every decision uses them. A task is *outstanding* while it is `in_progress`: a run that follows the board waits only on outstanding tasks. A task is *open* while it is `pending` or `lost`: its text, edges, and existence may change. A task is *started* while it is `in_progress` or `completed`: it is frozen, and every task in its `blockedBy` is `completed`. Views add owner name, readiness, lost cause, owner stop, and write-scope overlap warnings without changing the durable snapshot.
 
 <a id="task-status-transitions"></a>
 
@@ -294,9 +298,10 @@ outstandingTasks(caller: Agent): OutstandingTeamTask[]
  * @param cause - why the harness gave up on the owner.
  * @param ownerId - the owner the harness gave up on. A task another owner holds is refused with
  *   `TEAM_TASK_INVALID_TRANSITION`. Omit it when the run itself ended, which loses the task whoever holds it.
+ * @param ownerStop - how the owning run ended, when the cause is a run's stop reason.
  * @returns the lost task view.
  */
-async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause, ownerId?: SessionId): Promise<TeamTaskView>
+async markLost( caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause, ownerId?: SessionId, ownerStop?: SubagentStopReason, ): Promise<TeamTaskView>
 
 /**
  * Wait for the next Team-domain or member-status change.
@@ -338,7 +343,7 @@ tryMembership(agent: Agent): TeamMembership | undefined
 @Remote('view') remoteView(agent: Agent): TeamView
 ```
 
-Types: [Agent](core.md) · [SessionId](core.md)
+Types: [Agent](core.md) · [SessionId](core.md) · [SubagentStopReason](subagent.md)
 
 Source: [`packages/experimental/agent-team/src/index.ts`](../../packages/experimental/agent-team/src/index.ts)
 <!-- END GENERATED cordis-surface -->

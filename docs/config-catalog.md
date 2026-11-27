@@ -754,7 +754,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/experimental/agent-team/src/types.ts:274`](../packages/experimental/agent-team/src/types.ts)
+Source: [`packages/experimental/agent-team/src/types.ts:313`](../packages/experimental/agent-team/src/types.ts)
 
 <a id="deepseek-aidsh-experimental-agent-team-settlement"></a>
 
@@ -1124,6 +1124,22 @@ export interface Config {
 ```
 
 Source: [`packages/experimental/tool-agent-team/src/index.ts:17`](../packages/experimental/tool-agent-team/src/index.ts)
+
+<a id="deepseek-aidsh-experimental-turn-continuation"></a>
+
+## `@deepseek-ai/dsh-experimental-turn-continuation`
+
+```ts config-catalog
+/** Deployment bounds for how often one turn is continued. */
+export interface Config {
+  /** Maximum continuation notices sent within one turn before it is allowed to end as it is. */
+  readonly maxContinuations: number
+  /** Whether a message cut off at the output limit is continued too, not only an empty one. */
+  readonly onMaxTokens: boolean
+}
+```
+
+Source: [`packages/experimental/turn-continuation/src/index.ts:53`](../packages/experimental/turn-continuation/src/index.ts)
 
 <a id="deepseek-aidsh-file-reference-local"></a>
 

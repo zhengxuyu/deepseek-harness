@@ -7,9 +7,10 @@ import { carrierKeyOf } from '@deepseek-ai/dsh-scope'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
 import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
-import type { SubagentRuntime, SubagentRunEndInfo, SubagentRunId, SubagentRunInfo } from '@deepseek-ai/dsh-subagent'
+import type { SubagentRuntime, SubagentRunEndInfo, SubagentRunId, SubagentRunInfo, SubagentStopReason } from '@deepseek-ai/dsh-subagent'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { TeamActivity } from './activity.ts'
+import { TurnCutOffs } from './cut-off.ts'
 import { errorMessage, TeamError } from './error.ts'
 import { TeamJournal } from './journal.ts'
 import { TeamRuntimeLifecycle } from './lifecycle.ts'
@@ -40,6 +41,7 @@ export type * from './types.ts'
 export type { TeamMembership } from './roster.ts'
 export { TeamId, TeamMessageId, TeamTaskId } from './types.ts'
 export { TeamError } from './error.ts'
+export { TurnCutOffs } from './cut-off.ts'
 export { taskOpen, taskOutstanding, taskStarted, taskUncollected } from './task-status.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -61,6 +63,8 @@ interface TrackedRun {
   readonly local: boolean
   /** The board row of a tracked plain run, settled once its creation transaction commits; absent for a member's turn. */
   readonly task?: Promise<TeamTaskView>
+  /** The run's model messages, when its Session is in this process; a run elsewhere feeds it nothing. */
+  readonly cutOffs: TurnCutOffs
 }
 
 /** Validate one positive safe-integer deployment limit. */
@@ -130,6 +134,7 @@ export class TeamService extends TypertRemoteService {
     ctx.on('session/event', (session, event) => {
       this.mailbox.observeSessionEvent(session, event)
       this.observeMemberFailure(session, event)
+      this.observeModelMessage(session, event)
     })
     ctx.on('agent/created', ({ agent }) => { this.scheduleRecovery(agent) })
     ctx.on('agent/status', ({ agent }) => {
@@ -284,10 +289,17 @@ export class TeamService extends TypertRemoteService {
    * @param cause - why the harness gave up on the owner.
    * @param ownerId - the owner the harness gave up on. A task another owner holds is refused with
    *   `TEAM_TASK_INVALID_TRANSITION`. Omit it when the run itself ended, which loses the task whoever holds it.
+   * @param ownerStop - how the owning run ended, when the cause is a run's stop reason.
    * @returns the lost task view.
    */
-  async markLost(caller: Agent, id: TeamTaskId, cause: TeamTaskLostCause, ownerId?: SessionId): Promise<TeamTaskView> {
-    return await this.tasks.markLost(this.roster.membership(caller).root, id, cause, ownerId)
+  async markLost(
+    caller: Agent,
+    id: TeamTaskId,
+    cause: TeamTaskLostCause,
+    ownerId?: SessionId,
+    ownerStop?: SubagentStopReason,
+  ): Promise<TeamTaskView> {
+    return await this.tasks.markLost(this.roster.membership(caller).root, id, cause, ownerId, ownerStop)
   }
 
   /**
@@ -382,7 +394,7 @@ export class TeamService extends TypertRemoteService {
     const root = this.leadOf(parent)
     if (root === undefined) return
     if (this.journal.state(root).members.some(member => member.id === info.id)) {
-      this.runs.set(info.runId, { root, childId: info.id, local: info.local })
+      this.runs.set(info.runId, { root, childId: info.id, local: info.local, cutOffs: new TurnCutOffs() })
       return
     }
     if (!this.config.trackSubagentRuns) return
@@ -394,32 +406,45 @@ export class TeamService extends TypertRemoteService {
     task.catch((error: unknown) => {
       this.ctx.logger.warn(`Agent Teams could not record subagent run "${info.runId}": ${errorMessage(error)}`)
     })
-    this.runs.set(info.runId, { root, childId: info.id, local: info.local, task })
+    this.runs.set(info.runId, { root, childId: info.id, local: info.local, task, cutOffs: new TurnCutOffs() })
+  }
+
+  /** Feed each followed run the events of its own Session. */
+  private observeModelMessage(session: Session, event: SessionEvent): void {
+    for (const run of this.runs.values()) {
+      if (run.childId === session.id) run.cutOffs.observe(event)
+    }
   }
 
   /**
-   * Settle what the ended run held. A member's turn that ended any way other
-   * than `completed` or `aborted` loses the member's in-progress tasks: an
-   * aborted turn was interrupted on purpose and the member can continue, any
-   * other ending means it stopped without finishing. A tracked row completes
-   * when its run completed and is lost on any other stop reason.
+   * Record a member turn's outcome and settle what the ended run held. A
+   * member's turn that ended any way other than `completed` or `aborted`
+   * loses the member's in-progress tasks with that stop reason: an aborted
+   * turn was interrupted on purpose and the member can continue, any other
+   * ending means it stopped without finishing. A tracked row completes when
+   * its run completed and is lost with the stop reason on any other. A
+   * `max-tokens` run counts as `completed` under the rule of {@link TurnCutOffs}.
    */
   private observeRunEnd(info: SubagentRunEndInfo): void {
     const run = this.runs.get(info.runId)
     if (run === undefined) return
     this.runs.delete(info.runId)
+    const stopReason = run.cutOffs.outcome(info.stopReason)
     if (run.task === undefined) {
-      if (info.stopReason === 'completed' || info.stopReason === 'aborted') return
-      void this.tasks.markOwnerLost(run.root, run.childId, 'owner-failed').catch((error: unknown) => {
-        this.ctx.logger.warn(`Agent Teams could not mark tasks of member "${run.childId}" lost after its turn ended ${info.stopReason}: ${errorMessage(error)}`)
+      void this.roster.recordStop(run.root, run.childId, stopReason).catch((error: unknown) => {
+        this.ctx.logger.warn(`Agent Teams could not record the turn outcome of member "${run.childId}": ${errorMessage(error)}`)
+      })
+      if (stopReason === 'completed' || stopReason === 'aborted') return
+      void this.tasks.markOwnerLost(run.root, run.childId, 'owner-failed', stopReason).catch((error: unknown) => {
+        this.ctx.logger.warn(`Agent Teams could not mark tasks of member "${run.childId}" lost after its turn ended ${stopReason}: ${errorMessage(error)}`)
       })
       return
     }
     // A row that was never recorded was already reported at start.
     void run.task.then(
-      view => info.stopReason === 'completed'
+      view => stopReason === 'completed'
         ? this.tasks.completeRun(run.root, view.id, run.childId)
-        : this.tasks.markLost(run.root, view.id, 'owner-failed', run.childId),
+        : this.tasks.markLost(run.root, view.id, 'owner-failed', run.childId, stopReason),
       () => undefined,
     ).catch((error: unknown) => {
       this.ctx.logger.warn(`Agent Teams could not settle subagent run "${info.runId}": ${errorMessage(error)}`)

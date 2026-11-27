@@ -18,7 +18,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { TeamError, taskUncollected } from '@deepseek-ai/dsh-experimental-agent-team'
+import { TeamError, TurnCutOffs, taskUncollected } from '@deepseek-ai/dsh-experimental-agent-team'
 import type { TeamService, TeamTaskId, TeamTaskView } from '@deepseek-ai/dsh-experimental-agent-team'
 import type { HeadlessSettlement, HeadlessSettlementReport, HeadlessUnsettledWork } from '@deepseek-ai/dsh-headless'
 import type { TurnEndReason } from '@deepseek-ai/dsh-session'
@@ -75,8 +75,13 @@ interface FollowedRun {
    * and is not reported.
    */
   readonly baseline: ReadonlyMap<TeamTaskId, number>
-  /** How the root's latest turn ended; absent until one ends. */
+  /**
+   * How the root's latest turn ended; absent until one ends. A `max-tokens`
+   * turn counts as `completed` under the rule of {@link TurnCutOffs}.
+   */
   lastTurnEnd?: TurnEndReason['kind']
+  /** The root's model messages, which decide how a `max-tokens` turn is counted. */
+  readonly cutOffs: TurnCutOffs
   /** Why this run could not collect a task, for tasks whose reason the board does not record. */
   readonly reasons: Map<TeamTaskId, string>
 }
@@ -273,7 +278,9 @@ export function apply(ctx: Context, config: Config): void {
   const runs = new Map<Agent['id'], FollowedRun>()
   ctx.on('session/event', (session, event) => {
     const run = runs.get(session.id)
-    if (run !== undefined && event.type === 'turn/end') run.lastTurnEnd = event.data.reason.kind
+    if (run === undefined) return
+    run.cutOffs.observe(event)
+    if (event.type === 'turn/end') run.lastTurnEnd = run.cutOffs.outcome(event.data.reason.kind)
   })
   const settlement: HeadlessSettlement = {
     async begin(root, task) {
@@ -284,7 +291,7 @@ export function apply(ctx: Context, config: Config): void {
       for (const left of teams.outstandingTasks(root)) await teams.markLost(root, left.id, 'run-ended')
       const baseline = new Map(teams.listTasks(root).map(existing => [existing.id, existing.revision]))
       const recorded = await teams.beginTask(root, taskText(task))
-      const run: FollowedRun = { task: recorded.id, deadline, baseline, reasons: new Map() }
+      const run: FollowedRun = { task: recorded.id, deadline, baseline, reasons: new Map(), cutOffs: new TurnCutOffs() }
       runs.set(root.id, run)
       return {
         async settle() {
