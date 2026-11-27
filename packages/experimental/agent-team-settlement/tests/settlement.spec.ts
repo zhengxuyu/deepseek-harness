@@ -112,6 +112,26 @@ describe('agent-team-settlement', () => {
     expect(ctx.agentTeams.getTask(lead, task!.id)).toMatchObject({ status: 'lost', lostCause: 'owner-failed' })
   })
 
+  it('completes the run\'s task when the root was cut off at the output limit and then finished its turn', async () => {
+    const { ctx, lead, begin } = await setup([maxTokensResponse('cut off'), textResponse('finished')])
+    // What a continuation plugin does: the cut-off message is answered with a notice, and the root goes on.
+    let continued = false
+    ctx.on('agent/turn-stopping', ({ agent }) => {
+      if (continued) return
+      continued = true
+      agent.steer(prompt('continue'))
+    })
+    const ends: string[] = []
+    ctx.on('session/event', (_session, event) => { if (event.type === 'turn/end') ends.push(event.data.reason.kind) })
+    const run = await begin(lead)
+    lead.followup(prompt('the request'))
+    const [task] = ctx.agentTeams.listTasks(lead)
+    await expect(run.settle()).resolves.toEqual({ unsettled: [] })
+    // The loop still reports the turn as cut off; the task is settled by the message the turn ended with.
+    expect(ends).toEqual(['max-tokens'])
+    expect(ctx.agentTeams.getTask(lead, task!.id).status).toBe('completed')
+  })
+
   it('loses the run\'s task when the root\'s turn did not complete', async () => {
     const { ctx, lead, begin } = await setup([maxTokensResponse('cut off')])
     const run = await begin(lead)

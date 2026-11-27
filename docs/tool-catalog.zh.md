@@ -2292,7 +2292,7 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 
 ### `wait_agent`
 
-等待本次调用开始后下一次 teammate 状态、mailbox 或共享任务变更，并返回发生变化的成员与任务。它绝不会唤醒 inactive member；若没有其他 member 正在 running 或 provisioning，则立即返回 noProgress。
+等待本次调用开始后下一次 teammate 状态、mailbox 或共享任务变更，并返回发生变化的成员与任务，包括期间被删除的任务。它绝不会唤醒 inactive member；若没有其他 member 正在 running 或 provisioning，则立即返回 noProgress。
 
 ```json
 {

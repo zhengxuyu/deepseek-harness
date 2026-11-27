@@ -61,6 +61,18 @@ interface TrackedRun {
   readonly local: boolean
   /** The board row of a tracked plain run, settled once its creation transaction commits; absent for a member's turn. */
   readonly task?: Promise<TeamTaskView>
+  /**
+   * Whether the run's latest model message was cut off at the output limit.
+   * Absent until the run produced one, and for a run whose Session is not in
+   * this process.
+   */
+  lastMessageCutOff?: boolean
+}
+
+/** Whether a model message ended at the output limit. */
+function cutOff(message: SessionEvent<'assistant/message'>['data']): boolean {
+  return message.stream.some(entry =>
+    entry.type === 'chunk' && entry.chunk.type === 'finish' && entry.chunk.reason.kind === 'max-tokens')
 }
 
 /** Validate one positive safe-integer deployment limit. */
@@ -130,6 +142,7 @@ export class TeamService extends TypertRemoteService {
     ctx.on('session/event', (session, event) => {
       this.mailbox.observeSessionEvent(session, event)
       this.observeMemberFailure(session, event)
+      this.observeModelMessage(session, event)
     })
     ctx.on('agent/created', ({ agent }) => { this.scheduleRecovery(agent) })
     ctx.on('agent/status', ({ agent }) => {
@@ -404,33 +417,53 @@ export class TeamService extends TypertRemoteService {
     this.runs.set(info.runId, { root, childId: info.id, local: info.local, task })
   }
 
+  /** Remember, for each followed run, whether its latest model message was cut off. */
+  private observeModelMessage(session: Session, event: SessionEvent): void {
+    if (event.type !== 'assistant/message') return
+    for (const run of this.runs.values()) {
+      if (run.childId === session.id) run.lastMessageCutOff = cutOff(event.data)
+    }
+  }
+
+  /**
+   * How the work of an ended run ended. The agent loop reports `max-tokens`
+   * for a turn in which any model message was cut off, also when the model
+   * went on afterwards. When the run's latest model message was not cut off,
+   * the turn finished what it was doing, so its work `completed`.
+   */
+  private workOutcome(run: TrackedRun, stopReason: SubagentStopReason): SubagentStopReason {
+    return stopReason === 'max-tokens' && run.lastMessageCutOff === false ? 'completed' : stopReason
+  }
+
   /**
    * Record a member turn's outcome and settle what the ended run held. A
    * member's turn that ended any way other than `completed` or `aborted`
    * loses the member's in-progress tasks with that stop reason: an aborted
    * turn was interrupted on purpose and the member can continue, any other
    * ending means it stopped without finishing. A tracked row completes when
-   * its run completed and is lost with the stop reason on any other.
+   * its run completed and is lost with the stop reason on any other. The
+   * outcome is the one {@link workOutcome} gives.
    */
   private observeRunEnd(info: SubagentRunEndInfo): void {
     const run = this.runs.get(info.runId)
     if (run === undefined) return
     this.runs.delete(info.runId)
+    const stopReason = this.workOutcome(run, info.stopReason)
     if (run.task === undefined) {
-      void this.roster.recordStop(run.root, run.childId, info.stopReason).catch((error: unknown) => {
+      void this.roster.recordStop(run.root, run.childId, stopReason).catch((error: unknown) => {
         this.ctx.logger.warn(`Agent Teams could not record the turn outcome of member "${run.childId}": ${errorMessage(error)}`)
       })
-      if (info.stopReason === 'completed' || info.stopReason === 'aborted') return
-      void this.tasks.markOwnerLost(run.root, run.childId, 'owner-failed', info.stopReason).catch((error: unknown) => {
-        this.ctx.logger.warn(`Agent Teams could not mark tasks of member "${run.childId}" lost after its turn ended ${info.stopReason}: ${errorMessage(error)}`)
+      if (stopReason === 'completed' || stopReason === 'aborted') return
+      void this.tasks.markOwnerLost(run.root, run.childId, 'owner-failed', stopReason).catch((error: unknown) => {
+        this.ctx.logger.warn(`Agent Teams could not mark tasks of member "${run.childId}" lost after its turn ended ${stopReason}: ${errorMessage(error)}`)
       })
       return
     }
     // A row that was never recorded was already reported at start.
     void run.task.then(
-      view => info.stopReason === 'completed'
+      view => stopReason === 'completed'
         ? this.tasks.completeRun(run.root, view.id, run.childId)
-        : this.tasks.markLost(run.root, view.id, 'owner-failed', run.childId, info.stopReason),
+        : this.tasks.markLost(run.root, view.id, 'owner-failed', run.childId, stopReason),
       () => undefined,
     ).catch((error: unknown) => {
       this.ctx.logger.warn(`Agent Teams could not settle subagent run "${info.runId}": ${errorMessage(error)}`)

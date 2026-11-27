@@ -2286,7 +2286,7 @@ Source: [`packages/experimental/tool-agent-team/src/index.ts`](../packages/exper
 
 ### `wait_agent`
 
-Wait for the next teammate status, mailbox, or shared-task change after this call starts, and return the members and tasks that changed. This never wakes inactive members and returns noProgress immediately when no other member is running or provisioning.
+Wait for the next teammate status, mailbox, or shared-task change after this call starts, and return the members and tasks that changed, including a task deleted meanwhile. This never wakes inactive members and returns noProgress immediately when no other member is running or provisioning.
 
 ```json
 {

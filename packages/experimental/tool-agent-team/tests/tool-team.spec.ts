@@ -170,6 +170,14 @@ describe('dsh-tool-team', () => {
     expect(woken.changes.members).toEqual([])
     expect(woken.changes.tasks).toEqual([{ id: 'task-2', revision: 1, status: 'pending' }])
 
+    // A task deleted while waiting is not on the board list any more; the wait still names it.
+    const waitForDelete = execute(ctx, lead, 'wait_agent', { timeout_ms: 10_000 })
+    setTimeout(() => {
+      void execute(ctx, lead, 'team_task_update', { task_id: 'task-2', expected_revision: 1, action: 'delete' })
+    }, 0)
+    const deleted = JSON.parse(text(await waitForDelete)) as { changes: { members: unknown[]; tasks: unknown[] } }
+    expect(deleted.changes).toEqual({ members: [], tasks: [{ id: 'task-2', revision: 2, status: 'deleted' }] })
+
     // A member row changes while waiting: the hanger goes inactive when interrupted.
     const waitForHanger = execute(ctx, lead, 'wait_agent', { timeout_ms: 10_000 })
     setTimeout(() => { void execute(ctx, lead, 'interrupt_agent', { target: 'hanger' }) }, 0)

@@ -139,6 +139,7 @@ function summarize(session: Session, firstSeq: SessionLogOffset): RunOutcome {
   let started = false
   let text = ''
   let reason: SessionEvent<'turn/end'>['data']['reason'] | undefined
+  let cutOff = false
   const length = session.seq
   for (let seq = firstSeq; seq < length; seq++) {
     // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
@@ -157,9 +158,14 @@ function summarize(session: Session, firstSeq: SessionLogOffset): RunOutcome {
         .map(block => block.text)
         .join('')
       if (joined !== '') text = joined
+      cutOff = event.data.stream.some(entry =>
+        entry.type === 'chunk' && entry.chunk.type === 'finish' && entry.chunk.reason.kind === 'max-tokens')
     }
     if (event.type === 'turn/end') reason = event.data.reason
   }
+  // The loop reports max-tokens for a turn in which any message was cut off, also
+  // when the model went on afterwards; such a turn finished its answer.
+  if (reason?.kind === 'max-tokens' && !cutOff) reason = { kind: 'completed' }
   return { text, reason }
 }
 

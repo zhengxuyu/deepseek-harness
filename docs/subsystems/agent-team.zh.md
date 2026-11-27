@@ -23,7 +23,7 @@ interface TeamMemberSnapshot {
 }
 ```
 
-每个 member 都从 `provisioning` 开始，并且只到达一个终态 roster phase：`active` 或 `failed`。roster 的 `running`／`inactive` 状态单独派生，绝不会重写该记录。此后，active 成员每结束一个回合都会追加一条只改变 `lastStop`（该 epoch 的 stop reason：`completed`、`aborted`、`error`、`max-tokens`、`refusal`）的记录，以 payload 版本 3 写入；版本 2 记录仍可读取。
+每个 member 都从 `provisioning` 开始，并且只到达一个终态 roster phase：`active` 或 `failed`。roster 的 `running`／`inactive` 状态单独派生，绝不会重写该记录。此后，active 成员每结束一个回合都会追加一条只改变 `lastStop`（该 epoch 的 stop reason：`completed`、`aborted`、`error`、`max-tokens`、`refusal`）的记录，以 payload 版本 3 写入；版本 2 记录仍可读取。只要回合里有任何一条模型消息被截断，agent loop 就把这个回合报告为 `max-tokens`，即使模型之后继续写完；最后一条模型消息没有被截断的回合记为 `completed`，并保留它的任务。
 
 ## 持久 mailbox
 

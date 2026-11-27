@@ -75,8 +75,13 @@ interface FollowedRun {
    * and is not reported.
    */
   readonly baseline: ReadonlyMap<TeamTaskId, number>
-  /** How the root's latest turn ended; absent until one ends. */
+  /**
+   * How the root's latest turn ended; absent until one ends. A turn the loop
+   * ended `max-tokens` whose latest model message was not cut off is `completed`.
+   */
   lastTurnEnd?: TurnEndReason['kind']
+  /** Whether the root's latest model message was cut off at the output limit. */
+  lastMessageCutOff: boolean
   /** Why this run could not collect a task, for tasks whose reason the board does not record. */
   readonly reasons: Map<TeamTaskId, string>
 }
@@ -273,7 +278,16 @@ export function apply(ctx: Context, config: Config): void {
   const runs = new Map<Agent['id'], FollowedRun>()
   ctx.on('session/event', (session, event) => {
     const run = runs.get(session.id)
-    if (run !== undefined && event.type === 'turn/end') run.lastTurnEnd = event.data.reason.kind
+    if (run === undefined) return
+    if (event.type === 'assistant/message') {
+      run.lastMessageCutOff = event.data.stream.some(entry =>
+        entry.type === 'chunk' && entry.chunk.type === 'finish' && entry.chunk.reason.kind === 'max-tokens')
+    }
+    if (event.type !== 'turn/end') return
+    // The loop reports max-tokens for a turn in which any message was cut off, also
+    // when the root went on afterwards; such a turn completed.
+    const { kind } = event.data.reason
+    run.lastTurnEnd = kind === 'max-tokens' && !run.lastMessageCutOff ? 'completed' : kind
   })
   const settlement: HeadlessSettlement = {
     async begin(root, task) {
@@ -284,7 +298,7 @@ export function apply(ctx: Context, config: Config): void {
       for (const left of teams.outstandingTasks(root)) await teams.markLost(root, left.id, 'run-ended')
       const baseline = new Map(teams.listTasks(root).map(existing => [existing.id, existing.revision]))
       const recorded = await teams.beginTask(root, taskText(task))
-      const run: FollowedRun = { task: recorded.id, deadline, baseline, reasons: new Map() }
+      const run: FollowedRun = { task: recorded.id, deadline, baseline, reasons: new Map(), lastMessageCutOff: false }
       runs.set(root.id, run)
       return {
         async settle() {

@@ -201,7 +201,10 @@ function taskChange(task: TeamTaskView): TaskChange {
   }
 }
 
-/** Rows whose model-facing change fields differ from the earlier observation, plus rows that appeared. */
+/**
+ * Rows whose model-facing change fields differ from the earlier observation, plus rows that appeared.
+ * A task deleted in between is in `after` as its tombstone.
+ */
 function waitChanges(before: WaitObservation, after: WaitObservation): WaitChanges {
   const members = new Map(before.members.map(member => [member.id, JSON.stringify(memberChange(member))]))
   const tasks = new Map(before.tasks.map(task => [task.id, JSON.stringify(taskChange(task))]))
@@ -331,7 +334,7 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
 
     register(scoped.tools.register(defineTool({
       name: 'wait_agent',
-      description: 'Wait for the next teammate status, mailbox, or shared-task change after this call starts, and return the members and tasks that changed. This never wakes inactive members and returns noProgress immediately when no other member is running or provisioning.',
+      description: 'Wait for the next teammate status, mailbox, or shared-task change after this call starts, and return the members and tasks that changed, including a task deleted meanwhile. This never wakes inactive members and returns noProgress immediately when no other member is running or provisioning.',
       parameters: {
         timeout_ms: {
           type: 'integer',
@@ -363,7 +366,12 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
           }
         }
         const { timedOut } = await ctx.agentTeams.waitForChange(caller, timeoutMs, exec.signal)
-        const after: WaitObservation = { members: ctx.agentTeams.listMembers(caller), tasks: ctx.agentTeams.listTasks(caller) }
+        const listed = ctx.agentTeams.listTasks(caller)
+        // The board list leaves deleted tasks out, so a task deleted during the wait is read as its tombstone.
+        const deleted = before.tasks
+          .filter(task => !listed.some(current => current.id === task.id))
+          .map(task => ctx.agentTeams.getTask(caller, task.id))
+        const after: WaitObservation = { members: ctx.agentTeams.listMembers(caller), tasks: [...listed, ...deleted] }
         return { timedOut, changes: waitChanges(before, after) }
       },
     })))

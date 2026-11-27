@@ -2360,6 +2360,34 @@ describe('Member turns that end without completing', () => {
     await waitNoAgent(ctx, started.member.id)
   })
 
+  it('keeps the tasks of a member that was cut off at the output limit and then finished its turn', async () => {
+    const { ctx, lead, adapter } = await setup([
+      textResponse('first turn done'), textResponse('lead reads the settlement'),
+      maxTokensResponse('cut off'), textResponse('finished'), textResponse('lead reads the settlement'),
+    ])
+    const ended: string[] = []
+    ctx.on('subagent/end', (info) => { ended.push(info.stopReason) })
+    const started = await spawn(ctx, lead, 'worker')
+    await settledTurns(ctx, lead, adapter, 2)
+    // What a continuation plugin does: the cut-off message is answered with a notice, and the member goes on.
+    let continued = false
+    ctx.on('agent/turn-stopping', ({ agent }) => {
+      if (continued || agent.id !== started.member.id) return
+      continued = true
+      agent.steer(createUserMessage({ content: content('continue'), source: { kind: 'user' } }))
+    })
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'work', description: 'work' })
+    const assigned = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: task.revision, action: 'reassign', owner: 'worker',
+    })
+    await ctx.agentTeams.sendMessage(lead, { target: 'worker', content: content('continue'), signal: SIGNAL })
+    await settledTurns(ctx, lead, adapter, 5)
+    // The loop still reports the turn as cut off; the member's work is judged by the message the turn ended with.
+    expect(ended).toEqual(['completed', 'max-tokens'])
+    expect(ctx.agentTeams.getTask(lead, task.id)).toMatchObject({ status: 'in_progress', ownerName: 'worker', revision: assigned.revision })
+    expect(ctx.agentTeams.listMembers(lead)[1]).toMatchObject({ name: 'worker', lastStop: 'completed' })
+  })
+
   it('contains a failed lost mark after a member turn ended', async () => {
     const { ctx, lead } = await setup([maxTokensResponse('cut off')])
     const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})

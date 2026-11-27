@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-当无人值守的 Agent 不能停在一个「无事可做」的回合上时，挂载本插件。在回合的停止边界，它读取最后一条 assistant 消息：没有工具调用也没有文本的消息，或在设置了 `onMaxTokens` 时被输出上限截断的消息，会得到一条记入日志并 steer 回模型的提醒，每回合最多 `maxContinuations` 次。回合记录的结束原因不变，因此被截断的回合仍以 `max-tokens` 结束。代价是每条提醒多一次模型请求。
+当无人值守的 Agent 不能停在一个「无事可做」的回合上时，挂载本插件。在回合的停止边界，它读取最后一条 assistant 消息：没有工具调用也没有文本的消息，或在设置了 `onMaxTokens` 时被输出上限截断的消息，会得到一条记入日志并 steer 回模型的提醒，每回合最多 `maxContinuations` 次。回合记录的结束原因仍是 `max-tokens`；只要它的最后一条消息没有被截断，headless 运行器与 Agent Teams 就把它当作已完成。每条提醒多花一次模型请求。
 
 ## 目录
 

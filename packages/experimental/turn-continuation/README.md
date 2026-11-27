@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Mount this plugin when an unattended agent must not stop on a turn that produced nothing to act on. At the turn's stop boundary it reads the last assistant message: one with no tool call and no text, or one cut off at the output limit when `onMaxTokens` is set, gets a logged notice steered back to the model, at most `maxContinuations` times per turn. The turn's recorded end reason is unchanged, so a cut-off turn still ends `max-tokens`. The cost is one extra model request per notice.
+Mount this plugin when an unattended agent must not stop on a turn that produced nothing to act on. At the turn's stop boundary it reads the last assistant message: one with no tool call and no text, or one cut off at the output limit when `onMaxTokens` is set, gets a logged notice steered back to the model, at most `maxContinuations` times per turn. The turn's recorded end reason stays `max-tokens`; the headless runner and Agent Teams treat it as completed when its last message was not cut off. Each notice costs one model request.
 
 ## Table of Contents
 
