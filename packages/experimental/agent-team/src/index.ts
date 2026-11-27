@@ -6,6 +6,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { carrierKeyOf } from '@deepseek-ai/dsh-scope'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
 import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type { SubagentRuntime, SubagentRunEndInfo, SubagentRunId, SubagentRunInfo, SubagentStopReason } from '@deepseek-ai/dsh-subagent'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
@@ -82,10 +83,11 @@ export class TeamService extends TypertRemoteService {
     maxMessageBytes: z.number().step(1).min(1).default(DEFAULT_MAX_MESSAGE_BYTES),
     disposalTimeoutMs: z.number().step(1).min(1).default(DEFAULT_DISPOSAL_TIMEOUT_MS),
     trackSubagentRuns: z.boolean().default(false),
+    artifactRoot: z.string(),
   })
 
   /** Validated deployment limits used by every Team operation. */
-  private readonly config: Required<Config>
+  private readonly config: Required<Omit<Config, 'artifactRoot'>> & Pick<Config, 'artifactRoot'>
   /** Member turns and, with `trackSubagentRuns`, plain delegated runs still in flight. */
   private readonly runs = new Map<SubagentRunId, TrackedRun>()
 
@@ -111,6 +113,7 @@ export class TeamService extends TypertRemoteService {
         config.disposalTimeoutMs ?? DEFAULT_DISPOSAL_TIMEOUT_MS,
       ),
       trackSubagentRuns: config.trackSubagentRuns ?? false,
+      ...config.artifactRoot === undefined ? {} : { artifactRoot: config.artifactRoot },
     }
 
     this.activity = new TeamActivity()
@@ -125,7 +128,10 @@ export class TeamService extends TypertRemoteService {
       this.config.maxPendingMessagesPerMember,
       this.config.maxMessageBytes,
     )
-    this.tasks = new TeamTaskBoard(this.journal, this.config.maxTasks)
+    this.tasks = new TeamTaskBoard(this.journal, this.config.maxTasks, {
+      fs: () => ctx.get('fs'),
+      artifactRoot: this.config.artifactRoot,
+    })
 
     ctx.on('session/event', (session, event) => {
       this.mailbox.observeSessionEvent(session, event)
@@ -232,8 +238,22 @@ export class TeamService extends TypertRemoteService {
    * @returns the committed next task revision.
    */
   async updateTask(caller: Agent, request: UpdateTeamTaskRequest): Promise<TeamTaskView> {
-    const { view, displaced } = await this.tasks.update(caller, this.roster.membership(caller), request)
+    const membership = this.roster.membership(caller)
+    const { view, displaced } = await this.tasks.update(caller, membership, request)
     if (displaced !== undefined) await this.tellDisplacedOwner(caller, view, displaced)
+    // The assignee starts from the recorded brief, delivered as durable mail
+    // from the Lead; a claim already hands the brief back to the caller. The
+    // send is not awaited: delivery to a running member waits for its next
+    // step boundary, and the assignment itself is already committed.
+    if (request.action === 'reassign' && view.brief !== undefined && view.ownerName !== undefined && view.ownerName !== 'lead') {
+      void this.mailbox.send(membership.root, {
+        target: view.ownerName,
+        content: [{ type: 'text', text: `You were assigned ${view.id} by the Lead.\n\n${view.brief}` }],
+        signal: this.lifecycle.signal,
+      }).catch((error: unknown) => {
+        this.ctx.logger.warn(`Agent Teams could not mail the brief of ${view.id} to "${view.ownerName}": ${errorMessage(error)}`)
+      })
+    }
     return view
   }
 
@@ -242,16 +262,17 @@ export class TeamService extends TypertRemoteService {
    * Any member may be the caller; the harness uses it for work no member
    * created a task for, such as the request a run was started with.
    * @param caller - exact live Team member that owns the work.
-   * @param request - subject and description of the work.
+   * @param request - subject and description of the work, and the files it must produce.
    * @returns the revision-one task view, in progress and owned by the caller.
    */
-  async beginTask(caller: Agent, request: Pick<CreateTeamTaskRequest, 'subject' | 'description'>): Promise<TeamTaskView> {
+  async beginTask(caller: Agent, request: Pick<CreateTeamTaskRequest, 'subject' | 'description' | 'outputs'>): Promise<TeamTaskView> {
     const { root } = this.roster.membership(caller)
     return await this.tasks.trackRun(root, { ...request, ownerId: caller.id })
   }
 
   /**
-   * Complete one in-progress task on behalf of the harness, bypassing member authorization.
+   * Complete one in-progress task on behalf of the harness, bypassing member
+   * authorization. Declared outputs are checked on disk as `complete` checks them.
    * @param caller - exact live Team member whose board holds the task.
    * @param id - task the harness observed finished.
    * @param ownerId - the owner the harness observed finishing it. A task another owner holds is

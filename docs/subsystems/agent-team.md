@@ -90,6 +90,8 @@ A `lost` task with cause `owner-failed` also records `ownerStop`, the stop reaso
 
 **Attempts and the goal.** A task records its earlier ownerships in `attempts`, in the order they ended. An attempt names the owner and how the ownership ended: `released` when the owner or the Lead returned the task to `pending`, `reassigned` when the Lead moved it to another member, and `completed` or `lost` when the task was reopened from that status, with the `lostCause` and `ownerStop` it had. `release`, `reassign`, and `reopen` accept a `reason`, which is recorded on the attempt the action ends. Only the message a member receives when the Lead unassigns or reassigns a task it is working on carries the reason; `reopen` and an owner's own `release` send no message, so their reason reaches a member only through `attempts`. A reason is feedback on the work: it leaves `subject` and `description` unchanged. `edit` changes the goal, and an edit of `subject` or `description` sets `goalRevision` to the new revision; each attempt records the `goalRevision` its owner worked toward, so a reader can tell a second attempt at the same goal from an attempt at a changed one. An attempt with no `goalRevision`, or with 1, worked toward the text the task was created with. A `lost` task can be edited before it is reopened, and its owner never saw that edit: the first such edit stores the goal the owner had as `ownerGoalRevision` on the lost task, and `reopen` records that value on the attempt. `attempts` and `goalRevision` are absent until they have something to record.
 
+**Outputs and the brief.** `outputs` is the task's definition of done: each `ArtifactContract` names a workspace-relative path and a kind (`file`, `json` with an optional schema, `csv`, `npy`, `image`, `python`), and `complete` is refused with `TEAM_TASK_OUTPUT_MISSING` until every non-optional output exists and passes its kind's check. The accepted outputs are then recorded as `artifacts` (path, bytes, sha256, and the earlier completed task an output at that path supersedes); only a `completed` task carries `artifacts`, and `reopen` drops them. Two tasks that are `pending`, `in_progress`, or `lost` cannot declare one output path. `edgeInstructions` says what the task takes from each blocker. The `claim` result and the result of `reassign` to a member carry the harness-composed `brief`, and the reassigned member also receives it as mail from the Lead, which starts or resumes that member.
+
 Three groups of statuses are defined once, in `task-status.ts`, and every decision uses them. A task is *outstanding* while it is `in_progress`: a run that follows the board waits only on outstanding tasks. A task is *open* while it is `pending` or `lost`: its text, edges, and existence may change. A task is *started* while it is `in_progress` or `completed`: it is frozen, and every task in its `blockedBy` is `completed`. Views add owner name, readiness, lost cause, owner stop, and write-scope overlap warnings without changing the durable snapshot.
 
 <a id="task-status-transitions"></a>
@@ -269,13 +271,14 @@ async updateTask(caller: Agent, request: UpdateTeamTaskRequest): Promise<TeamTas
  * Any member may be the caller; the harness uses it for work no member
  * created a task for, such as the request a run was started with.
  * @param caller - exact live Team member that owns the work.
- * @param request - subject and description of the work.
+ * @param request - subject and description of the work, and the files it must produce.
  * @returns the revision-one task view, in progress and owned by the caller.
  */
-async beginTask(caller: Agent, request: Pick<CreateTeamTaskRequest, 'subject' | 'description'>): Promise<TeamTaskView>
+async beginTask(caller: Agent, request: Pick<CreateTeamTaskRequest, 'subject' | 'description' | 'outputs'>): Promise<TeamTaskView>
 
 /**
- * Complete one in-progress task on behalf of the harness, bypassing member authorization.
+ * Complete one in-progress task on behalf of the harness, bypassing member
+ * authorization. Declared outputs are checked on disk as `complete` checks them.
  * @param caller - exact live Team member whose board holds the task.
  * @param id - task the harness observed finished.
  * @param ownerId - the owner the harness observed finishing it. A task another owner holds is

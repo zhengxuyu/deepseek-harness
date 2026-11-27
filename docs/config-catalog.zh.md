@@ -753,10 +753,17 @@ export interface Config {
    * default: the board then holds only tasks members created.
    */
   readonly trackSubagentRuns?: boolean
+  /**
+   * Absolute harness-local directory under which every completed output is
+   * retained as `<team>/<task>/<path>`, so a later task that overwrites the
+   * same path leaves the previous version and its diff recoverable. Absent
+   * means outputs are hashed but not retained.
+   */
+  readonly artifactRoot?: string
 }
 ```
 
-来源： [`packages/experimental/agent-team/src/types.ts:311`](../packages/experimental/agent-team/src/types.ts)
+来源： [`packages/experimental/agent-team/src/types.ts:361`](../packages/experimental/agent-team/src/types.ts)
 
 <a id="deepseek-aidsh-experimental-agent-team-settlement"></a>
 
@@ -765,7 +772,7 @@ export interface Config {
 需要： `agentTeams`
 
 ```ts config-catalog
-/** Deployment limits for how long a one-shot run follows delegated work. */
+/** Deployment limits for how long a one-shot run follows delegated work, and what the run must produce. */
 export interface Config {
   /**
    * Milliseconds from the start of the run before the root's turn is cancelled,
@@ -784,10 +791,18 @@ export interface Config {
    * without them, so the run ends at most this long after the deadline.
    */
   readonly stopGraceMs: number
+  /**
+   * Files the run's task must produce, declared on it like any task's outputs.
+   * When any is declared, only the root completes the run's task, through the
+   * task tool that checks them on disk. Empty when omitted.
+   */
+  readonly outputs: ArtifactContract[]
 }
 ```
 
-来源： [`packages/experimental/agent-team-settlement/src/index.ts:33`](../packages/experimental/agent-team-settlement/src/index.ts)
+Depends on: [`ArtifactContract`](../packages/experimental/agent-team/src/index.ts)
+
+来源： [`packages/experimental/agent-team-settlement/src/index.ts:55`](../packages/experimental/agent-team-settlement/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-api-speech-to-text"></a>
 

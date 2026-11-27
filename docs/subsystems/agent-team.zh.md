@@ -90,6 +90,8 @@ type TeamTaskSnapshot =
 
 **尝试记录与目标。** 任务在 `attempts` 里按结束的先后记录它之前的每一次持有。每条记录写明 owner 和这次持有如何结束：owner 或 Lead 把任务退回 `pending` 时是 `released`，Lead 把它转给另一个成员时是 `reassigned`，任务从 `completed` 或 `lost` 被 reopen 时是对应的状态，并带上当时的 `lostCause` 与 `ownerStop`。`release`、`reassign` 与 `reopen` 接受一个 `reason`，它记录在该动作结束的那次尝试上。只有 Lead 对成员正在做的任务取消指派或重新指派时，该成员收到的消息里才带有这个 reason；`reopen` 和 owner 自己的 `release` 不发消息，它们的 reason 只能通过 `attempts` 被成员读到。reason 是对工作的反馈：它不改变 `subject` 与 `description`。`edit` 改变的是目标，对 `subject` 或 `description` 的编辑会把 `goalRevision` 设为新的 revision；每次尝试记录它的 owner 当时对应的 `goalRevision`，因此读者能分清"对同一个目标的第二次尝试"和"对改过的目标的尝试"。没有 `goalRevision` 或值为 1 的尝试，对应的是任务创建时的文本。`lost` 任务可以在 reopen 之前被编辑，而它的 owner 从未见过这次编辑：第一次这样的编辑会把 owner 当时的目标存为 lost 任务上的 `ownerGoalRevision`，`reopen` 把这个值记到尝试上。`attempts` 与 `goalRevision` 在没有内容可记之前都不出现。
 
+**输出与简报。** `outputs` 是任务的完成定义：每个 `ArtifactContract` 指定一个 workspace 相对路径和一种 kind（`file`、可带 schema 的 `json`、`csv`、`npy`、`image`、`python`），在每个非可选输出都存在于磁盘并通过其 kind 的检查之前，`complete` 以 `TEAM_TASK_OUTPUT_MISSING` 拒绝。通过的输出随后记为 `artifacts`（路径、字节数、sha256，以及该路径上被它取代的更早已完成任务）；只有 `completed` 任务带有 `artifacts`，`reopen` 会去掉它们。两个处于 `pending`、`in_progress` 或 `lost` 的任务不能声明同一个输出路径。`edgeInstructions` 说明任务从每个 blocker 取什么。`claim` 的结果与 `reassign` 给成员的结果携带 harness 组合的 `brief`，被重新指派的成员还会以来自 Lead 的邮件收到它，这会启动或恢复该成员。
+
 三组状态在 `task-status.ts` 里只定义一次，所有判断都使用它们。任务处于 `in_progress` 时是 *outstanding*：跟随任务板的运行只等待 outstanding 任务。任务处于 `pending` 或 `lost` 时是 *open*：它的文本、边和存在与否都还可以改变。任务处于 `in_progress` 或 `completed` 时是 *started*：它被冻结，并且它的 `blockedBy` 中每个任务都是 `completed`。view 会添加 owner name、readiness、lost cause、owner stop 和 write-scope 重叠警告，但不会改变持久快照。
 
 <a id="task-status-transitions"></a>
@@ -269,13 +271,14 @@ async updateTask(caller: Agent, request: UpdateTeamTaskRequest): Promise<TeamTas
  * Any member may be the caller; the harness uses it for work no member
  * created a task for, such as the request a run was started with.
  * @param caller - exact live Team member that owns the work.
- * @param request - subject and description of the work.
+ * @param request - subject and description of the work, and the files it must produce.
  * @returns the revision-one task view, in progress and owned by the caller.
  */
-async beginTask(caller: Agent, request: Pick<CreateTeamTaskRequest, 'subject' | 'description'>): Promise<TeamTaskView>
+async beginTask(caller: Agent, request: Pick<CreateTeamTaskRequest, 'subject' | 'description' | 'outputs'>): Promise<TeamTaskView>
 
 /**
- * Complete one in-progress task on behalf of the harness, bypassing member authorization.
+ * Complete one in-progress task on behalf of the harness, bypassing member
+ * authorization. Declared outputs are checked on disk as `complete` checks them.
  * @param caller - exact live Team member whose board holds the task.
  * @param id - task the harness observed finished.
  * @param ownerId - the owner the harness observed finishing it. A task another owner holds is

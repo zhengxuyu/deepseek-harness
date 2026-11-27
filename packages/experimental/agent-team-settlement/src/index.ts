@@ -4,8 +4,10 @@
  * is started with is recorded as an in-progress task owned by the root, like
  * any task a member works on. The run keeps going while the root is in a turn
  * or any task on its board is in progress; a settling child may wake the root
- * again. The run's task completes when the root's last turn completed with
- * nothing else outstanding. When the deadline passes, the root's turn is
+ * again. A run's task without declared outputs completes when the root's last
+ * turn completed with nothing else outstanding. One with declared outputs is
+ * completed only by the root, through the task tool that checks them on disk;
+ * the root is reminded once. When the deadline passes, the root's turn is
  * cancelled and every running teammate is interrupted; work still in progress
  * then, or when nothing is running and nothing changes for the stall window,
  * is marked `lost`. The report lists every task the run created or changed
@@ -19,8 +21,10 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { TeamError, taskUncollected } from '@deepseek-ai/dsh-experimental-agent-team'
-import type { TeamService, TeamTaskId, TeamTaskView } from '@deepseek-ai/dsh-experimental-agent-team'
+import type { ArtifactContract, TeamService, TeamTaskId, TeamTaskView } from '@deepseek-ai/dsh-experimental-agent-team'
 import type { HeadlessSettlement, HeadlessSettlementReport, HeadlessUnsettledWork } from '@deepseek-ai/dsh-headless'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { ContextFormed } from '@deepseek-ai/dsh-llm'
 import type { TurnEndReason } from '@deepseek-ai/dsh-session'
 
 /** Stable Cordis plugin name. */
@@ -29,7 +33,25 @@ export const name = 'agent-team-settlement'
 /** The Team board this plugin settles over. */
 export const inject = ['agentTeams']
 
-/** Deployment limits for how long a one-shot run follows delegated work. */
+/** Source of the reminder sent to a root whose turn completed with the run's declared outputs unsettled. */
+export interface AgentTeamSettlementSource {
+  kind: 'agent-team-settlement'
+  /** The run's task the reminder is about. */
+  taskId: TeamTaskId
+}
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /**
+     * Reminder attribution; readers preserve the notice without this producer,
+     * and the kind imposes no validation, replay, or authority requirement.
+     * @persistenceAttribution
+     */
+    'agent-team-settlement': AgentTeamSettlementSource & ContextFormed
+  }
+}
+
+/** Deployment limits for how long a one-shot run follows delegated work, and what the run must produce. */
 export interface Config {
   /**
    * Milliseconds from the start of the run before the root's turn is cancelled,
@@ -48,6 +70,12 @@ export interface Config {
    * without them, so the run ends at most this long after the deadline.
    */
   readonly stopGraceMs: number
+  /**
+   * Files the run's task must produce, declared on it like any task's outputs.
+   * When any is declared, only the root completes the run's task, through the
+   * task tool that checks them on disk. Empty when omitted.
+   */
+  readonly outputs: ArtifactContract[]
 }
 
 /** The longest delay `setTimeout` accepts without firing at once. */
@@ -57,6 +85,12 @@ export const Config: z<Config> = z.object({
   deadlineMs: z.number().step(1).min(1).max(MAX_TIMER_MS).required(),
   stallMs: z.number().step(1).min(10_000).max(3_600_000).required(),
   stopGraceMs: z.number().step(1).min(1).max(MAX_TIMER_MS).required(),
+  outputs: z.array(z.object({
+    path: z.string().required(),
+    kind: z.union(['file', 'json', 'csv', 'npy', 'image', 'python'] as const).required(),
+    schema: z.any(),
+    optional: z.boolean(),
+  })),
 })
 
 /** The board's subject and description length limits, which the run's task text is cut to. */
@@ -79,6 +113,8 @@ interface FollowedRun {
   lastTurnEnd?: TurnEndReason['kind']
   /** Why this run could not collect a task, for tasks whose reason the board does not record. */
   readonly reasons: Map<TeamTaskId, string>
+  /** Whether the root was already reminded to complete the run's task and its declared outputs. */
+  reminded: boolean
 }
 
 /**
@@ -173,12 +209,35 @@ async function abandon(teams: TeamService, root: Agent, run: FollowedRun, why: s
   }
 }
 
+/** Start a root turn telling the root its task's declared outputs are still unsettled. */
+function remind(root: Agent, task: TeamTaskView): void {
+  const paths = task.outputs.map(output => output.path).join(', ')
+  root.followup(createUserMessage({
+    content: [{
+      type: 'text',
+      text: `Your turn ended, but task ${task.id}, which this run was started with and you own, is still in progress. `
+        + `It declares outputs that are checked on disk: ${paths}. `
+        + `Produce them, then call team_task_update with action complete on ${task.id} at revision ${task.revision}. `
+        + 'This reminder is sent once; if your next turn ends with the task still in progress, the run records it as lost.',
+    }],
+    source: {
+      kind: 'agent-team-settlement',
+      taskId: task.id,
+      form: 'notice',
+      summary: `reminded to complete ${task.id} and its declared outputs`,
+    },
+  }))
+}
+
 /**
- * Settle the run's own task once nothing else is outstanding: complete it when
- * the root's latest turn completed, lose it when that turn ended any other way,
- * and record why when the root moved it out of progress without completing it.
+ * Settle the run's own task once nothing else is outstanding. A task the root
+ * completed is accepted, and one it moved out of progress is reported. A task
+ * still in progress is lost when the root's latest turn did not complete.
+ * After a completed turn, a task without declared outputs is completed here,
+ * and one with declared outputs is left to the root: reminded once, then lost.
  * The root's turn says how the task ended only while the root holds it.
- * @returns false when the root gave the task to another member in the meantime, so the run has to keep waiting.
+ * @returns false when the run has to keep waiting: the root was reminded and runs again, or it gave
+ *   the task to another member in the meantime.
  */
 async function close(teams: TeamService, root: Agent, run: FollowedRun): Promise<boolean> {
   const task = teams.getTask(root, run.task)
@@ -187,17 +246,30 @@ async function close(teams: TeamService, root: Agent, run: FollowedRun): Promise
     run.reasons.set(task.id, `the run's task was left ${task.status}`)
     return true
   }
+  let ended: string
+  if (run.lastTurnEnd === undefined) {
+    ended = 'no turn ran'
+  } else if (run.lastTurnEnd !== 'completed') {
+    ended = `the turn ended ${run.lastTurnEnd}`
+  } else {
+    ended = 'the turn completed without completing the task and its declared outputs, after one reminder'
+  }
   try {
-    if (run.lastTurnEnd === 'completed') {
+    if (run.lastTurnEnd === 'completed' && task.outputs.length === 0) {
       await teams.markCompleted(root, task.id, root.id)
       return true
+    }
+    if (run.lastTurnEnd === 'completed' && !run.reminded) {
+      run.reminded = true
+      remind(root, task)
+      return false
     }
     await teams.markLost(root, task.id, 'owner-failed', root.id)
   } catch (error) {
     if (error instanceof TeamError && error.code === 'TEAM_TASK_INVALID_TRANSITION') return false
     throw error
   }
-  run.reasons.set(task.id, run.lastTurnEnd === undefined ? 'no turn ran' : `the turn ended ${run.lastTurnEnd}`)
+  run.reasons.set(task.id, ended)
   return true
 }
 
@@ -283,8 +355,8 @@ export function apply(ctx: Context, config: Config): void {
       // left by an earlier process that ended before the task finished.
       for (const left of teams.outstandingTasks(root)) await teams.markLost(root, left.id, 'run-ended')
       const baseline = new Map(teams.listTasks(root).map(existing => [existing.id, existing.revision]))
-      const recorded = await teams.beginTask(root, taskText(task))
-      const run: FollowedRun = { task: recorded.id, deadline, baseline, reasons: new Map() }
+      const recorded = await teams.beginTask(root, { ...taskText(task), outputs: config.outputs })
+      const run: FollowedRun = { task: recorded.id, deadline, baseline, reasons: new Map(), reminded: false }
       runs.set(root.id, run)
       return {
         async settle() {

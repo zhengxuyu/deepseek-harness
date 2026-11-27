@@ -92,6 +92,21 @@ const teamTaskSnapshotV2Schema = z.object({
   writeScopes: z.array(z.string()),
 }).strict() as z.ZodType<TeamTaskSnapshotV2>
 
+const artifactContractSchema = z.object({
+  path: z.string().min(1),
+  kind: z.enum(['file', 'json', 'csv', 'npy', 'image', 'python']),
+  schema: z.record(z.string(), z.unknown()).optional(),
+  optional: z.boolean().optional(),
+}).strict()
+
+const taskArtifactSchema = z.object({
+  path: z.string().min(1),
+  bytes: nonNegativeSafeInteger,
+  sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+  supersedes: z.object({ task: teamTaskIdSchema, sha256: z.string().regex(/^[0-9a-f]{64}$/u) }).strict().optional(),
+  previousVersion: z.string().min(1).optional(),
+}).strict()
+
 const lostCauseSchema = z.enum(['owner-failed', 'run-ended'])
 
 const teamTaskAttemptSchema = z.object({
@@ -115,17 +130,24 @@ const teamTaskFields = {
   subject: z.string(),
   description: z.string(),
   blockedBy: z.array(teamTaskIdSchema),
+  edgeInstructions: z.record(z.string(), z.string()).optional(),
   writeScopes: z.array(z.string()),
+  outputs: z.array(artifactContractSchema).optional(),
   goalRevision: positiveSafeInteger.optional(),
   attempts: z.array(teamTaskAttemptSchema).min(1).optional(),
 }
 
-// One strict member per status: each names exactly the owner, cause, and owner-goal fields
+// One strict member per status: each names exactly the owner, cause, owner-goal, and artifact fields
 // that status carries, so a record with the fields of another status is refused.
 const teamTaskSnapshotSchema = z.discriminatedUnion('status', [
   z.object({ ...teamTaskFields, status: z.literal('pending') }).strict(),
   z.object({ ...teamTaskFields, status: z.literal('in_progress'), ownerId: sessionIdSchema }).strict(),
-  z.object({ ...teamTaskFields, status: z.literal('completed'), ownerId: sessionIdSchema }).strict(),
+  z.object({
+    ...teamTaskFields,
+    status: z.literal('completed'),
+    ownerId: sessionIdSchema,
+    artifacts: z.array(taskArtifactSchema).optional(),
+  }).strict(),
   // Stop reasons are merge-extensible across subagent backends, so the record keeps any non-empty string.
   z.object({
     ...teamTaskFields,
@@ -139,6 +161,9 @@ const teamTaskSnapshotSchema = z.discriminatedUnion('status', [
 ]).refine(
   task => task.status !== 'lost' || task.ownerStop === undefined || task.lostCause === 'owner-failed',
   { message: 'ownerStop requires the owner-failed cause' },
+).refine(
+  task => task.edgeInstructions === undefined || Object.keys(task.edgeInstructions).every(id => task.blockedBy.includes(toTeamTaskId(id))),
+  { message: 'edgeInstructions may name only blockers' },
 ) as z.ZodType<TeamTaskSnapshot>
 
 const teamMessageSnapshotSchema = z.object({
