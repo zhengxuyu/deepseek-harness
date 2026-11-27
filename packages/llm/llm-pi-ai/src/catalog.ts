@@ -252,7 +252,7 @@ const COMPLETIONS_COMPAT_GATE = {
   vercelGatewayRouting: 'withhold',
   zaiToolStream: 'withhold',
   supportsOpenAIGrammarTools: 'withhold',
-  sendSessionAffinityHeaders: 'withhold',
+  sendSessionAffinityHeaders: 'offer',
   deferredToolsMode: 'withhold',
   sessionAffinityFormat: 'withhold',
 } as const satisfies Record<keyof OpenAICompletionsCompat, CompatDisposition>
@@ -416,6 +416,15 @@ export interface PiAiCompatProfile {
    * `openai-completions`, the three Responses protocols, `anthropic-messages`.
    */
   supportsLongCacheRetention?: boolean
+  /**
+   * Whether requests carrying a Session id send it as session-affinity
+   * headers (`session_id`, `x-client-request-id`, `x-session-affinity`; a
+   * route detected as OpenRouter sends only `x-session-id`), so a self-hosted
+   * gateway can attribute each model call to its Session; off unless
+   * configured, and dropped when `cacheRetention` is `none`.
+   * `openai-completions`.
+   */
+  sendSessionAffinityHeaders?: boolean
   /** Whether the endpoint accepts per-tool `eager_input_streaming`; `anthropic-messages`. */
   supportsEagerToolInputStreaming?: boolean
   /** Whether the endpoint accepts `cache_control` on tool definitions; `anthropic-messages`. */
