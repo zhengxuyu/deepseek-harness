@@ -14,7 +14,7 @@ Status: implemented
 
 `openai-completions` 兼容闸门开放 `sendSessionAffinityHeaders`。`PiAiCompatProfile`、`compat` schema 与生成的配置目录都列出了它。与其他开放的开关一样，可以在路由上设置，也可以只对单个模型设置。该值为 `true` 且请求带有 Session id 时，pi-ai 把这个 id 作为 `x-client-request-id` 与 `x-session-affinity` 请求头发送；在其默认的 `openai` 亲和格式下还会发送 `session_id`。普通 agent、标题与压缩请求的 Session id 由 agent loop 提供。不带 Session id 的请求，或路由设置了 `cacheRetention: none` 的请求，不发送亲和请求头。未设置该开关的路由保留已安装或检测到的值。
 
-该决定只针对 `openai-completions`。`sessionAffinityFormat` 仍被扣留，所以手写路由使用 pi-ai 的默认写法。Anthropic Messages 闸门仍扣留 `sendSessionAffinityHeaders`，所以在该协议上解析会拒绝这个键。
+该决定只针对 `openai-completions`。`sessionAffinityFormat` 仍被扣留，所以手写路由使用 pi-ai 根据路由检测出的写法：provider 为 `openrouter` 或 `baseURL` 含 `openrouter.ai` 的路由只发送 `x-session-id`，其余路由发送上述三个请求头。Anthropic Messages 闸门仍扣留 `sendSessionAffinityHeaders`，所以在该协议上解析会拒绝这个键。
 
 ## Alternatives considered
 

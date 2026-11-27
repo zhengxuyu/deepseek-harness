@@ -1819,9 +1819,10 @@ export interface PiAiCompatProfile {
   supportsLongCacheRetention?: boolean
   /**
    * Whether requests carrying a Session id send it as session-affinity
-   * headers (`session_id`, `x-client-request-id`, `x-session-affinity`), so a
-   * self-hosted gateway can attribute each model call to its Session; off
-   * unless configured, and dropped when `cacheRetention` is `none`.
+   * headers (`session_id`, `x-client-request-id`, `x-session-affinity`; a
+   * route detected as OpenRouter sends only `x-session-id`), so a self-hosted
+   * gateway can attribute each model call to its Session; off unless
+   * configured, and dropped when `cacheRetention` is `none`.
    * `openai-completions`.
    */
   sendSessionAffinityHeaders?: boolean

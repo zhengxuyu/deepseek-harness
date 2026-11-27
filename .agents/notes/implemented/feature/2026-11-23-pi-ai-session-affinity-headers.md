@@ -14,7 +14,7 @@ The direct DeepSeek adapter already sends `x-deepseek-harness-session-id`, but i
 
 The `openai-completions` compat gate offers `sendSessionAffinityHeaders`. `PiAiCompatProfile`, the `compat` schema and the generated configuration catalog name it. Like every offered switch, a route or a single model sets it. When it is `true` and the request carries a Session id, pi-ai sends that id as `x-client-request-id` and `x-session-affinity` headers, plus `session_id` under its default `openai` affinity format. The agent loop supplies that Session id for ordinary agent, title and compaction requests. A request without a Session id, or one whose route sets `cacheRetention: none`, sends no affinity header. A route that does not set the switch keeps its installed or detected value.
 
-The decision is limited to `openai-completions`. `sessionAffinityFormat` remains withheld, so a hand-declared route uses pi-ai's default spelling. The Anthropic Messages gate still withholds `sendSessionAffinityHeaders`, so resolution refuses the key on that protocol.
+The decision is limited to `openai-completions`. `sessionAffinityFormat` remains withheld, so a hand-declared route uses the spelling pi-ai detects from it: a route whose provider is `openrouter` or whose `baseURL` contains `openrouter.ai` sends only `x-session-id`, and every other route sends the three headers above. The Anthropic Messages gate still withholds `sendSessionAffinityHeaders`, so resolution refuses the key on that protocol.
 
 ## Alternatives considered
 

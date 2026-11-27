@@ -124,28 +124,36 @@ describe('PiAiAdapter provider routing', () => {
   })
 
   it('sends the Session id as affinity headers only when the route opts in', async () => {
-    const server = await mockServer([{ events: textEvents }, { events: textEvents }, { events: textEvents }])
-    const route = (compat: Record<string, boolean>) => ({
+    const server = await mockServer(Array.from({ length: 4 }, () => ({ events: textEvents })))
+    const route = (compat: Record<string, boolean>, extra: Partial<LlmPiAi.PiAiProviderProfile> = {}) => ({
       apiKeyEnv: 'PI_TEST_KEY',
       api: 'openai-completions',
       baseURL: server.url,
       models: [{ id: 'policy' }],
       compat,
+      ...extra,
     }) as LlmPiAi.PiAiProviderProfile
     const ctx = new Context()
     await ctx.plugin(LlmRuntime)
     await ctx.plugin(LlmPiAi, { providers: {
       'self-hosted': route({ sendSessionAffinityHeaders: true }),
       'self-hosted-plain': route({}),
+      'self-hosted-uncached': route({ sendSessionAffinityHeaders: true }, { cacheRetention: 'none' }),
     } })
 
     await assemble(ctx, { provider: 'self-hosted', model: 'policy', messages: [], sessionId: 'session-a' as never })
     await assemble(ctx, { provider: 'self-hosted', model: 'policy', messages: [] })
     await assemble(ctx, { provider: 'self-hosted-plain', model: 'policy', messages: [], sessionId: 'session-a' as never })
+    await assemble(ctx, { provider: 'self-hosted-uncached', model: 'policy', messages: [], sessionId: 'session-a' as never })
 
-    expect(server.headers[0]).toMatchObject({ 'x-session-affinity': 'session-a', 'x-client-request-id': 'session-a' })
+    expect(server.headers[0]).toMatchObject({
+      'session_id': 'session-a',
+      'x-session-affinity': 'session-a',
+      'x-client-request-id': 'session-a',
+    })
     expect(server.headers[1]).not.toHaveProperty('x-session-affinity')
     expect(server.headers[2]).not.toHaveProperty('x-session-affinity')
+    expect(server.headers[3]).not.toHaveProperty('x-session-affinity')
   })
 
   it('forwards common stream options and profile reasoning', async () => {
